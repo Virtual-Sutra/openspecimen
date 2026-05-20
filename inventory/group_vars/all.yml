@@ -1,6 +1,6 @@
 ---
 # ═══════════════════════════════════════════════════════════════════════════════
-# OpenSpecimen Deployment Variables — AWS EC2
+# OpenSpecimen Deployment — Default Variables
 # Override sensitive values with: ansible-playbook -e @secrets.yml
 #   (use ansible-vault encrypt secrets.yml for production)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -23,14 +23,11 @@ openspecimen_release: ""    # must be set; matches the zip filename without .zip
 openspecimen_port:    8080
 
 # ── Artifact path ─────────────────────────────────────────────────────────────
-# In the Jenkins deploy pipeline, openspecimen_zip_path is set automatically
-# to wherever copyArtifacts placed the zip in the build workspace.
-# For manual runs it defaults to the builds directory pattern below.
+# Pass openspecimen_zip_path at run time pointing to the downloaded release zip:
+#   -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip
 #
-# Jenkins override (set by Jenkinsfile):
-#   -e openspecimen_zip_path=/path/to/workspace/artifacts/<release-name>.zip
-#
-# Fallback builds directory — used when openspecimen_zip_path is not overridden:
+# The default below is a fallback for environments where zips are stored at a
+# well-known location; override as needed.
 openspecimen_builds_dir: /opt/openspecimen/builds
 openspecimen_zip_path:   "{{ openspecimen_builds_dir }}/{{ openspecimen_release }}.zip"
 
