@@ -1,0 +1,6 @@
+---
+_mysql_package:  "mysql-server"
+_mysql_service:  "mysql"
+_mysql_conf_dir: "/etc/mysql/mysql.conf.d"
+_mysql_conf_file: "/etc/mysql/mysql.conf.d/mysqld.cnf"
+_mysql_socket:   "/var/run/mysqld/mysqld.sock"

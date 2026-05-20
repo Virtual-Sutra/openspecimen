@@ -1,0 +1,5 @@
+---
+- name: restart mysql
+  ansible.builtin.service:
+    name: "{{ _mysql_service }}"
+    state: restarted

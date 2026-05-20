@@ -1,0 +1,5 @@
+#!/bin/bash
+# Managed by Ansible
+export JAVA_OPTS="-Dfile.encoding=UTF-8 -Xms{{ tomcat_heap_min }} -Xmx{{ tomcat_heap_max }}"
+export CATALINA_OPTS="$CATALINA_OPTS -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath={{ tomcat_home }}/bin"
+CATALINA_PID={{ tomcat_home }}/bin/pid.txt

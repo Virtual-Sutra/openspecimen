@@ -1,0 +1,6 @@
+---
+- name: restart openspecimen
+  ansible.builtin.systemd:
+    name: openspecimen
+    state: restarted
+  become: true

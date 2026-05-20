@@ -1,0 +1,17 @@
+# Vault-encrypted customer secrets — encrypt before committing, never commit plaintext
+secrets/*.yml
+!secrets/_template.yml
+
+# Auto-generated inventory files
+inventory/hosts-*
+!inventory/hosts-*.sample
+
+# Auto-generated per-customer host_vars
+inventory/customers/*/host_vars/
+
+# Ansible retry files
+*.retry
+
+# Python cache
+__pycache__/
+*.pyc

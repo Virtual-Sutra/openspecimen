@@ -1,0 +1,19 @@
+# ── OrbStack Direct Inventory ─────────────────────────────────────────────────
+# Used when Ansible runs on the same Mac that hosts the OrbStack VMs.
+# OrbStack provides a transparent SSH proxy; no IP address is required.
+#
+# After running ansible-infra/direct/setup-openspecimen.yml, the VM is
+# automatically added to inventory/hosts-direct (generated file).
+# This sample shows the format used.
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts-direct site.yml
+#   ansible-playbook -i inventory/hosts-direct deploy.yml   # upgrade
+# ─────────────────────────────────────────────────────────────────────────────
+
+[openspecimen]
+direct-openspecimen  ansible_host=orb  ansible_user=ubuntu@direct-openspecimen
+
+[all:vars]
+ansible_python_interpreter   = /usr/bin/python3
+ansible_ssh_private_key_file = ~/.orbstack/ssh/id_ed25519

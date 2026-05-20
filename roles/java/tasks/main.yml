@@ -1,0 +1,16 @@
+---
+- name: Load OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_facts['os_family'] }}.yml"
+
+- name: Install OpenJDK 17
+  ansible.builtin.package:
+    name: "{{ _java_package }}"
+    state: present
+
+- name: Set JAVA_HOME in /etc/environment
+  ansible.builtin.lineinfile:
+    path: /etc/environment
+    regexp: '^JAVA_HOME='
+    line: "JAVA_HOME={{ _java_home }}"
+    create: true
+    mode: '0644'

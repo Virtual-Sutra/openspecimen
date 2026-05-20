@@ -1,0 +1,23 @@
+# ── Customer inventory — copy this directory to inventory/customers/<name>/ ───
+#
+# Fill in the values below, then run:
+#   ansible-playbook -i inventory/customers/<name>/ site.yml \
+#     -e @secrets/<name>.yml --vault-password-file .vault-pass
+#
+# Dry-run (no changes applied):
+#   ansible-playbook -i inventory/customers/<name>/ site.yml \
+#     -e @secrets/<name>.yml --vault-password-file .vault-pass --check
+# ─────────────────────────────────────────────────────────────────────────────
+
+[openspecimen]
+# Replace with the EC2 private IP and the OS username for your AMI:
+#   Ubuntu AMIs → ansible_user=ubuntu
+#   RHEL AMIs   → ansible_user=ec2-user
+os-prod  ansible_host=REPLACE_WITH_EC2_PRIVATE_IP  ansible_user=ubuntu
+
+# Uncomment to add staging or additional nodes:
+# os-staging  ansible_host=REPLACE_WITH_EC2_PRIVATE_IP  ansible_user=ubuntu
+
+[all:vars]
+ansible_python_interpreter   = /usr/bin/python3
+ansible_ssh_private_key_file = ~/.ssh/REPLACE_WITH_KEY_FILENAME.pem

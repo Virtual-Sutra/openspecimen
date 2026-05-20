@@ -1,0 +1,20 @@
+app.name=openspecimen
+datasource.jndi=jdbc/openspecimen
+database.type={{ db_type }}
+
+# 'upgrade' is only for legacy caTissue→OpenSpecimen migrations.
+# All other cases (including version upgrades) must use 'fresh'.
+datasource.type=fresh
+
+tomcat.dir={{ tomcat_home }}
+app.data_dir={{ openspecimen_data_dir }}
+plugin.dir={{ openspecimen_plugin_dir }}
+app.backup_dir={{ openspecimen_backup_dir }}
+
+{% if openspecimen_node_name is defined and openspecimen_node_name %}
+node.name={{ openspecimen_node_name }}
+{% endif %}
+
+{% if openspecimen_app_url is defined and openspecimen_app_url %}
+app.url={{ openspecimen_app_url }}
+{% endif %}

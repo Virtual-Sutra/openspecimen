@@ -1,0 +1,244 @@
+---
+# ── Prior version check ───────────────────────────────────────────────────────
+# site.yml: common role already ran this and set _version_check_done=true.
+# deploy.yml: common does not run, so include_role runs the check here.
+
+- name: Prior version check
+  ansible.builtin.include_role:
+    name: common
+    tasks_from: version_check
+  when: not (_version_check_done | default(false))
+
+# ── Detect install type ───────────────────────────────────────────────────────
+# Checks the database, not the WAR. A WAR on disk with an empty DB (e.g. after
+# DB reset) must be treated as fresh — using upgrade mode on an empty DB skips
+# core schema creation and causes Liquibase FK failures.
+# Override with: -e openspecimen_install_type=fresh|upgrade
+
+- name: Check for existing OpenSpecimen schema in database
+  ansible.builtin.shell: |
+    mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' \
+      -h {{ mysql_db_host }} {{ mysql_db_name }} \
+      -sNe "SELECT COUNT(*) FROM information_schema.tables
+            WHERE table_schema='{{ mysql_db_name }}'
+            AND table_name='CATISSUE_SITE';" 2>/dev/null || echo 0
+  register: _schema_check
+  changed_when: false
+  no_log: true
+
+- name: Set install type
+  ansible.builtin.set_fact:
+    openspecimen_install_type: "{{ 'upgrade' if (_schema_check.stdout | trim) == '1' else 'fresh' }}"
+  when: openspecimen_install_type is not defined
+
+- name: Log deployment plan
+  ansible.builtin.debug:
+    msg: >-
+      {% if openspecimen_install_type == 'fresh' %}
+      Fresh install — deploying {{ openspecimen_release }}
+      {% elif _installed_release | default('') %}
+      Upgrade — installed: {{ _installed_release }} → requesting: {{ openspecimen_release }}
+      {% else %}
+      Upgrade — no prior release marker found → requesting: {{ openspecimen_release }}
+      {% endif %}
+
+# ── Ensure release zip is on target ──────────────────────────────────────────
+# deploy.yml (upgrade) runs only this role — upload if not already present.
+
+- name: Upload release zip to target (if not already present)
+  ansible.builtin.copy:
+    src:  "{{ openspecimen_zip_path | expanduser }}"
+    dest: "/tmp/{{ openspecimen_release }}.zip"
+    mode: '0644'
+  args:
+    creates: "/tmp/{{ openspecimen_release }}.zip"
+
+# ── Cache zip contents listing ────────────────────────────────────────────────
+# Listed once here; reused for WAR and plugin extraction below.
+# When site.yml runs, tomcat role may have already set _zip_contents.
+
+- name: Cache release zip contents
+  ansible.builtin.shell: unzip -l /tmp/{{ openspecimen_release }}.zip
+  register: _zip_contents
+  changed_when: false
+
+# ── Create required directories ───────────────────────────────────────────────
+# Plugin subdirectory structure matches install.sh:
+#   default/   — common plugins from release zip
+#   paid/      — paid enterprise plugins
+#   zustomer/  — customer-specific plugins
+
+- name: Create data, plugin and backup directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0755'
+  loop:
+    - "{{ openspecimen_data_dir }}"
+    - "{{ openspecimen_plugin_dir }}"
+    - "{{ openspecimen_plugin_dir }}/default"
+    - "{{ openspecimen_plugin_dir }}/paid"
+    - "{{ openspecimen_plugin_dir }}/zustomer"
+    - "{{ openspecimen_backup_dir }}"
+    - "{{ openspecimen_backup_dir }}/config-changes"
+    - /usr/local/openspecimen/scripts
+
+- name: Deploy update-config.sh operator script
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/scripts/update-config.sh"
+    dest: /usr/local/openspecimen/scripts/update-config.sh
+    owner: root
+    group: root
+    mode: '0750'
+
+# ── openspecimen.properties ───────────────────────────────────────────────────
+
+- name: Template openspecimen.properties
+  ansible.builtin.template:
+    src: openspecimen.properties.j2
+    dest: "{{ tomcat_home }}/conf/openspecimen.properties"
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0640'
+
+# ── Backup WAR and plugins on upgrade ────────────────────────────────────────
+
+- name: Get backup timestamp
+  ansible.builtin.command: date '+%d%m%Y_%H%M%S'
+  register: backup_ts
+  changed_when: false
+  when: openspecimen_install_type == 'upgrade'
+
+- name: Stop service for upgrade backup
+  ansible.builtin.systemd:
+    name: openspecimen
+    state: stopped
+  when: openspecimen_install_type == 'upgrade'
+
+- name: Create backup directory structure
+  ansible.builtin.file:
+    path: "{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/plugins/{{ item }}"
+    state: directory
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0755'
+  loop: [default, paid, zustomer]
+  when: openspecimen_install_type == 'upgrade'
+
+- name: Backup old WAR
+  ansible.builtin.shell: |
+    WEBAPPS="{{ tomcat_home }}/webapps"
+    DEST="{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}"
+    if [ -f "$WEBAPPS/openspecimen.war" ]; then
+      mv "$WEBAPPS/openspecimen.war" "$DEST/"
+      rm -rf "$WEBAPPS/openspecimen"
+    fi
+  when: openspecimen_install_type == 'upgrade'
+
+- name: Backup plugins
+  ansible.builtin.shell: |
+    SRC="{{ openspecimen_plugin_dir }}"
+    DEST="{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/plugins"
+    ls "$SRC/default/"*.jar  2>/dev/null && mv "$SRC/default/"*.jar  "$DEST/default/"   || true
+    ls "$SRC/paid/"*.jar     2>/dev/null && mv "$SRC/paid/"*.jar     "$DEST/paid/"      || true
+    ls "$SRC/zustomer/"*.jar 2>/dev/null && mv "$SRC/zustomer/"*.jar "$DEST/zustomer/"  || true
+    ls "$SRC/"*.jar          2>/dev/null && mv "$SRC/"*.jar          "$DEST/default/"   || true
+  when: openspecimen_install_type == 'upgrade'
+
+# ── Deploy WAR ────────────────────────────────────────────────────────────────
+
+- name: Deploy openspecimen.war
+  ansible.builtin.shell: |
+    WAR=$(echo "{{ _zip_contents.stdout }}" \
+      | awk 'NF==4 && $NF ~ /openspecimen\.war$/ {print $NF; exit}')
+    if [ -z "$WAR" ]; then
+      echo "ERROR: openspecimen.war not found in release zip"
+      exit 1
+    fi
+    unzip -p /tmp/{{ openspecimen_release }}.zip "$WAR" \
+      > {{ tomcat_home }}/webapps/openspecimen.war
+  args:
+    creates: "{{ tomcat_home }}/webapps/openspecimen.war"
+  notify: restart openspecimen
+
+- name: Set WAR ownership
+  ansible.builtin.file:
+    path: "{{ tomcat_home }}/webapps/openspecimen.war"
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0644'
+
+# ── Deploy plugins ────────────────────────────────────────────────────────────
+
+- name: Extract plugin JARs from release zip
+  ansible.builtin.shell: |
+    PLUGIN_DIR=$(echo "{{ _zip_contents.stdout }}" \
+      | awk 'NF==4 && $NF ~ /plugin_build\/.+\.jar$/ {sub("/[^/]+$","", $NF); print $NF; exit}')
+    if [ -z "$PLUGIN_DIR" ]; then
+      echo "ERROR: plugin_build/*.jar not found in release zip"
+      exit 1
+    fi
+    unzip -jo /tmp/{{ openspecimen_release }}.zip "${PLUGIN_DIR}/*.jar" \
+      -d {{ openspecimen_plugin_dir }}/default/
+  register: _plugin_extract
+  changed_when: _plugin_extract.stdout is search('inflating:|extracting:')
+
+- name: Set plugin ownership
+  ansible.builtin.file:
+    path: "{{ openspecimen_plugin_dir }}"
+    state: directory
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    recurse: true
+
+# ── Clean up ──────────────────────────────────────────────────────────────────
+
+- name: Remove release zip from target
+  ansible.builtin.file:
+    path: "/tmp/{{ openspecimen_release }}.zip"
+    state: absent
+
+# ── Start service ─────────────────────────────────────────────────────────────
+
+- name: Start and enable openspecimen service
+  ansible.builtin.systemd:
+    name: openspecimen
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# ── Wait for app to be ready ──────────────────────────────────────────────────
+# curl handles connection-refused gracefully; uri module does not.
+# Fresh installs run Liquibase schema migration which can take 10+ minutes.
+
+- name: Wait for OpenSpecimen to be ready
+  ansible.builtin.shell: >
+    curl -sf -o /dev/null -w "%{http_code}"
+    http://localhost:{{ openspecimen_port }}/openspecimen/rest/ng/config-settings/app-props
+    | grep -qE '^(200|401)$'
+  register: health_check
+  until: health_check.rc == 0
+  retries: 90
+  delay: 10
+  changed_when: false
+
+- name: Deployment complete
+  ansible.builtin.debug:
+    msg: >-
+      {% if openspecimen_install_type == 'fresh' %}
+      Fresh install complete — {{ openspecimen_release }}
+      {% else %}
+      Upgrade complete — {{ _installed_release | default('unknown') }} → {{ openspecimen_release }}
+      {% endif %}
+      | IP: {{ ansible_facts['default_ipv4']['address'] }}
+      | URL: http://{{ ansible_facts['default_ipv4']['address'] }}:{{ openspecimen_port }}/openspecimen
+
+- name: Record deployed release version
+  ansible.builtin.copy:
+    content: "{{ openspecimen_release }}\n"
+    dest: "{{ openspecimen_release_marker }}"
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0644'

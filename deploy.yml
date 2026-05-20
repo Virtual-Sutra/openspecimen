@@ -1,0 +1,33 @@
+---
+# Application-only re-deploy — skips MySQL, Java, and Tomcat setup.
+# Use this for version upgrades after the initial site.yml run.
+#
+# What it does:
+#   1. Stops the openspecimen service
+#   2. Backs up old WAR + default plugins to backup/<timestamp>/
+#   3. Deploys new WAR and plugins from the release zip
+#   4. Starts the service and waits for health check
+#
+# Usage:
+#   ansible-playbook -i inventory/customers/<name>/ deploy.yml \
+#     -e openspecimen_release=openspecimen_v12.3 \
+#     -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
+#     -e @secrets/<name>.yml --vault-password-file .vault-pass
+#
+# Dry run (shows what would change, does not deploy):
+#   ansible-playbook -i inventory/customers/<name>/ deploy.yml \
+#     -e openspecimen_release=openspecimen_v12.3 \
+#     -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
+#     -e @secrets/<name>.yml --vault-password-file .vault-pass --check
+
+- name: Re-deploy OpenSpecimen (upgrade)
+  hosts: openspecimen
+  become: true
+  vars:
+    # Default to upgrade; override with -e openspecimen_install_type=fresh for DB recovery
+    openspecimen_install_type: "{{ openspecimen_install_type | default('upgrade') }}"
+
+  roles:
+    - openspecimen
+    - role: plugins
+      when: customer_plugins | default([]) | length > 0

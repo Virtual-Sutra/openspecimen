@@ -1,0 +1,17 @@
+---
+# JVM heap auto-sized from ansible_facts['memtotal_mb'] at deploy time.
+# Rule: max(2048 MB minimum, 50% of total RAM)
+# OpenSpecimen enforces the 2 GB floor itself — the app exits at startup
+# if Xmx is below that threshold.
+#
+# To set an explicit value, add to inventory/customers/<name>/group_vars/openspecimen.yml:
+#   tomcat_heap_max_override: "4096"   # integer MB, no suffix
+#   tomcat_heap_min_override: "512"    # integer MB, no suffix
+
+tomcat_heap_max: >-
+  {{ (tomcat_heap_max_override
+      | default([2048, (ansible_facts['memtotal_mb'] * 0.5) | int] | max)
+      | int) | string }}m
+
+tomcat_heap_min: >-
+  {{ (tomcat_heap_min_override | default(512) | int) | string }}m

@@ -1,0 +1,6 @@
+---
+# python3-PyMySQL comes from EPEL; the common role enables EPEL first.
+_os_prereq_packages:
+  - unzip
+  - curl
+  - python3-PyMySQL

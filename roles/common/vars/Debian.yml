@@ -1,0 +1,5 @@
+---
+_os_prereq_packages:
+  - unzip
+  - curl
+  - python3-pymysql

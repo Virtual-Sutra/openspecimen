@@ -1,0 +1,4 @@
+---
+_java_package: "java-17-openjdk-devel"
+# RHEL JDK path has no architecture suffix.
+_java_home: "/usr/lib/jvm/java-17-openjdk"

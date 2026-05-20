@@ -1,0 +1,4 @@
+---
+_java_package: "openjdk-17-jdk"
+# Ubuntu places JDK under an arch-suffixed directory.
+_java_home: "/usr/lib/jvm/java-17-openjdk-{{ (ansible_facts['architecture'] == 'aarch64') | ternary('arm64', 'amd64') }}"

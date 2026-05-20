@@ -1,0 +1,13 @@
+---
+- name: Upload customer-specific plugins to target
+  ansible.builtin.copy:
+    src:   "{{ item.src }}"
+    dest:  "{{ openspecimen_plugin_dir }}/{{ item.dest_subdir | default('zustomer') }}/"
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode:  '0644'
+  loop: "{{ customer_plugins }}"
+  loop_control:
+    label: "{{ item.src | basename }}"
+  when: customer_plugins | default([]) | length > 0
+  notify: restart openspecimen

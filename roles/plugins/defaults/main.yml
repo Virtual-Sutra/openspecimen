@@ -1,0 +1,15 @@
+---
+# List of customer-specific plugins to install alongside the standard release plugins.
+# Define this in inventory/customers/<name>/group_vars/plugins.yml.
+#
+# Each entry:
+#   src:         path to .jar or .zip file on the Ansible controller
+#   dest_subdir: target subdirectory — one of: default, paid, zustomer
+#
+# Example:
+#   customer_plugins:
+#     - src: "{{ playbook_dir }}/plugins/enterprise.jar"
+#       dest_subdir: paid
+#     - src: "{{ playbook_dir }}/plugins/custom-reports.jar"
+#       dest_subdir: zustomer
+customer_plugins: []

@@ -1,0 +1,121 @@
+---
+# Write config BEFORE installing MySQL so the package picks it up when it
+# initialises the data directory. lower_case_table_names and character-set-server
+# cannot be changed after data-dir init in MySQL 8.x.
+
+- name: Load OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_facts['os_family'] }}.yml"
+
+# ── RHEL 9: add MySQL Community repo ─────────────────────────────────────────
+# RHEL 9 ships MariaDB in its default repos; the community repo provides
+# genuine MySQL 8.4 LTS. The RPM is idempotent — dnf skips it if already present.
+
+- name: Install MySQL Community repository (RHEL)
+  ansible.builtin.dnf:
+    name: "https://dev.mysql.com/get/mysql84-community-release-el9-1.noarch.rpm"
+    state: present
+    disable_gpg_check: true
+  when: ansible_facts['os_family'] == 'RedHat'
+
+# ── Write config before install ───────────────────────────────────────────────
+
+- name: Log InnoDB buffer pool sizing
+  ansible.builtin.debug:
+    msg: >-
+      InnoDB buffer pool: {{ mysql_innodb_buffer_pool_size }}
+      (RAM: {{ ansible_facts['memtotal_mb'] }} MB
+      {% if mysql_innodb_buffer_pool_size_override is defined %}| override{% else %}| auto-sized at 25%{% endif %})
+
+- name: Create MySQL config directory
+  ansible.builtin.file:
+    path: "{{ _mysql_conf_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Write mysqld.cnf before MySQL is installed
+  ansible.builtin.template:
+    src: mysqld.cnf.j2
+    dest: "{{ _mysql_conf_file }}"
+    owner: root
+    group: root
+    mode: '0644'
+
+# ── Install and start ─────────────────────────────────────────────────────────
+
+- name: Install MySQL server
+  ansible.builtin.package:
+    name: "{{ _mysql_package }}"
+    state: present
+
+- name: Ensure MySQL is started and enabled
+  ansible.builtin.service:
+    name: "{{ _mysql_service }}"
+    state: started
+    enabled: true
+
+# ── RHEL 9: initialise root access ───────────────────────────────────────────
+# MySQL Community on RHEL sets a temporary root password printed in the error
+# log on first init. Reset it to empty so the community.mysql modules can
+# connect via socket without a password (same behaviour as Ubuntu).
+
+- name: Check MySQL root socket connectivity (RHEL)
+  ansible.builtin.command:
+    cmd: mysqladmin -u root ping
+  register: _mysql_root_ping
+  failed_when: false
+  changed_when: false
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Read temporary MySQL root password from error log (RHEL)
+  ansible.builtin.shell: |
+    grep 'temporary password' /var/log/mysqld.log | awk '{print $NF}' | tail -1
+  register: _mysql_tmp_pass
+  changed_when: false
+  no_log: true
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - _mysql_root_ping.rc != 0
+
+- name: Reset MySQL root to empty password (RHEL first-time init)
+  ansible.builtin.shell: |
+    mysql --connect-expired-password -u root \
+      -p'{{ _mysql_tmp_pass.stdout }}' \
+      -e "ALTER USER 'root'@'localhost' IDENTIFIED BY ''; FLUSH PRIVILEGES;"
+  changed_when: true
+  no_log: true
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - _mysql_root_ping.rc != 0
+    - _mysql_tmp_pass.stdout | length > 0
+
+# ── Verify config ─────────────────────────────────────────────────────────────
+
+- name: Verify MySQL config (lower_case_table_names=1, character_set_server=utf8)
+  ansible.builtin.command:
+    cmd: >
+      mysql -u root -S {{ _mysql_socket }} -sNe
+      "SELECT @@lower_case_table_names, @@character_set_server;"
+  register: mysql_config
+  changed_when: false
+  failed_when: >
+    mysql_config.stdout | trim != '1\tutf8mb3' and
+    mysql_config.stdout | trim != '1\tutf8'
+
+# ── Create database and user ──────────────────────────────────────────────────
+
+- name: Create OpenSpecimen database
+  community.mysql.mysql_db:
+    name: "{{ mysql_db_name }}"
+    state: present
+    login_unix_socket: "{{ _mysql_socket }}"
+
+- name: Create OpenSpecimen database user
+  community.mysql.mysql_user:
+    name: "{{ mysql_db_user }}"
+    password: "{{ mysql_db_password }}"
+    priv: "{{ mysql_db_name }}.*:ALL"
+    host: localhost
+    state: present
+    login_unix_socket: "{{ _mysql_socket }}"

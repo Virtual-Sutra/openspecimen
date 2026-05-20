@@ -1,0 +1,46 @@
+---
+- name: Load OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_facts['os_family'] }}.yml"
+
+# ── Prior version check — before any system change ───────────────────────────
+
+- name: Prior version check
+  ansible.builtin.include_tasks: version_check.yml
+
+# ── Debian / Ubuntu ───────────────────────────────────────────────────────────
+
+- name: Update apt cache (Debian)
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_facts['os_family'] == 'Debian'
+
+# ── RHEL 9 ────────────────────────────────────────────────────────────────────
+
+- name: Enable EPEL repository (RHEL)
+  ansible.builtin.dnf:
+    name: epel-release
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
+
+# ── Common ────────────────────────────────────────────────────────────────────
+
+- name: Install prerequisite packages
+  ansible.builtin.package:
+    name: "{{ _os_prereq_packages }}"
+    state: present
+
+- name: Create openspecimen system group
+  ansible.builtin.group:
+    name: "{{ tomcat_user }}"
+    system: true
+    state: present
+
+- name: Create openspecimen system user
+  ansible.builtin.user:
+    name: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    shell: /usr/sbin/nologin
+    create_home: false
+    system: true
+    state: present

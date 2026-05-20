@@ -1,0 +1,11 @@
+---
+# InnoDB buffer pool auto-sized from ansible_facts['memtotal_mb'] at deploy time.
+# Rule: 25% of RAM — leaves headroom for Tomcat and the OS on a shared VM.
+#
+# To set an explicit value, add to inventory/customers/<name>/group_vars/openspecimen.yml:
+#   mysql_innodb_buffer_pool_size_override: "2048"   # integer MB, no suffix
+
+mysql_innodb_buffer_pool_size: >-
+  {{ (mysql_innodb_buffer_pool_size_override
+      | default((ansible_facts['memtotal_mb'] * 0.25) | int)
+      | int) | string }}M

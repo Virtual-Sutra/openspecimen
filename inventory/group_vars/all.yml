@@ -1,0 +1,126 @@
+---
+# ═══════════════════════════════════════════════════════════════════════════════
+# OpenSpecimen Deployment Variables — AWS EC2
+# Override sensitive values with: ansible-playbook -e @secrets.yml
+#   (use ansible-vault encrypt secrets.yml for production)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Database type ─────────────────────────────────────────────────────────────
+# mysql  → uses MySQL/MariaDB (including RDS for MySQL/Aurora MySQL)
+# oracle → uses Oracle DB (requires oracle_db_* vars below)
+db_type:    mysql
+
+# true  = Ansible installs and manages MySQL on this VM (default)
+# false = skip the mysql role; DB is external — RDS, Aurora, Oracle, etc.
+db_managed: true
+
+# ── Release ───────────────────────────────────────────────────────────────────
+# openspecimen_release is the zip filename without the .zip extension.
+# It must be set per deployment — no default is provided here.
+# Override in inventory/customers/<name>/group_vars/openspecimen.yml
+# or pass at run time: -e openspecimen_release=<release-name>
+openspecimen_release: ""    # must be set; matches the zip filename without .zip
+openspecimen_port:    8080
+
+# ── Artifact path ─────────────────────────────────────────────────────────────
+# In the Jenkins deploy pipeline, openspecimen_zip_path is set automatically
+# to wherever copyArtifacts placed the zip in the build workspace.
+# For manual runs it defaults to the builds directory pattern below.
+#
+# Jenkins override (set by Jenkinsfile):
+#   -e openspecimen_zip_path=/path/to/workspace/artifacts/<release-name>.zip
+#
+# Fallback builds directory — used when openspecimen_zip_path is not overridden:
+openspecimen_builds_dir: /opt/openspecimen/builds
+openspecimen_zip_path:   "{{ openspecimen_builds_dir }}/{{ openspecimen_release }}.zip"
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+tomcat_home:                /usr/local/openspecimen/tomcat-as
+openspecimen_data_dir:      /usr/local/openspecimen/data
+openspecimen_plugin_dir:    /usr/local/openspecimen/plugins
+openspecimen_backup_dir:    /usr/local/openspecimen/backup
+openspecimen_release_marker: /usr/local/openspecimen/.release
+
+# ── High Availability (optional) ──────────────────────────────────────────────
+# Uncomment and set a unique name per node when running multiple OpenSpecimen
+# nodes behind a load balancer. Name must not contain whitespace.
+# Ref: https://openspecimen.atlassian.net/wiki/spaces/CAT/pages/1193082943
+# openspecimen_node_name: ""
+
+# Public URL for OpenSpecimen — required when the app is accessed via a hostname
+# that differs from the server's own address (reverse proxy, ALB, VPN gateway).
+# Used for: email links (password resets, survey invites), SAML redirects.
+# Maps to app.url in openspecimen.properties.
+# Post-deploy: also set Settings → Common → Allowed Request Origins to this URL
+# to avoid HTTP 405 errors when the browser Origin header carries this hostname.
+# Ref: https://openspecimen.atlassian.net/wiki/spaces/CAT/pages/3342041156
+# openspecimen_app_url: "https://openspecimen.yourdomain.com"
+
+# ── Java ──────────────────────────────────────────────────────────────────────
+# java_package is detected automatically from ansible_facts['os_family']:
+#   Debian/Ubuntu → openjdk-17-jdk
+#   RHEL 9        → java-17-openjdk-devel
+# Override here only if you need a non-default JDK package.
+# java_package: openjdk-17-jdk
+
+# ── Tomcat ────────────────────────────────────────────────────────────────────
+tomcat_user: openspecimen
+# tomcat_heap_max and tomcat_heap_min are auto-sized from instance RAM in
+# roles/tomcat/defaults/main.yml — see CONFIG-REFERENCE.md for the formula.
+# Override per customer with tomcat_heap_max_override / tomcat_heap_min_override (MB).
+
+# ── Tomcat JDBC Connection Pool ───────────────────────────────────────────────
+# Ref: https://openspecimen.atlassian.net/wiki/spaces/CAT/pages/4191944759
+tomcat_pool_max_active:              100
+tomcat_pool_min_idle:                10
+tomcat_pool_initial_size:            10
+tomcat_pool_max_wait_ms:             10000
+tomcat_pool_validation_interval_ms:  60000
+tomcat_pool_eviction_interval_ms:    60000
+tomcat_pool_min_evictable_idle_ms:   60000
+tomcat_pool_abandoned_timeout_s:     300
+tomcat_pool_abandon_pct:             60
+
+# ── MySQL ─────────────────────────────────────────────────────────────────────
+mysql_db_name:       openspecimen
+mysql_db_user:       openspecimen
+mysql_db_password:   ~                    # required — set via -e @secrets/<name>.yml (Vault)
+mysql_bind_address:  "127.0.0.1"
+
+# Host seen by Tomcat's JDBC URL. Use 127.0.0.1 when DB is on the same VM;
+# set to the RDS endpoint hostname when using RDS.
+mysql_db_host:       "127.0.0.1"
+
+# mysql_innodb_buffer_pool_size is auto-sized from instance RAM in
+# roles/mysql/defaults/main.yml (25% of RAM on shared VM).
+# Override per customer with mysql_innodb_buffer_pool_size_override (MB).
+
+mysql_max_allowed_packet: "64M"
+
+# ── Oracle (db_type: oracle) ──────────────────────────────────────────────────
+# Uncomment and populate when db_type: oracle. Set db_managed: false.
+# Use either service name (preferred) OR SID — not both.
+#
+#   Service name → jdbc:oracle:thin:@//host:port/service_name  (modern, preferred)
+#   SID          → jdbc:oracle:thin:@host:port:sid              (legacy, Oracle 11g)
+#
+# Note: The thin JDBC driver (used here) is pure Java — no Oracle client or
+#       ORACLE_HOME installation is required on the Tomcat host.
+#
+# Required DB user grants (run as sysdba or DBA before first deploy):
+#   GRANT CONNECT, RESOURCE,
+#         CREATE ANY TABLE,     DROP ANY TABLE,
+#         CREATE ANY TRIGGER,   DROP ANY TRIGGER,
+#         CREATE ANY VIEW,      DROP ANY VIEW,
+#         CREATE ANY PROCEDURE, DROP ANY PROCEDURE,
+#         CREATE ANY SEQUENCE,  DROP ANY SEQUENCE
+#   TO <oracle_db_user>;
+#
+# Ref: https://openspecimen.atlassian.net/wiki/spaces/CAT/pages/1115693/Database+Configuration
+#
+# oracle_db_host:     "oracle.yourdomain.com"
+# oracle_db_port:     1521
+# oracle_db_service:  "ORCL"          # service name — set this OR oracle_db_sid, not both
+# oracle_db_sid:      "ORCL"          # SID — legacy Oracle 11g; leave unset if using service name
+# oracle_db_user:     openspecimen
+# oracle_db_password: "changeme"      # Use Vault in production

@@ -1,0 +1,22 @@
+---
+# Full fresh deployment — runs all roles in order.
+#
+# Usage:
+#   ansible-playbook -i inventory/customers/<name>/ site.yml \
+#     -e openspecimen_release=openspecimen_v12.3 \
+#     -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
+#     -e @secrets/<name>.yml --vault-password-file .vault-pass
+
+- name: Deploy OpenSpecimen
+  hosts: openspecimen
+  become: true
+
+  roles:
+    - common
+    - java
+    - role: mysql
+      when: db_managed | default(true)
+    - tomcat
+    - openspecimen
+    - role: plugins
+      when: customer_plugins | default([]) | length > 0

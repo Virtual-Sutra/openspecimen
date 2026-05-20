@@ -1,0 +1,20 @@
+# ── AWS EC2 Inventory (sample) ────────────────────────────────────────────────
+# Copy to inventory/hosts-<env> and replace placeholder values.
+# Jenkins reaches EC2 nodes on private IPs — no bastion required.
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts-<env> site.yml \
+#     -e @inventory/group_vars/<env>.yml \
+#     -e @secrets.yml             # ansible-vault encrypted passwords
+# ─────────────────────────────────────────────────────────────────────────────
+
+[openspecimen]
+os-prod  ansible_host=REPLACE_WITH_EC2_PRIVATE_IP  ansible_user=ubuntu
+
+# Multiple targets:
+# os-staging  ansible_host=REPLACE_WITH_EC2_PRIVATE_IP  ansible_user=ubuntu
+# os-prod     ansible_host=REPLACE_WITH_EC2_PRIVATE_IP  ansible_user=ubuntu
+
+[all:vars]
+ansible_python_interpreter   = /usr/bin/python3
+ansible_ssh_private_key_file = ~/.ssh/deploy-key.pem

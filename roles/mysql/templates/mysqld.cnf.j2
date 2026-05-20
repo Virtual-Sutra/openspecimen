@@ -1,0 +1,68 @@
+#
+# OpenSpecimen MySQL configuration — managed by Ansible.
+# Ref: https://openspecimen.atlassian.net/wiki/spaces/CAT/pages/1115772/MySQL+prerequisites
+#
+# This file is written BEFORE apt/dnf installs MySQL so that lower_case_table_names
+# and character-set-server take effect at data-directory initialisation time.
+#
+
+# MySQL client default charset — keep in sync with character-set-server below.
+# Switch to utf8mb4 here when the server charset is switched.
+[client]
+default-character-set = utf8
+# default-character-set = utf8mb4   # TODO: enable with utf8mb4 server charset
+
+[mysqld]
+bind-address = {{ mysql_bind_address }}
+
+# ── Storage engine ────────────────────────────────────────────────────────────
+default-storage-engine = INNODB
+
+# ── Character set ─────────────────────────────────────────────────────────────
+# CONFLICT WITH OFFICIAL DOCS — REVIEW BEFORE UPGRADING
+#
+# Official MySQL prerequisites page recommends utf8mb4:
+#   character-set-server = utf8mb4
+#   collation-server     = utf8mb4_unicode_ci
+#   init_connect         = 'SET NAMES utf8mb4'
+#   init_connect         = 'SET collation_connection = utf8mb4_unicode_ci'
+#
+# We cannot use utf8mb4 on MySQL 8.x because OpenSpecimen's Liquibase changelog
+# (db.changelog-11.2.xml) creates a full-column index on VARCHAR(1000):
+#   utf8mb4 (4 bytes/char): 1000 × 4 = 4000 bytes > InnoDB 3072-byte key limit
+#              → "Specified key was too long; max key length is 3072 bytes"
+#   utf8    (3 bytes/char): 1000 × 3 = 3000 bytes — within the limit ✓
+#
+# TODO: Switch to utf8mb4 block below once upstream schema uses prefix indexes.
+#       Track at: https://openspecimen.atlassian.net/wiki/spaces/CAT/pages/1115772
+#
+# -- utf8mb4 (official recommendation — blocked by schema, do not enable yet) --
+# character-set-server  = utf8mb4
+# collation-server      = utf8mb4_unicode_ci
+# init_connect          = 'SET NAMES utf8mb4'
+# init_connect          = 'SET collation_connection = utf8mb4_unicode_ci'
+# ---------------------------------------------------------------------------------
+character-set-server  = utf8
+collation-server      = utf8_unicode_ci
+
+# ── Case sensitivity (must be set at data-dir init time) ──────────────────────
+# Required: Liquibase creates tables in uppercase (DYEXTN_AUDIT_EVENTS) then
+# references them in lowercase. Without this the schema migration fails with
+# "Table doesn't exist". Cannot be changed on an existing instance.
+lower_case_table_names = 1
+
+# ── Triggers / binary logging ─────────────────────────────────────────────────
+# MySQL 8.x enables binary logging by default. Without this flag, non-SUPER
+# users cannot create triggers via Liquibase changesets.
+log_bin_trust_function_creators = 1
+
+# ── InnoDB tuning ─────────────────────────────────────────────────────────────
+# Set to ~50% of RAM on a dedicated DB server; lower on shared VMs.
+innodb_buffer_pool_size = {{ mysql_innodb_buffer_pool_size }}
+
+# ── Query optimiser ───────────────────────────────────────────────────────────
+# 0 = server chooses optimal depth automatically (recommended for OpenSpecimen).
+optimizer_search_depth = 0
+
+# ── Network ───────────────────────────────────────────────────────────────────
+max_allowed_packet = {{ mysql_max_allowed_packet }}

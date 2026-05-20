@@ -1,0 +1,61 @@
+---
+- name: Fail if openspecimen_release is not set
+  ansible.builtin.fail:
+    msg: >-
+      openspecimen_release is empty for {{ inventory_hostname }}.
+      Set it in inventory/customers/<customer>/group_vars/openspecimen.yml,
+      then re-run jenkins.yml to sync the updated inventory into the
+      Jenkins workspace before triggering the deploy job.
+  when: not openspecimen_release | default('') | trim
+
+- name: Check prior OpenSpecimen version
+  ansible.builtin.slurp:
+    src: "{{ openspecimen_release_marker }}"
+  register: _release_marker
+  failed_when: false
+
+- name: Set prior version fact
+  ansible.builtin.set_fact:
+    _installed_release: "{{ (_release_marker.content | b64decode | trim) if _release_marker.content is defined else '' }}"
+    _version_check_done: true
+
+- name: Show version transition
+  ansible.builtin.debug:
+    msg: >-
+      {% if _installed_release %}
+      Prior version: {{ _installed_release }} — Requesting: {{ openspecimen_release }}
+      {% else %}
+      No prior version recorded — Requesting: {{ openspecimen_release }}
+      {% endif %}
+
+- name: Detect version direction
+  ansible.builtin.shell: |
+    INSTALLED="{{ _installed_release }}"
+    REQUESTED="{{ openspecimen_release }}"
+    if [ "$INSTALLED" = "$REQUESTED" ]; then
+      echo ok
+    elif [ "$(printf '%s\n%s\n' "$INSTALLED" "$REQUESTED" | sort -V | head -1)" = "$REQUESTED" ]; then
+      echo downgrade
+    else
+      echo ok
+    fi
+  register: _version_direction
+  changed_when: false
+  when: _installed_release | length > 0
+
+- name: Downgrade is not supported
+  ansible.builtin.debug:
+    msg: |
+      Downgrade is not supported — deployment will not proceed.
+        Prior version : {{ _installed_release }}
+        Requested     : {{ openspecimen_release }}
+      To deploy an older version, provision a fresh VM and run site.yml.
+  when:
+    - _installed_release | length > 0
+    - _version_direction.stdout | default('ok') == 'downgrade'
+
+- name: Stop play on downgrade
+  ansible.builtin.meta: end_play
+  when:
+    - _installed_release | length > 0
+    - _version_direction.stdout | default('ok') == 'downgrade'

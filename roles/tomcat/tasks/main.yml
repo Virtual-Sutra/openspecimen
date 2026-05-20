@@ -1,0 +1,176 @@
+---
+# ── Verify release zip on control node ───────────────────────────────────────
+# openspecimen_zip_path is always a path on the Ansible control node
+# (Jenkins workspace or local Mac). Stat and upload run here, not on target.
+
+- name: Assert openspecimen_release is set
+  ansible.builtin.assert:
+    that: openspecimen_release | length > 0
+    fail_msg: "openspecimen_release must be set — pass -e openspecimen_release=<name>"
+
+- name: Stat release zip on control node
+  ansible.builtin.stat:
+    path: "{{ openspecimen_zip_path | expanduser }}"
+  register: _release_zip
+  delegate_to: localhost
+  become: false
+
+- name: Assert release zip exists
+  ansible.builtin.assert:
+    that: _release_zip.stat.exists
+    fail_msg: >
+      Release zip not found on control node: {{ openspecimen_zip_path }}
+      Jenkins pipeline: set via copyArtifacts automatically.
+      Manual/OrbStack: set openspecimen_zip_path in local/vars.yml to the
+      absolute path of the zip on this machine.
+
+- name: Upload release zip to target
+  ansible.builtin.copy:
+    src:  "{{ openspecimen_zip_path | expanduser }}"
+    dest: "/tmp/{{ openspecimen_release }}.zip"
+    mode: '0644'
+
+# ── Cache zip contents listing ────────────────────────────────────────────────
+# Listed once; reused for all extraction tasks below and by the openspecimen
+# role (variable persists across roles within the same play).
+
+- name: Cache release zip contents
+  ansible.builtin.shell: unzip -l /tmp/{{ openspecimen_release }}.zip
+  register: _zip_contents
+  changed_when: false
+
+# ── Extract tomcat-as bundle ──────────────────────────────────────────────────
+
+- name: Create /usr/local/openspecimen base dir
+  ansible.builtin.file:
+    path: /usr/local/openspecimen
+    state: directory
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0755'
+
+- name: Check if tomcat-as is already extracted
+  ansible.builtin.stat:
+    path: "{{ tomcat_home }}/bin/startup.sh"
+  register: tomcat_stat
+
+- name: Extract inner tomcat-as.zip from release package
+  ansible.builtin.shell: |
+    TOMCAT_ZIP=$(echo "{{ _zip_contents.stdout }}" \
+      | awk 'NF==4 && $NF ~ /tomcat-as\.zip$/ {print $NF; exit}')
+    if [ -z "$TOMCAT_ZIP" ]; then
+      echo "ERROR: tomcat-as.zip not found inside /tmp/{{ openspecimen_release }}.zip"
+      echo "Release zip contents:"
+      echo "{{ _zip_contents.stdout }}"
+      exit 1
+    fi
+    unzip -p /tmp/{{ openspecimen_release }}.zip "$TOMCAT_ZIP" > /tmp/tomcat-as.zip
+    test -s /tmp/tomcat-as.zip || { echo "ERROR: extracted tomcat-as.zip is empty"; exit 1; }
+  when: not tomcat_stat.stat.exists
+
+- name: Extract tomcat-as bundle
+  ansible.builtin.unarchive:
+    src:  /tmp/tomcat-as.zip
+    dest: /usr/local/openspecimen/
+    remote_src: true
+  when: not tomcat_stat.stat.exists
+
+- name: Remove inner tomcat-as.zip
+  ansible.builtin.file:
+    path: /tmp/tomcat-as.zip
+    state: absent
+
+- name: Set ownership of tomcat-as
+  ansible.builtin.file:
+    path: /usr/local/openspecimen/tomcat-as
+    state: directory
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    recurse: true
+
+# ── Copy database connectors ──────────────────────────────────────────────────
+# lib/ is empty in the tomcat-as bundle so unzip does not create it.
+# Connectors are always redeployed from the current release zip — stale JARs
+# removed first to ensure the correct version is in place after upgrades.
+
+- name: Create tomcat lib directory
+  ansible.builtin.file:
+    path: "{{ tomcat_home }}/lib"
+    state: directory
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0755'
+
+- name: Extract MySQL connector from release zip
+  ansible.builtin.shell: |
+    rm -f {{ tomcat_home }}/lib/mysql-connector*.jar
+    CONNECTOR=$(echo "{{ _zip_contents.stdout }}" \
+      | awk 'NF==4 && $NF ~ /mysql-connector.*\.jar$/ {print $NF; exit}')
+    if [ -z "$CONNECTOR" ]; then
+      echo "ERROR: MySQL connector JAR not found in release zip"
+      exit 1
+    fi
+    unzip -j /tmp/{{ openspecimen_release }}.zip "$CONNECTOR" -d {{ tomcat_home }}/lib/
+    chown {{ tomcat_user }}:{{ tomcat_user }} {{ tomcat_home }}/lib/mysql-connector*.jar
+    chmod 644 {{ tomcat_home }}/lib/mysql-connector*.jar
+  when: db_type == 'mysql'
+
+- name: Extract Oracle JDBC driver from release zip
+  ansible.builtin.shell: |
+    rm -f {{ tomcat_home }}/lib/ojdbc*.jar
+    DRIVER=$(echo "{{ _zip_contents.stdout }}" \
+      | awk 'NF==4 && $NF ~ /ojdbc.*\.jar$/ {print $NF; exit}')
+    if [ -z "$DRIVER" ]; then
+      echo "ERROR: Oracle JDBC driver not found in release zip"
+      exit 1
+    fi
+    unzip -j /tmp/{{ openspecimen_release }}.zip "$DRIVER" -d {{ tomcat_home }}/lib/
+    chown {{ tomcat_user }}:{{ tomcat_user }} {{ tomcat_home }}/lib/ojdbc*.jar
+    chmod 644 {{ tomcat_home }}/lib/ojdbc*.jar
+  when: db_type == 'oracle'
+
+# ── Templated configs ─────────────────────────────────────────────────────────
+
+- name: Log JVM heap sizing
+  ansible.builtin.debug:
+    msg: >-
+      Heap: -Xms{{ tomcat_heap_min }} -Xmx{{ tomcat_heap_max }}
+      (RAM: {{ ansible_facts['memtotal_mb'] }} MB
+      {% if tomcat_heap_max_override is defined %}| override{% else %}| auto-sized{% endif %})
+
+- name: Template context.xml (JNDI datasource)
+  ansible.builtin.template:
+    src: context.xml.j2
+    dest: "{{ tomcat_home }}/conf/context.xml"
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0640'
+  notify: restart openspecimen
+
+- name: Template setenv.sh (JVM heap settings)
+  ansible.builtin.template:
+    src: setenv.sh.j2
+    dest: "{{ tomcat_home }}/bin/setenv.sh"
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0750'
+  notify: restart openspecimen
+
+# ── systemd service ───────────────────────────────────────────────────────────
+
+- name: Install openspecimen systemd service
+  ansible.builtin.template:
+    src: openspecimen.service.j2
+    dest: /etc/systemd/system/openspecimen.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart openspecimen
+
+- name: Enable openspecimen service
+  ansible.builtin.systemd:
+    name: openspecimen
+    enabled: true
+    daemon_reload: true
