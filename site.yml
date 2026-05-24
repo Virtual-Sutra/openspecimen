@@ -5,7 +5,7 @@
 #   ansible-playbook -i inventory/customers/<name>/ site.yml \
 #     -e openspecimen_release=openspecimen_v12.3 \
 #     -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
-#     -e @secrets/<name>.yml --vault-password-file .vault-pass
+#     -e mysql_db_password=<password>
 
 - name: Deploy OpenSpecimen
   hosts: openspecimen

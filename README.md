@@ -37,7 +37,7 @@ inventory/
   group_vars/all.yml    — default variable values (all roles)
   customers/_template/  — copy this for each new customer
   hosts-ec2.sample      — example hosts file for EC2
-secrets/_template.yml   — copy and vault-encrypt per customer
+secrets/_template.yml   — example credential variables (never commit with real values)
 docs/
   DEPLOY-UPGRADE.md     — fresh install, upgrade, rollback procedures
   TROUBLESHOOTING.md    — common errors and fixes
@@ -48,7 +48,7 @@ CONFIG-REFERENCE.md     — every config file the roles write and what controls 
 
 ```bash
 # 1. Check out this branch
-git clone https://github.com/Virtual-Sutra/openspecimen.git --branch ansible-deploy
+git clone https://github.com/krishagni/openspecimen.git --branch ansible-deploy
 cd openspecimen
 ansible-galaxy collection install -r requirements.yml
 
@@ -57,21 +57,15 @@ cp -r inventory/customers/_template/ inventory/customers/my-hospital/
 vi inventory/customers/my-hospital/hosts          # set ansible_host, ansible_user, key path
 vi inventory/customers/my-hospital/group_vars/openspecimen.yml  # db_type, db_managed, etc.
 
-# 3. Create and encrypt secrets (DB password)
-cp secrets/_template.yml secrets/my-hospital.yml
-vi secrets/my-hospital.yml          # set mysql_db_password (or oracle_db_password)
-read -rs VAULT_PASS && echo "$VAULT_PASS" > .vault-pass && chmod 600 .vault-pass
-ansible-vault encrypt secrets/my-hospital.yml
-
-# 4. (Optional) Verify the target VM is reachable
+# 3. (Optional) Verify the target VM is reachable
 ansible-playbook -i inventory/customers/my-hospital/ verify-customer.yml \
   -e customer=my-hospital
 
-# 5. Deploy
+# 4. Deploy (pass the DB password via -e or your CI/CD secrets manager)
 ansible-playbook -i inventory/customers/my-hospital/ site.yml \
   -e openspecimen_release=openspecimen_v12.3 \
   -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
-  -e @secrets/my-hospital.yml --vault-password-file .vault-pass
+  -e mysql_db_password=<password>
 ```
 
 ## Upgrade
@@ -80,7 +74,7 @@ ansible-playbook -i inventory/customers/my-hospital/ site.yml \
 ansible-playbook -i inventory/customers/my-hospital/ deploy.yml \
   -e openspecimen_release=openspecimen_v12.3 \
   -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
-  -e @secrets/my-hospital.yml --vault-password-file .vault-pass
+  -e mysql_db_password=<password>
 ```
 
 ## Database topologies
@@ -110,8 +104,6 @@ customer_plugins:
 
 Plugin files referenced by `src` must be accessible on the Ansible controller at deploy time.
 
-For **Jenkins-managed** deployments, plugin binaries are stored on the Jenkins VM and staged automatically by the pipeline. See the ops repository documentation.
-
 ## Roles
 
 | Role | Purpose |
@@ -125,29 +117,3 @@ For **Jenkins-managed** deployments, plugin binaries are stored on the Jenkins V
 
 See [`CONFIG-REFERENCE.md`](CONFIG-REFERENCE.md) for all variables, and
 [`docs/DEPLOY-UPGRADE.md`](docs/DEPLOY-UPGRADE.md) for upgrade and rollback procedures.
-
-## Jenkins integration
-
-For Jenkins-managed deployments, Jenkins checks out this branch directly from
-GitHub using a read-only deploy key and runs the playbooks against customer
-inventory stored in a separate private ops repository.
-
-**Required Jenkins environment variables** (set via `jenkins-setup.yml` in the ops repo):
-
-| Variable | Value |
-|----------|-------|
-| `ANSIBLE_REPO_URL` | `git@github.com:Virtual-Sutra/openspecimen.git` |
-| `ANSIBLE_REPO_BRANCH` | `ansible-deploy` |
-| `ANSIBLE_CRED_ID` | Jenkins SSH credential ID holding the deploy key |
-
-**Pipeline flow:**
-1. Jenkins fetches the OpenSpecimen release artifact (WAR/zip)
-2. Jenkins checks out this branch → `${WORKSPACE}/ansible`
-3. Jenkins stages any customer-specific plugins from the Jenkins VM
-4. `ansible-playbook ansible/site.yml` runs with customer inventory from the ops repo
-
-A read-only GitHub deploy key must be added to this repository. See
-`add-github-deploy-key.yml` in the ops repository for the setup procedure.
-
-Customer inventory, Jenkins pipeline configuration, credentials, and operator
-runbooks are managed in the private ops repository.

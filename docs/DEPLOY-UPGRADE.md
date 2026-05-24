@@ -23,8 +23,8 @@ It is **not** stored in inventory `group_vars`.
 
 Before deploying:
 - Customer inventory exists under `inventory/customers/<name>/`
-- Secrets file is Vault-encrypted at `secrets/<name>.yml`
 - The release zip is accessible on the Ansible controller
+- The database password is available to pass via `-e` or your CI/CD secrets manager
 
 ---
 
@@ -36,7 +36,7 @@ ansible-galaxy collection install -r requirements.yml
 ansible-playbook -i inventory/customers/<name>/ site.yml \
   -e openspecimen_release=openspecimen_v12.3 \
   -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
-  -e @secrets/<name>.yml --vault-password-file .vault-pass
+  -e mysql_db_password=<password>
 ```
 
 `openspecimen_zip_path` defaults to
@@ -54,7 +54,7 @@ infrastructure (MySQL, Tomcat config) is already correct. Skips infra roles.
 ansible-playbook -i inventory/customers/<name>/ deploy.yml \
   -e openspecimen_release=openspecimen_v12.3 \
   -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
-  -e @secrets/<name>.yml --vault-password-file .vault-pass
+  -e mysql_db_password=<password>
 ```
 
 The playbook:
@@ -119,8 +119,8 @@ sudo tail -f $TOMCAT/logs/catalina.out   # watch for "Server startup in"
 ## Variable reference
 
 All defaults in `inventory/group_vars/all.yml`. Override per-customer in
-`inventory/customers/<name>/group_vars/openspecimen.yml`. Credentials in
-`secrets/<name>.yml` (Vault-encrypted).
+`inventory/customers/<name>/group_vars/openspecimen.yml`. Pass credentials
+via `-e mysql_db_password=<password>` (or your CI/CD secrets manager).
 
 | Variable | Default | Notes |
 |----------|---------|-------|

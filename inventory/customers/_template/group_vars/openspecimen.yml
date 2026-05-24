@@ -6,8 +6,8 @@
 # inventory/group_vars/all.yml) are shown in the comment.
 # Uncomment and set only the values that differ for this customer.
 #
-# Credentials (mysql_db_password, oracle_db_password) belong in the Vault
-# file at secrets/<customer-name>.yml, not here.
+# Credentials (mysql_db_password, oracle_db_password) must not be stored here.
+# Pass them at run time via -e mysql_db_password=<password>.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ── Database topology ─────────────────────────────────────────────────────────
@@ -93,7 +93,7 @@
 
 # ── MySQL (db_type: mysql, db_managed: true — local install) ─────────────────
 # Role: mysql
-# mysql_db_password lives in secrets/<customer-name>.yml (Vault-encrypted).
+# Pass mysql_db_password at run time: -e mysql_db_password=<password>
 
 # mysql_db_name:                openspecimen   # default: openspecimen
 # mysql_db_user:                openspecimen   # default: openspecimen
@@ -104,7 +104,7 @@
 # ── MySQL / RDS (db_type: mysql, db_managed: false — external DB) ─────────────
 # Role: mysql (skipped), tomcat (JDBC URL)
 # Set mysql_db_host to the RDS endpoint or private DB server IP.
-# mysql_db_password lives in secrets/<customer-name>.yml.
+# Pass mysql_db_password at run time: -e mysql_db_password=<password>
 
 # mysql_db_host: "REPLACE_WITH_RDS_ENDPOINT_OR_DB_PRIVATE_IP"
 # mysql_db_name: openspecimen
@@ -112,7 +112,7 @@
 
 # ── Oracle (db_type: oracle, db_managed: false) ───────────────────────────────
 # Role: tomcat (JDBC URL and driver), mysql (skipped)
-# oracle_db_password lives in secrets/<customer-name>.yml.
+# Pass oracle_db_password at run time: -e oracle_db_password=<password>
 #
 # Use service name (preferred) OR SID — not both.
 #   Service name → jdbc:oracle:thin:@//host:port/service_name

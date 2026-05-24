@@ -46,7 +46,7 @@ out with "Condition check failed".
 |-------|-----|
 | Wrong `openspecimen_port` | Check `inventory/group_vars/all.yml`; default is `8080` |
 | Wrong `openspecimen_app_url` | If set, it must match the actual URL Tomcat answers on |
-| Database connection failure | Check `catalina.out` on the target; verify DB credentials in `secrets/<name>.yml` |
+| Database connection failure | Check `catalina.out` on the target; verify the DB password passed via `-e mysql_db_password` |
 | Tomcat startup too slow | Increase `openspecimen_health_retries` or `openspecimen_health_delay` in `group_vars` |
 
 To check Tomcat logs on the target:
@@ -111,23 +111,6 @@ Run with `--check` to see what would change without applying it:
 ```bash
 ansible-playbook ... --check
 ```
-
----
-
-## Vault decryption fails
-
-**Symptom:** `ERROR! Decryption failed (no vault secrets would decrypt)`.
-
-**Fix:**
-1. Check that `.vault-pass` contains the correct passphrase.
-2. Check that the secrets file was encrypted with that passphrase:
-   ```bash
-   ansible-vault view secrets/<name>.yml --vault-password-file .vault-pass
-   ```
-3. Re-encrypt if needed:
-   ```bash
-   ansible-vault rekey secrets/<name>.yml
-   ```
 
 ---
 
