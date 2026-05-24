@@ -103,7 +103,7 @@ Then re-run `site.yml`.
 
 | Task | Why it changes | Fix |
 |------|---------------|-----|
-| `scripts/update-config.sh` | Always runs | Verify the script is idempotent; add `changed_when: false` if appropriate |
+| A `shell`/`command` task | Always runs | Verify the command is idempotent; add `changed_when: false` if no state changes |
 | Service restart handler | Triggered by a config change upstream | Check which `notify` fired; suppress the config task if inputs haven't changed |
 
 Run with `--check` to see what would change without applying it:

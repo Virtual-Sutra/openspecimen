@@ -60,7 +60,7 @@ vi inventory/customers/my-hospital/group_vars/openspecimen.yml  # db_type, db_ma
 # 3. Create and encrypt secrets (DB password)
 cp secrets/_template.yml secrets/my-hospital.yml
 vi secrets/my-hospital.yml          # set mysql_db_password (or oracle_db_password)
-echo "your-vault-password" > .vault-pass && chmod 600 .vault-pass
+read -rs VAULT_PASS && echo "$VAULT_PASS" > .vault-pass && chmod 600 .vault-pass
 ansible-vault encrypt secrets/my-hospital.yml
 
 # 4. (Optional) Verify the target VM is reachable
