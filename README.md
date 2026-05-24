@@ -101,7 +101,7 @@ customer_plugins:
   - src: "/path/to/enterprise.jar"
     dest_subdir: paid
   - src: "/path/to/custom.jar"
-    dest_subdir: zustomer
+    dest_subdir: customer
 ```
 
 Plugin files at `src` must be accessible on the Ansible controller at deploy time.
