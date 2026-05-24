@@ -1,0 +1,114 @@
+---
+# Verify a customer environment is ready for deployment.
+#
+# Checks:
+#   1. Customer inventory exists and is well-formed
+#   2. Customer VM is reachable via SSH
+#   3. Current installed OpenSpecimen version on the VM
+#   4. Available disk space on the VM
+#   5. OpenSpecimen service status (if already installed)
+#
+# Usage:
+#   ansible-playbook -i inventory/customers/<name>/ verify-customer.yml \
+#     -e customer=<name>
+
+# ── Play 1: Validate customer inventory ───────────────────────────────────────
+
+- name: Validate customer inventory
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  pre_tasks:
+    - name: Require customer variable
+      ansible.builtin.fail:
+        msg: "customer is required — pass -e customer=<name> matching inventory/customers/<name>/"
+      when: customer is not defined or not customer | trim
+
+  tasks:
+    - name: Check customer inventory directory
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/inventory/customers/{{ customer }}"
+      register: _inv_dir
+
+    - name: Fail if inventory directory is missing
+      ansible.builtin.fail:
+        msg: >-
+          inventory/customers/{{ customer }}/ not found.
+          Create it from inventory/customers/_template/ first.
+      when: not _inv_dir.stat.exists
+
+    - name: Check customer hosts file
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/inventory/customers/{{ customer }}/hosts"
+      register: _inv_hosts
+
+    - name: Check customer group_vars file
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/inventory/customers/{{ customer }}/group_vars/openspecimen.yml"
+      register: _inv_groupvars
+
+    - name: Load customer group_vars
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/inventory/customers/{{ customer }}/group_vars/openspecimen.yml"
+      when: _inv_groupvars.stat.exists
+
+    - name: Inventory check
+      ansible.builtin.debug:
+        msg:
+          - "Customer   : {{ customer }}"
+          - "hosts file : {{ 'OK' if _inv_hosts.stat.exists else 'MISSING' }}"
+          - "group_vars : {{ 'OK' if _inv_groupvars.stat.exists else 'MISSING' }}"
+          - "db_type    : {{ db_type | default('mysql') }}"
+          - "db_managed : {{ db_managed | default(true) }}"
+
+# ── Play 2: Check VM connectivity and current state ───────────────────────────
+
+- name: Check customer VM readiness
+  hosts: "{{ customer }}"
+  gather_facts: false
+
+  tasks:
+    - name: Test SSH connectivity
+      ansible.builtin.ping:
+      register: _ssh_ping
+      ignore_errors: true
+
+    - name: Gather disk space
+      ansible.builtin.shell: df -h / | awk 'NR==2 {print $4 " free of " $2 " (" $5 " used)"}'
+      register: _disk_space
+      changed_when: false
+      when: _ssh_ping is succeeded
+
+    - name: Check current OpenSpecimen version
+      ansible.builtin.slurp:
+        src: /usr/local/openspecimen/.release
+      register: _release_marker
+      failed_when: false
+      when: _ssh_ping is succeeded
+
+    - name: Check OpenSpecimen service status
+      ansible.builtin.command: systemctl is-active openspecimen
+      register: _service_status
+      changed_when: false
+      failed_when: false
+      when: _ssh_ping is succeeded
+
+    - name: VM readiness report
+      ansible.builtin.debug:
+        msg:
+          - "==========================================="
+          - "  VM: {{ inventory_hostname }}"
+          - "==========================================="
+          - "  SSH              : {{ 'OK' if _ssh_ping is succeeded else 'FAILED — check ansible_host and SSH key' }}"
+          - "  Disk space       : {{ _disk_space.stdout | default('N/A — SSH failed') }}"
+          - "  Installed version: {{ (_release_marker.content | b64decode | trim) if (_release_marker.content is defined) else 'not installed — fresh deploy' }}"
+          - "  Service status   : {{ _service_status.stdout | default('N/A') }}"
+
+    - name: Fail if VM is unreachable
+      ansible.builtin.fail:
+        msg: >-
+          Cannot reach {{ inventory_hostname }} via SSH.
+          Check ansible_host in inventory/customers/{{ customer }}/hosts and
+          ensure the VM is running and the SSH key is correct.
+      when: _ssh_ping is failed
