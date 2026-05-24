@@ -1,6 +1,8 @@
 # OpenSpecimen Ansible Deployment
 
-Ansible automation for deploying and upgrading [OpenSpecimen](https://github.com/krishagni/openspecimen) on Linux servers.
+Ansible playbooks for deploying and upgrading [OpenSpecimen](https://github.com/krishagni/openspecimen) on Linux servers.
+
+This is the `ansible-deploy` branch of the `Virtual-Sutra/openspecimen` fork. It contains **only** deployment automation — no application source code.
 
 ## What this does
 
@@ -10,6 +12,26 @@ Ansible automation for deploying and upgrading [OpenSpecimen](https://github.com
 
 Supports Ubuntu 22.04, Ubuntu 24.04, and RHEL 9. Works with local MySQL, Amazon RDS, and Oracle databases.
 
+## Repository layout
+
+```
+site.yml          — full fresh deployment (all roles in order)
+deploy.yml        — upgrade-only re-deploy (skips infra setup)
+roles/
+  common/         — OS prerequisites, system user/group
+  java/           — OpenJDK 17
+  mysql/          — MySQL install and config (skipped when db_managed: false)
+  tomcat/         — Tomcat, JDBC drivers, JVM tuning
+  openspecimen/   — WAR deploy, properties, health check
+  plugins/        — customer-specific plugin injection
+inventory/
+  group_vars/all.yml              — default variable values (all roles)
+  customers/_template/            — copy this for each new customer
+  hosts-ec2.sample                — example hosts file for EC2
+secrets/_template.yml             — copy and vault-encrypt per customer
+CONFIG-REFERENCE.md               — every config file the roles write and what controls it
+```
+
 ## Prerequisites
 
 | Requirement | Version | Install |
@@ -18,40 +40,34 @@ Supports Ubuntu 22.04, Ubuntu 24.04, and RHEL 9. Works with local MySQL, Amazon 
 | Ansible collections | — | `ansible-galaxy collection install -r requirements.yml` |
 | Python 3 | ≥ 3.9 | Must be present on the **target** host |
 | Target OS | Ubuntu 22.04/24.04 or RHEL 9 | x86_64 and arm64 |
-| SSH access | — | Key-based auth from the Ansible controller to the target |
+| SSH access | — | Key-based auth from the Ansible controller to the target host |
 
-## Quick start (self-hosted)
-
-**Option A — from the release zip (recommended — version-matched playbooks)**
+## Quick start (self-hosted / manual)
 
 ```bash
-unzip openspecimen_v12.3.zip 'ansible/*' -d deploy/
-cd deploy/ansible
+# 1. Check out this branch
+git clone https://github.com/Virtual-Sutra/openspecimen.git --branch ansible-deploy
+cd openspecimen
+ansible-galaxy collection install -r requirements.yml
 
-# Copy and fill in your inventory
+# 2. Create a customer inventory
 cp -r inventory/customers/_template/ inventory/customers/my-hospital/
+# Edit hosts file — set ansible_host, ansible_user, ansible_ssh_private_key_file
 vi inventory/customers/my-hospital/hosts
+# Edit group_vars — set db_type, db_managed, mysql_db_host (if RDS), etc.
 vi inventory/customers/my-hospital/group_vars/openspecimen.yml
 
-# Create vault-encrypted secrets (DB password)
+# 3. Create and encrypt secrets (DB password)
 cp secrets/_template.yml secrets/my-hospital.yml
 vi secrets/my-hospital.yml          # set mysql_db_password (or oracle_db_password)
 ansible-vault encrypt secrets/my-hospital.yml
 echo "your-vault-password" > .vault-pass && chmod 600 .vault-pass
 
-# Deploy
+# 4. Deploy
 ansible-playbook -i inventory/customers/my-hospital/ site.yml \
   -e openspecimen_release=openspecimen_v12.3 \
   -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
   -e @secrets/my-hospital.yml --vault-password-file .vault-pass
-```
-
-**Option B — from git (latest playbooks)**
-
-```bash
-git clone https://github.com/Virtual-Sutra/openspecimen.git --branch ansible-deploy
-cd openspecimen
-# then follow inventory setup above
 ```
 
 ## Upgrade
@@ -77,45 +93,50 @@ For RDS and Oracle, the `mysql` role is skipped — only the JDBC connection is 
 
 ## Customer-specific plugins
 
-For **self-hosted** deployments, define the plugin list in your customer inventory:
+Define the plugin list in your customer inventory:
 
 ```yaml
 # inventory/customers/my-hospital/group_vars/plugins.yml
 customer_plugins:
   - src: "/path/to/enterprise.jar"
-    dest_subdir: paid      # default | paid | zustomer
+    dest_subdir: paid
   - src: "/path/to/custom.jar"
     dest_subdir: zustomer
 ```
 
-Plugin files referenced by `src` must be accessible on the Ansible controller at deploy time.
+Plugin files at `src` must be accessible on the Ansible controller at deploy time.
 
-For **Jenkins-managed** deployments, plugin binaries are stored on the Jenkins VM and staged automatically by the pipeline. See the ops repository documentation.
-
-## Roles
-
-| Role | Purpose |
-|------|---------|
-| `common` | OS prerequisites, system user/group |
-| `java` | OpenJDK 17 installation |
-| `mysql` | MySQL install and configuration (skipped when `db_managed: false`) |
-| `tomcat` | Tomcat, JDBC drivers, JVM tuning |
-| `openspecimen` | WAR deploy, properties config, health check |
-| `plugins` | Customer-specific plugin injection (optional) |
-
-See [`CONFIG-REFERENCE.md`](CONFIG-REFERENCE.md) for all variables.
+For Jenkins-managed deployments, plugin binaries are stored on the Jenkins VM at
+`/opt/openspecimen/plugins/<customer>/` and staged automatically by the pipeline.
 
 ## Jenkins integration
 
-For Jenkins-managed deployments, the `ansible/` directory from this branch is
-injected into each release zip before upload using `scripts/package-release.sh`
-(in the ops repository). The Jenkins deploy pipeline then:
+For automated deployments, Jenkins checks out this branch directly from GitHub
+using a read-only deploy key and runs the playbooks against customer inventory
+stored in the `Virtual-Sutra/openspecimen-ops` repository.
 
-1. Fetches the packaged release zip via `copyArtifacts`
-2. Extracts `ansible/` to get version-matched playbooks
-3. Stages customer-specific plugins from the Jenkins VM
-4. Runs `ansible-playbook ansible/site.yml` with customer inventory from the ops repo
+**Pipeline flow:**
+1. Jenkins fetches the OpenSpecimen release artifact (WAR/zip) from the upstream build job
+2. Jenkins checks out this branch (`ansible-deploy`) → `ANSIBLE_DIR`
+3. Jenkins stages any customer-specific plugins from the Jenkins VM
+4. `ansible-playbook ${ANSIBLE_DIR}/site.yml` runs against `${OPS_DIR}/inventory` (from ops repo)
 
-Customer inventory and Jenkins pipeline configuration are managed in the private
-`Virtual-Sutra/openspecimen-ops` repository. See its `docs/JENKINS-SETUP.md` for
-the full ops setup guide.
+**Required Jenkins configuration** (set in `openspecimen-ops/local/vars.yml`):
+```yaml
+jenkins_ansible_repo_url:    "git@github.com:Virtual-Sutra/openspecimen.git"
+jenkins_ansible_repo_branch: "ansible-deploy"
+```
+
+A read-only GitHub deploy key must be added to this repository for Jenkins to clone it.
+See `add-github-deploy-key.yml` in the ops repository for the setup procedure.
+
+Customer inventory, Jenkins pipeline configuration, credentials, and operator runbooks
+are managed in the private `Virtual-Sutra/openspecimen-ops` repository.
+
+## Configuration reference
+
+See [`CONFIG-REFERENCE.md`](CONFIG-REFERENCE.md) for every file the roles write, the
+variables that control each setting, and which changes require a service restart.
+
+All defaults are in [`inventory/group_vars/all.yml`](inventory/group_vars/all.yml).
+Customer-specific overrides go in `inventory/customers/<name>/group_vars/openspecimen.yml`.
