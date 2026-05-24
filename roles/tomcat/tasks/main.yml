@@ -1,7 +1,7 @@
 ---
 # ── Verify release zip on control node ───────────────────────────────────────
-# openspecimen_zip_path is always a path on the Ansible control node
-# (Jenkins workspace or local Mac). Stat and upload run here, not on target.
+# openspecimen_zip_path must be a path on the Ansible control node.
+# Stat and upload run here, not on target.
 
 - name: Assert openspecimen_release is set
   ansible.builtin.assert:
@@ -19,10 +19,8 @@
   ansible.builtin.assert:
     that: _release_zip.stat.exists
     fail_msg: >
-      Release zip not found on control node: {{ openspecimen_zip_path }}
-      Jenkins pipeline: set via copyArtifacts automatically.
-      Manual/OrbStack: set openspecimen_zip_path in local/vars.yml to the
-      absolute path of the zip on this machine.
+      Release zip not found: {{ openspecimen_zip_path }}
+      Pass the path at run time: -e openspecimen_zip_path=/path/to/<release>.zip
 
 - name: Upload release zip to target
   ansible.builtin.copy:

@@ -2,10 +2,8 @@
 - name: Fail if openspecimen_release is not set
   ansible.builtin.fail:
     msg: >-
-      openspecimen_release is empty for {{ inventory_hostname }}.
-      Set it in inventory/customers/<customer>/group_vars/openspecimen.yml,
-      then re-run jenkins.yml to sync the updated inventory into the
-      Jenkins workspace before triggering the deploy job.
+      openspecimen_release is not set for {{ inventory_hostname }}.
+      Pass it at run time: -e openspecimen_release=<name>
   when: not openspecimen_release | default('') | trim
 
 - name: Check prior OpenSpecimen version

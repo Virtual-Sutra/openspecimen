@@ -1,8 +1,7 @@
 ---
 # ═══════════════════════════════════════════════════════════════════════════════
 # OpenSpecimen Deployment — Default Variables
-# Override sensitive values with: ansible-playbook -e @secrets.yml
-#   (use ansible-vault encrypt secrets.yml for production)
+# Pass sensitive values at run time: -e mysql_db_password=<password>
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ── Database type ─────────────────────────────────────────────────────────────
@@ -81,7 +80,7 @@ tomcat_pool_abandon_pct:             60
 # ── MySQL ─────────────────────────────────────────────────────────────────────
 mysql_db_name:       openspecimen
 mysql_db_user:       openspecimen
-mysql_db_password:   ~                    # required — set via -e @secrets/<name>.yml (Vault)
+mysql_db_password:   ~                    # required — pass via -e mysql_db_password=<password>
 mysql_bind_address:  "127.0.0.1"
 
 # Host seen by Tomcat's JDBC URL. Use 127.0.0.1 when DB is on the same VM;
@@ -120,4 +119,4 @@ mysql_max_allowed_packet: "64M"
 # oracle_db_service:  "ORCL"          # service name — set this OR oracle_db_sid, not both
 # oracle_db_sid:      "ORCL"          # SID — legacy Oracle 11g; leave unset if using service name
 # oracle_db_user:     openspecimen
-# oracle_db_password: "changeme"      # Use Vault in production
+# oracle_db_password: "changeme"      # pass via -e oracle_db_password=<password>
