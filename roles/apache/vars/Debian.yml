@@ -1,0 +1,9 @@
+---
+_apache_package:  apache2
+_apache_service:  apache2
+_apache_conf_dir: /etc/apache2/sites-available
+_apache_conf_link: /etc/apache2/sites-enabled/openspecimen.conf
+_apache_log_dir:  /var/log/apache2
+_apache_webroot:  /var/www/html
+_apache_modules:  [proxy, proxy_http, headers, expires]
+_apache_ssl_modules: [ssl]

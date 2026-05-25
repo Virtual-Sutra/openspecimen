@@ -1,0 +1,47 @@
+# Managed by Ansible — do not edit by hand
+# HTTP proxy (not AJP) to avoid CVE-2020-1938 (Ghostcat)
+{% if apache_enable_ssl %}
+<VirtualHost *:{{ apache_http_port }}>
+    ServerName {{ apache_server_name }}
+    Redirect permanent / https://{{ apache_server_name }}/
+</VirtualHost>
+
+<VirtualHost *:{{ apache_https_port }}>
+    ServerName {{ apache_server_name }}
+
+    SSLEngine             on
+    SSLCertificateFile    {{ apache_ssl_cert_file }}
+    SSLCertificateKeyFile {{ apache_ssl_key_file }}
+    SSLProtocol           all -TLSv1 -TLSv1.1
+    SSLCipherSuite        HIGH:!aNULL:!MD5:!3DES
+    SSLHonorCipherOrder   on
+
+{% else %}
+<VirtualHost *:{{ apache_http_port }}>
+    ServerName {{ apache_server_name }}
+
+{% endif %}
+    # Serve static error pages directly — exclusions must precede the catch-all ProxyPass
+    ProxyPass /downtime.html    !
+    ProxyPass /OS_LOGO_BANNER.png !
+
+    ProxyPreserveHost On
+    ProxyPass        / {{ apache_proxy_backend }}
+    ProxyPassReverse / {{ apache_proxy_backend }}
+    ProxyPassReverseCookiePath /openspecimen/ /
+
+{% if apache_security_headers %}
+    Header always set X-Frame-Options       "SAMEORIGIN"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy       "strict-origin-when-cross-origin"
+{% endif %}
+
+    ExpiresActive On
+    ExpiresDefault "access plus 3 hours"
+
+    ErrorDocument 503 /downtime.html
+
+    ErrorLog  {{ _apache_log_dir }}/openspecimen-error.log
+    CustomLog {{ _apache_log_dir }}/openspecimen-access.log combined
+
+</VirtualHost>

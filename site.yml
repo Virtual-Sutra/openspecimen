@@ -20,3 +20,5 @@
     - openspecimen
     - role: plugins
       when: customer_plugins | default([]) | length > 0
+    - role: apache
+      when: apache_enabled | default(false)

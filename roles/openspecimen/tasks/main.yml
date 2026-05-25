@@ -83,6 +83,7 @@
     - "{{ openspecimen_plugin_dir }}/zustomer"
     - "{{ openspecimen_backup_dir }}"
     - "{{ openspecimen_backup_dir }}/config-changes"
+    - "{{ openspecimen_data_dir }}/heapdumps"
     - /usr/local/openspecimen/scripts
 
 - name: Deploy update-config.sh operator script

@@ -1,0 +1,15 @@
+---
+apache_http_port:   80
+apache_https_port:  443
+apache_server_name: "{{ ansible_fqdn | default(ansible_hostname) }}"
+
+# Set to true to terminate SSL at Apache. Requires the two cert vars below.
+apache_enable_ssl:    false
+apache_ssl_cert_file: ""
+apache_ssl_key_file:  ""
+
+# HTTP proxy backend — uses HTTP not AJP to avoid CVE-2020-1938 (Ghostcat).
+apache_proxy_backend: "http://localhost:{{ openspecimen_port }}/openspecimen/"
+
+# Add defensive response headers.
+apache_security_headers: true

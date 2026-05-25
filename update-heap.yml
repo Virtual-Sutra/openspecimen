@@ -1,0 +1,70 @@
+---
+# Day-2: Update JVM heap settings and restart OpenSpecimen.
+# Backs up the current setenv.sh before applying changes.
+#
+# Usage:
+#   ansible-playbook -i inventory/customers/<name>/ update-heap.yml \
+#     -e heap_min_mb=512 -e heap_max_mb=4096
+#
+# Values are integers in MB (no suffix). Current settings:
+#   sudo update-config.sh status
+
+- name: Update JVM heap settings
+  hosts: openspecimen
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Require heap_min_mb and heap_max_mb
+      ansible.builtin.fail:
+        msg: "Pass -e heap_min_mb=<int> -e heap_max_mb=<int> (integer MB, e.g. heap_min_mb=512 heap_max_mb=4096)"
+      when: heap_min_mb is not defined or heap_max_mb is not defined
+
+    - name: Backup current setenv.sh
+      ansible.builtin.copy:
+        src:        "{{ tomcat_home }}/bin/setenv.sh"
+        dest:       "{{ openspecimen_backup_dir }}/config-changes/{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}-setenv.sh"
+        remote_src: true
+        owner:      root
+        group:      root
+        mode:       '0640'
+
+  vars:
+    # Override the auto-sizing defaults so the template uses our explicit values.
+    tomcat_heap_min: "{{ heap_min_mb }}m"
+    tomcat_heap_max: "{{ heap_max_mb }}m"
+
+  tasks:
+    - name: Apply new heap to setenv.sh
+      ansible.builtin.template:
+        src:   "{{ playbook_dir }}/roles/tomcat/templates/setenv.sh.j2"
+        dest:  "{{ tomcat_home }}/bin/setenv.sh"
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_user }}"
+        mode:  '0750'
+
+    - name: Restart OpenSpecimen
+      ansible.builtin.systemd:
+        name:  openspecimen
+        state: restarted
+
+    - name: Wait for OpenSpecimen to be ready
+      ansible.builtin.shell: >
+        curl -sf -o /dev/null -w "%{http_code}"
+        http://localhost:{{ openspecimen_port }}/openspecimen/rest/ng/config-settings/app-props
+        | grep -qE '^(200|401)$'
+      register: _health
+      until:    _health.rc == 0
+      retries:  30
+      delay:    10
+      changed_when: false
+
+    - name: Confirm new heap settings
+      ansible.builtin.command:
+        cmd: grep -oP '\-Xm[sx][0-9]+[mMgG]' {{ tomcat_home }}/bin/setenv.sh
+      register: _heap
+      changed_when: false
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "Heap updated — {{ _heap.stdout_lines | join('  ') }}"

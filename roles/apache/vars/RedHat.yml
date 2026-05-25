@@ -1,0 +1,9 @@
+---
+_apache_package:  httpd
+_apache_service:  httpd
+_apache_conf_dir: /etc/httpd/conf.d
+_apache_conf_link: ""
+_apache_log_dir:  /var/log/httpd
+_apache_webroot:  /var/www/html
+_apache_modules:  []
+_apache_ssl_modules: []

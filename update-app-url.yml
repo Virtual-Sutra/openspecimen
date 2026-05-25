@@ -1,0 +1,65 @@
+---
+# Day-2: Update app.url in openspecimen.properties and restart OpenSpecimen.
+# Required when the public hostname changes (reverse proxy, ALB, new DNS).
+#
+# Usage:
+#   ansible-playbook -i inventory/customers/<name>/ update-app-url.yml \
+#     -e app_url=https://openspecimen.yourdomain.com
+#
+# After running this playbook also update in the app UI:
+#   Settings → Common → Allowed Request Origins → add the new URL
+# to avoid HTTP 405 errors when the browser Origin header carries this hostname.
+
+- name: Update app.url in openspecimen.properties
+  hosts: openspecimen
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Require app_url
+      ansible.builtin.fail:
+        msg: "Pass -e app_url=https://... (must start with http:// or https://)"
+      when: app_url is not defined or not (app_url | regex_search('^https?://'))
+
+    - name: Backup current openspecimen.properties
+      ansible.builtin.copy:
+        src:        "{{ tomcat_home }}/conf/openspecimen.properties"
+        dest:       "{{ openspecimen_backup_dir }}/config-changes/{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}-openspecimen.properties"
+        remote_src: true
+        owner:      root
+        group:      root
+        mode:       '0640'
+
+  vars:
+    openspecimen_app_url: "{{ app_url }}"
+
+  tasks:
+    - name: Apply new app.url to openspecimen.properties
+      ansible.builtin.template:
+        src:   "{{ playbook_dir }}/roles/openspecimen/templates/openspecimen.properties.j2"
+        dest:  "{{ tomcat_home }}/conf/openspecimen.properties"
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_user }}"
+        mode:  '0640'
+
+    - name: Restart OpenSpecimen
+      ansible.builtin.systemd:
+        name:  openspecimen
+        state: restarted
+
+    - name: Wait for OpenSpecimen to be ready
+      ansible.builtin.shell: >
+        curl -sf -o /dev/null -w "%{http_code}"
+        http://localhost:{{ openspecimen_port }}/openspecimen/rest/ng/config-settings/app-props
+        | grep -qE '^(200|401)$'
+      register: _health
+      until:    _health.rc == 0
+      retries:  30
+      delay:    10
+      changed_when: false
+
+    - name: Report
+      ansible.builtin.debug:
+        msg:
+          - "app.url set to {{ app_url }}"
+          - "REMINDER: also update Settings → Common → Allowed Request Origins in the app UI"

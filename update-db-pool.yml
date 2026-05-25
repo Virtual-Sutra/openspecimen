@@ -1,0 +1,70 @@
+---
+# Day-2: Update JDBC connection pool size and restart OpenSpecimen.
+# Backs up the current context.xml before applying changes.
+#
+# Usage:
+#   ansible-playbook -i inventory/customers/<name>/ update-db-pool.yml \
+#     -e pool_max_active=150
+#
+# Other pool parameters (min_idle, initial_size, etc.) retain their current
+# values from group_vars. To change multiple parameters at once, pass each:
+#   -e pool_max_active=150 -e pool_min_idle=20
+
+- name: Update JDBC connection pool settings
+  hosts: openspecimen
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Require pool_max_active
+      ansible.builtin.fail:
+        msg: "Pass -e pool_max_active=<int> (e.g. pool_max_active=150)"
+      when: pool_max_active is not defined
+
+    - name: Backup current context.xml
+      ansible.builtin.copy:
+        src:        "{{ tomcat_home }}/conf/context.xml"
+        dest:       "{{ openspecimen_backup_dir }}/config-changes/{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}-context.xml"
+        remote_src: true
+        owner:      root
+        group:      root
+        mode:       '0640'
+
+  vars:
+    tomcat_pool_max_active: "{{ pool_max_active }}"
+    tomcat_pool_min_idle:   "{{ pool_min_idle   | default(tomcat_pool_min_idle) }}"
+
+  tasks:
+    - name: Apply new pool settings to context.xml
+      ansible.builtin.template:
+        src:   "{{ playbook_dir }}/roles/tomcat/templates/context.xml.j2"
+        dest:  "{{ tomcat_home }}/conf/context.xml"
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_user }}"
+        mode:  '0640'
+
+    - name: Restart OpenSpecimen
+      ansible.builtin.systemd:
+        name:  openspecimen
+        state: restarted
+
+    - name: Wait for OpenSpecimen to be ready
+      ansible.builtin.shell: >
+        curl -sf -o /dev/null -w "%{http_code}"
+        http://localhost:{{ openspecimen_port }}/openspecimen/rest/ng/config-settings/app-props
+        | grep -qE '^(200|401)$'
+      register: _health
+      until:    _health.rc == 0
+      retries:  30
+      delay:    10
+      changed_when: false
+
+    - name: Confirm new pool settings
+      ansible.builtin.command:
+        cmd: grep -oP 'maxActive="\K[^"]+' {{ tomcat_home }}/conf/context.xml
+      register: _pool
+      changed_when: false
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "Pool updated — maxActive={{ _pool.stdout }}"

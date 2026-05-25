@@ -1,0 +1,63 @@
+---
+# Day-2: Show live configuration and health status of an OpenSpecimen instance.
+#
+# Usage:
+#   ansible-playbook -i inventory/customers/<name>/ status.yml
+
+- name: OpenSpecimen status
+  hosts: openspecimen
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Read deployed release marker
+      ansible.builtin.slurp:
+        src: "{{ openspecimen_release_marker }}"
+      register: _release
+      failed_when: false
+
+    - name: Read JVM heap from setenv.sh
+      ansible.builtin.command:
+        cmd: grep -oP '\-Xm[sx][0-9]+[mMgG]' {{ tomcat_home }}/bin/setenv.sh
+      register: _heap
+      changed_when: false
+      failed_when: false
+
+    - name: Read pool maxActive from context.xml
+      ansible.builtin.command:
+        cmd: grep -oP 'maxActive="\K[^"]+' {{ tomcat_home }}/conf/context.xml
+      register: _pool
+      changed_when: false
+      failed_when: false
+
+    - name: Read app.url from openspecimen.properties
+      ansible.builtin.command:
+        cmd: grep '^app\.url=' {{ tomcat_home }}/conf/openspecimen.properties
+      register: _app_url
+      changed_when: false
+      failed_when: false
+
+    - name: Check service state
+      ansible.builtin.command:
+        cmd: systemctl is-active openspecimen
+      register: _svc
+      changed_when: false
+      failed_when: false
+
+    - name: Check HTTP health
+      ansible.builtin.shell: >
+        curl -sf -o /dev/null -w "%{http_code}"
+        http://localhost:{{ openspecimen_port }}/openspecimen/rest/ng/config-settings/app-props
+      register: _http
+      changed_when: false
+      failed_when: false
+
+    - name: Report status
+      ansible.builtin.debug:
+        msg:
+          - "Release   : {{ (_release.content | b64decode | trim) if _release.content is defined else '(marker not found)' }}"
+          - "Service   : {{ _svc.stdout | default('unknown') }}"
+          - "HTTP      : {{ _http.stdout | default('no response') }}"
+          - "Heap      : {{ _heap.stdout_lines | join('  ') | default('(not found)') }}"
+          - "Pool max  : {{ _pool.stdout | default('(not found)') }}"
+          - "App URL   : {{ _app_url.stdout | default('(not set)') }}"
