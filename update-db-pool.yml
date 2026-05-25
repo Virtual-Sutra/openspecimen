@@ -22,19 +22,20 @@
       when: pool_max_active is not defined
 
     - name: Backup current context.xml
-      ansible.builtin.copy:
-        src:        "{{ tomcat_home }}/conf/context.xml"
-        dest:       "{{ openspecimen_backup_dir }}/config-changes/{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}-context.xml"
-        remote_src: true
-        owner:      root
-        group:      root
-        mode:       '0640'
+      ansible.builtin.include_tasks: tasks/backup_config.yml
+      vars:
+        backup_src:   "{{ tomcat_home }}/conf/context.xml"
+        backup_label: context.xml
 
   vars:
     tomcat_pool_max_active: "{{ pool_max_active }}"
-    tomcat_pool_min_idle:   "{{ pool_min_idle   | default(tomcat_pool_min_idle) }}"
 
   tasks:
+    - name: Override pool min idle when provided
+      ansible.builtin.set_fact:
+        tomcat_pool_min_idle: "{{ pool_min_idle }}"
+      when: pool_min_idle is defined
+
     - name: Apply new pool settings to context.xml
       ansible.builtin.template:
         src:   "{{ playbook_dir }}/roles/tomcat/templates/context.xml.j2"
@@ -49,15 +50,7 @@
         state: restarted
 
     - name: Wait for OpenSpecimen to be ready
-      ansible.builtin.shell: >
-        curl -sf -o /dev/null -w "%{http_code}"
-        http://localhost:{{ openspecimen_port }}/openspecimen/rest/ng/config-settings/app-props
-        | grep -qE '^(200|401)$'
-      register: _health
-      until:    _health.rc == 0
-      retries:  30
-      delay:    10
-      changed_when: false
+      ansible.builtin.include_tasks: tasks/wait_for_app.yml
 
     - name: Confirm new pool settings
       ansible.builtin.command:

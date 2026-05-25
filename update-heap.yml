@@ -12,7 +12,7 @@
 - name: Update JVM heap settings
   hosts: openspecimen
   become: true
-  gather_facts: true
+  gather_facts: false
 
   pre_tasks:
     - name: Require heap_min_mb and heap_max_mb
@@ -21,16 +21,12 @@
       when: heap_min_mb is not defined or heap_max_mb is not defined
 
     - name: Backup current setenv.sh
-      ansible.builtin.copy:
-        src:        "{{ tomcat_home }}/bin/setenv.sh"
-        dest:       "{{ openspecimen_backup_dir }}/config-changes/{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}-setenv.sh"
-        remote_src: true
-        owner:      root
-        group:      root
-        mode:       '0640'
+      ansible.builtin.include_tasks: tasks/backup_config.yml
+      vars:
+        backup_src:   "{{ tomcat_home }}/bin/setenv.sh"
+        backup_label: setenv.sh
 
   vars:
-    # Override the auto-sizing defaults so the template uses our explicit values.
     tomcat_heap_min: "{{ heap_min_mb }}m"
     tomcat_heap_max: "{{ heap_max_mb }}m"
 
@@ -49,15 +45,7 @@
         state: restarted
 
     - name: Wait for OpenSpecimen to be ready
-      ansible.builtin.shell: >
-        curl -sf -o /dev/null -w "%{http_code}"
-        http://localhost:{{ openspecimen_port }}/openspecimen/rest/ng/config-settings/app-props
-        | grep -qE '^(200|401)$'
-      register: _health
-      until:    _health.rc == 0
-      retries:  30
-      delay:    10
-      changed_when: false
+      ansible.builtin.include_tasks: tasks/wait_for_app.yml
 
     - name: Confirm new heap settings
       ansible.builtin.command:

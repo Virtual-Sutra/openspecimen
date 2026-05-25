@@ -99,14 +99,23 @@
     group: "{{ tomcat_user }}"
     mode: '0755'
 
-- name: Backup existing MySQL connector before replacement
-  ansible.builtin.shell: |
-    if ls {{ tomcat_home }}/lib/mysql-connector*.jar 2>/dev/null | head -1 | grep -q .; then
-      mkdir -p {{ openspecimen_backup_dir }}/config-changes
-      cp {{ tomcat_home }}/lib/mysql-connector*.jar {{ openspecimen_backup_dir }}/config-changes/ 2>/dev/null || true
-    fi
+- name: Find existing MySQL connector
+  ansible.builtin.find:
+    paths:    "{{ tomcat_home }}/lib"
+    patterns: "mysql-connector*.jar"
+  register: _mysql_connectors
   when: db_type == 'mysql'
-  changed_when: false
+
+- name: Backup existing MySQL connector before replacement
+  ansible.builtin.copy:
+    src:        "{{ item.path }}"
+    dest:       "{{ openspecimen_backup_dir }}/config-changes/"
+    remote_src: true
+    owner:      root
+    group:      root
+    mode:       '0640'
+  loop: "{{ _mysql_connectors.files }}"
+  when: db_type == 'mysql' and _mysql_connectors.files | length > 0
 
 - name: Extract MySQL connector from release zip
   ansible.builtin.shell: |

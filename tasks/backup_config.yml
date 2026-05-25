@@ -1,0 +1,10 @@
+---
+# Required vars: backup_src (remote path), backup_label (filename used in backup dest)
+- name: Backup {{ backup_label }}
+  ansible.builtin.copy:
+    src:        "{{ backup_src }}"
+    dest:       "{{ openspecimen_backup_dir }}/config-changes/{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}-{{ backup_label }}"
+    remote_src: true
+    owner:      root
+    group:      root
+    mode:       '0640'
