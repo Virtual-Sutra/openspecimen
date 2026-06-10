@@ -213,17 +213,59 @@
 # ── Wait for app to be ready ──────────────────────────────────────────────────
 # curl handles connection-refused gracefully; uri module does not.
 # Fresh installs run Liquibase schema migration which can take 10+ minutes.
+# Read the actual HTTP port from server.xml — the bundled tomcat-as ships
+# without an HTTP connector; the tomcat role patches it in, but we verify
+# the real port rather than assuming openspecimen_port.
+
+- name: Detect Tomcat HTTP port from server.xml
+  ansible.builtin.shell: |
+    python3 -c "
+    import re, sys
+    content = open('{{ tomcat_home }}/conf/server.xml').read()
+    for p in [
+        r'<Connector[^>]*protocol=\"HTTP/1\.1\"[^>]*port=\"(\d+)\"',
+        r'<Connector[^>]*port=\"(\d+)\"[^>]*protocol=\"HTTP/1\.1\"',
+    ]:
+        m = re.search(p, content, re.DOTALL)
+        if m:
+            print(m.group(1))
+            sys.exit(0)
+    print('{{ openspecimen_port }}')
+    "
+  register: _http_port_detected
+  changed_when: false
+
+- name: Log Tomcat HTTP port
+  ansible.builtin.debug:
+    msg: "Tomcat HTTP port: {{ _http_port_detected.stdout | trim }} (default: {{ openspecimen_port }})"
 
 - name: Wait for OpenSpecimen to be ready
-  ansible.builtin.shell: >
-    curl -sf -o /dev/null -w "%{http_code}"
-    http://localhost:{{ openspecimen_port }}/openspecimen/rest/ng/config-settings/app-props
-    | grep -qE '^(200|401)$'
-  register: health_check
-  until: health_check.rc == 0
-  retries: 90
-  delay: 10
-  changed_when: false
+  block:
+    - name: Poll OpenSpecimen health endpoint
+      ansible.builtin.shell: >
+        curl -sf -o /dev/null -w "%{http_code}"
+        http://localhost:{{ _http_port_detected.stdout | trim }}/openspecimen/rest/ng/config-settings/app-props
+        | grep -qE '^(200|401)$'
+      register: health_check
+      until: health_check.rc == 0
+      retries: 90
+      delay: 10
+      changed_when: false
+  rescue:
+    - name: Tail catalina.out for diagnostics
+      ansible.builtin.shell: "tail -100 {{ tomcat_home }}/logs/catalina.out 2>&1 || echo '(catalina.out not found)'"
+      register: _catalina_tail
+      changed_when: false
+
+    - name: Print catalina.out
+      ansible.builtin.debug:
+        msg: "{{ _catalina_tail.stdout_lines }}"
+
+    - name: Fail with diagnostic message
+      ansible.builtin.fail:
+        msg: >-
+          OpenSpecimen did not respond on port {{ _http_port_detected.stdout | trim }}
+          after 15 minutes. See catalina.out output above.
 
 - name: Deployment complete
   ansible.builtin.debug:
