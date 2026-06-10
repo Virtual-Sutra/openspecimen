@@ -211,19 +211,51 @@
     daemon_reload: true
 
 # ── Wait for app to be ready ──────────────────────────────────────────────────
-# The bundled tomcat-as server.xml has no HTTP connector, so curl is not
-# usable. Instead check two conditions:
-#   1. systemctl reports the service active (process running).
-#   2. catalina.out contains the Tomcat "Server startup in" completion line —
-#      this is logged after Liquibase migrations finish, making it a reliable
-#      signal that the app is ready even on fresh installs (10+ min schema init).
+# Phase 1 — internal readiness: wait until Tomcat logs "Server startup in"
+#   AFTER the most recent service activation timestamp. The timestamp filter
+#   prevents a stale match on upgrade — catalina.out is append-only so a plain
+#   grep would hit the previous run's startup line immediately.
+# Phase 2 — external reachability (optional): if openspecimen_app_url is set,
+#   curl that URL from the Ansible control node to confirm the ALB / reverse-
+#   proxy path is live. delegate_to: localhost exercises the real network stack
+#   rather than a loopback from the server to itself.
 
-- name: Wait for OpenSpecimen to be ready
+- name: Wait for Tomcat startup completion
   block:
-    - name: Wait for service active and startup logged
+    - name: Wait for service active and startup in catalina.out since last activation
       ansible.builtin.shell: |
-        systemctl is-active openspecimen || exit 1
-        grep -q 'Server startup in' {{ tomcat_home }}/logs/catalina.out 2>/dev/null || exit 1
+        python3 << 'PYEOF'
+        import subprocess, datetime, re, sys
+        result = subprocess.run(
+            ['systemctl', 'show', 'openspecimen', '-p', 'ActiveEnterTimestamp', '--value'],
+            capture_output=True, text=True)
+        # Normalise: strip microseconds then timezone word — both systemd and
+        # Tomcat use the same local clock so TZ is irrelevant for comparison,
+        # and strptime('%Z') only reliably parses UTC/GMT on most Python builds.
+        ts_str = re.sub(r'(\d{2}:\d{2}:\d{2})\.\d+', r'\1', result.stdout.strip())
+        ts_str = re.sub(r'\s\S+$', '', ts_str)
+        if not ts_str:
+            sys.exit(1)
+        try:
+            svc_start = datetime.datetime.strptime(ts_str, '%a %Y-%m-%d %H:%M:%S')
+        except ValueError:
+            sys.exit(1)
+        log_re = re.compile(r'^(\d{2}-\w{3}-\d{4} \d{2}:\d{2}:\d{2})\.')
+        try:
+            with open('{{ tomcat_home }}/logs/catalina.out') as f:
+                for line in f:
+                    m = log_re.match(line)
+                    if m:
+                        try:
+                            log_ts = datetime.datetime.strptime(m.group(1), '%d-%b-%Y %H:%M:%S')
+                            if log_ts >= svc_start and 'Server startup in' in line:
+                                sys.exit(0)
+                        except ValueError:
+                            pass
+        except FileNotFoundError:
+            pass
+        sys.exit(1)
+        PYEOF
       become: true
       register: health_check
       until: health_check.rc == 0
@@ -257,6 +289,23 @@
           OpenSpecimen did not reach active state with startup complete
           after {{ (90 * 10 / 60) | int }} minutes.
           See systemctl status and catalina.out above.
+
+# Phase 2: external URL reachability — only runs when openspecimen_app_url is set.
+# Runs from the Ansible control node (Jenkins) so it validates the full
+# ALB/proxy stack, not just local Tomcat connectivity.
+- name: Verify app reachable via public URL
+  ansible.builtin.shell: >
+    curl -sf -o /dev/null -w "%{http_code}"
+    {{ openspecimen_app_url }}/openspecimen/rest/ng/config-settings/app-props
+    | grep -qE '^(200|401)$'
+  delegate_to: localhost
+  become: false
+  when: openspecimen_app_url is defined
+  register: _app_url_check
+  until: _app_url_check.rc == 0
+  retries: 12
+  delay: 10
+  changed_when: false
 
 - name: Deployment complete
   ansible.builtin.debug:
