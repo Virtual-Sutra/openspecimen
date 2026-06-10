@@ -229,11 +229,15 @@
         result = subprocess.run(
             ['systemctl', 'show', 'openspecimen', '-p', 'ActiveEnterTimestamp', '--value'],
             capture_output=True, text=True)
+        # Normalise: strip microseconds then timezone word — both systemd and
+        # Tomcat use the same local clock so TZ is irrelevant for comparison,
+        # and strptime('%Z') only reliably parses UTC/GMT on most Python builds.
         ts_str = re.sub(r'(\d{2}:\d{2}:\d{2})\.\d+', r'\1', result.stdout.strip())
-        if not ts_str or ts_str == 'n/a':
+        ts_str = re.sub(r'\s\S+$', '', ts_str)
+        if not ts_str:
             sys.exit(1)
         try:
-            svc_start = datetime.datetime.strptime(ts_str, '%a %Y-%m-%d %H:%M:%S %Z')
+            svc_start = datetime.datetime.strptime(ts_str, '%a %Y-%m-%d %H:%M:%S')
         except ValueError:
             sys.exit(1)
         log_re = re.compile(r'^(\d{2}-\w{3}-\d{4} \d{2}:\d{2}:\d{2})\.')
