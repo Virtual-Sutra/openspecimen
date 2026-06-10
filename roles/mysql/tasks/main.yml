@@ -140,7 +140,7 @@
       # it does not auto-init. --initialize-insecure creates the data dir and
       # sets root to empty password (no plugin), which we switch to auth_socket below.
       ansible.builtin.command:
-        cmd: mysqld --initialize-insecure --user=mysql
+        cmd: /usr/sbin/mysqld --initialize-insecure --user=mysql
       changed_when: true
 
     - name: Start MySQL after fresh initialization
