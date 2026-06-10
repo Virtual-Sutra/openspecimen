@@ -259,13 +259,13 @@
 
     - name: Print catalina.out
       ansible.builtin.debug:
-        msg: "{{ _catalina_tail.stdout_lines }}"
+        var: _catalina_tail.stdout_lines
 
     - name: Fail with diagnostic message
       ansible.builtin.fail:
         msg: >-
           OpenSpecimen did not respond on port {{ _http_port_detected.stdout | trim }}
-          after 15 minutes. See catalina.out output above.
+          after {{ (90 * 10 / 60) | int }} minutes. See catalina.out output above.
 
 - name: Deployment complete
   ansible.builtin.debug:
