@@ -199,6 +199,29 @@
   changed_when: "'changed' in _ajp_patch.stdout"
   notify: restart openspecimen
 
+# ── Ensure HTTP connector is present ─────────────────────────────────────────
+# The bundled tomcat-as.zip ships server.xml with only an AJP connector on
+# 8009 and no HTTP connector. Without this patch nothing listens on 8080.
+
+- name: Ensure HTTP connector exists in server.xml
+  ansible.builtin.shell: |
+    python3 -c "
+    import re, sys
+    path = '{{ tomcat_home }}/conf/server.xml'
+    content = open(path).read()
+    if re.search(r'protocol=\"HTTP/1\.1\"', content):
+        sys.exit(0)
+    connector = '\n    <Connector port=\"{{ openspecimen_port }}\" protocol=\"HTTP/1.1\"\n               connectionTimeout=\"20000\" redirectPort=\"8443\" />'
+    patched = content.replace('</Service>', connector + '\n</Service>', 1)
+    if patched == content:
+        sys.exit(0)
+    open(path, 'w').write(patched)
+    print('changed')
+    "
+  register: _http_connector_patch
+  changed_when: "'changed' in _http_connector_patch.stdout"
+  notify: restart openspecimen
+
 # ── systemd service ───────────────────────────────────────────────────────────
 
 - name: Install openspecimen systemd service
