@@ -135,16 +135,31 @@
         path: /var/lib/mysql
         state: absent
 
-    - name: Start MySQL to trigger fresh initialization
+    - name: Initialize MySQL data directory
+      # Ubuntu's mysql-systemd-start refuses to start without /var/lib/mysql —
+      # it does not auto-init. --initialize-insecure creates the data dir and
+      # sets root to empty password (no plugin), which we switch to auth_socket below.
+      ansible.builtin.command:
+        cmd: mysqld --initialize-insecure --user=mysql
+      changed_when: true
+
+    - name: Start MySQL after fresh initialization
       ansible.builtin.service:
         name: "{{ _mysql_service }}"
         state: started
 
-    - name: Wait for MySQL to finish initializing
+    - name: Wait for MySQL to be ready
       ansible.builtin.wait_for:
         port: 3306
         host: 127.0.0.1
         timeout: 60
+
+    - name: Switch root to auth_socket after fresh init
+      ansible.builtin.command:
+        cmd: >-
+          mysql -u root --password= -e
+          "ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket; FLUSH PRIVILEGES;"
+      changed_when: true
 
 # ── Verify config ─────────────────────────────────────────────────────────────
 
