@@ -108,10 +108,43 @@
     cmd: >-
       mysql --defaults-extra-file=/etc/mysql/debian.cnf -e
       "ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket; FLUSH PRIVILEGES;"
+  register: _mysql_debian_maint_reset
+  failed_when: false
+  changed_when: _mysql_debian_maint_reset.rc == 0
   when:
     - ansible_facts['os_family'] == 'Debian'
     - _mysql_root_socket_debian.rc != 0
-  changed_when: true
+
+- name: Reinitialize MySQL data directory (Debian, all auth broken)
+  # debian-sys-maint password is stale (debian.cnf out of sync with MySQL grants,
+  # common on re-used instances). Wipe the data directory — MySQL re-initialises
+  # on next start with auth_socket for root (Ubuntu package default), and our
+  # mysqld.cnf (written before install) is applied from first init.
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - _mysql_root_socket_debian.rc != 0
+    - _mysql_debian_maint_reset.rc | default(0) != 0
+  block:
+    - name: Stop MySQL before data directory wipe
+      ansible.builtin.service:
+        name: "{{ _mysql_service }}"
+        state: stopped
+
+    - name: Wipe MySQL data directory
+      ansible.builtin.file:
+        path: /var/lib/mysql
+        state: absent
+
+    - name: Start MySQL to trigger fresh initialization
+      ansible.builtin.service:
+        name: "{{ _mysql_service }}"
+        state: started
+
+    - name: Wait for MySQL to finish initializing
+      ansible.builtin.wait_for:
+        port: 3306
+        host: 127.0.0.1
+        timeout: 60
 
 # ── Verify config ─────────────────────────────────────────────────────────────
 
