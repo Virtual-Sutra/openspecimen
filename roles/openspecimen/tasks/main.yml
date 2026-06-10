@@ -224,6 +224,7 @@
       ansible.builtin.shell: |
         systemctl is-active openspecimen || exit 1
         grep -q 'Server startup in' {{ tomcat_home }}/logs/catalina.out 2>/dev/null || exit 1
+      become: true
       register: health_check
       until: health_check.rc == 0
       retries: 90
@@ -232,6 +233,7 @@
   rescue:
     - name: Show service status on failure
       ansible.builtin.shell: systemctl status openspecimen --no-pager -l 2>&1 || true
+      become: true
       register: _service_status
       changed_when: false
 
@@ -241,6 +243,7 @@
 
     - name: Tail catalina.out for diagnostics
       ansible.builtin.shell: "tail -100 {{ tomcat_home }}/logs/catalina.out 2>&1 || echo '(catalina.out not found)'"
+      become: true
       register: _catalina_tail
       changed_when: false
 
