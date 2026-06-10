@@ -90,6 +90,29 @@
     - _mysql_root_ping.rc != 0
     - _mysql_tmp_pass.stdout | length > 0
 
+# ── Debian/Ubuntu: ensure root uses auth_socket ──────────────────────────────
+# Ubuntu installs auth_socket by default, but re-used instances (or installs
+# that ran ALTER USER) may have root on password auth. Use the always-present
+# debian-sys-maint credentials to restore auth_socket when socket auth fails.
+
+- name: Check MySQL root socket connectivity (Debian)
+  ansible.builtin.command:
+    cmd: mysql -u root -S {{ _mysql_socket }} -e "SELECT 1"
+  register: _mysql_root_socket_debian
+  failed_when: false
+  changed_when: false
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Reset MySQL root to auth_socket via debian-sys-maint (Debian)
+  ansible.builtin.command:
+    cmd: >-
+      mysql --defaults-extra-file=/etc/mysql/debian.cnf -e
+      "ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket; FLUSH PRIVILEGES;"
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - _mysql_root_socket_debian.rc != 0
+  changed_when: true
+
 # ── Verify config ─────────────────────────────────────────────────────────────
 
 - name: Verify MySQL config (lower_case_table_names=1, character_set_server=utf8)
