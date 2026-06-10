@@ -211,47 +211,34 @@
     daemon_reload: true
 
 # ── Wait for app to be ready ──────────────────────────────────────────────────
-# curl handles connection-refused gracefully; uri module does not.
-# Fresh installs run Liquibase schema migration which can take 10+ minutes.
-# Read the actual HTTP port from server.xml — the bundled tomcat-as ships
-# without an HTTP connector; the tomcat role patches it in, but we verify
-# the real port rather than assuming openspecimen_port.
-
-- name: Detect Tomcat HTTP port from server.xml
-  ansible.builtin.shell: |
-    python3 -c "
-    import re, sys
-    content = open('{{ tomcat_home }}/conf/server.xml').read()
-    for p in [
-        r'<Connector[^>]*protocol=\"HTTP/1\.1\"[^>]*port=\"(\d+)\"',
-        r'<Connector[^>]*port=\"(\d+)\"[^>]*protocol=\"HTTP/1\.1\"',
-    ]:
-        m = re.search(p, content, re.DOTALL)
-        if m:
-            print(m.group(1))
-            sys.exit(0)
-    print('{{ openspecimen_port }}')
-    "
-  register: _http_port_detected
-  changed_when: false
-
-- name: Log Tomcat HTTP port
-  ansible.builtin.debug:
-    msg: "Tomcat HTTP port: {{ _http_port_detected.stdout | trim }} (default: {{ openspecimen_port }})"
+# The bundled tomcat-as server.xml has no HTTP connector, so curl is not
+# usable. Instead check two conditions:
+#   1. systemctl reports the service active (process running).
+#   2. catalina.out contains the Tomcat "Server startup in" completion line —
+#      this is logged after Liquibase migrations finish, making it a reliable
+#      signal that the app is ready even on fresh installs (10+ min schema init).
 
 - name: Wait for OpenSpecimen to be ready
   block:
-    - name: Poll OpenSpecimen health endpoint
-      ansible.builtin.shell: >
-        curl -sf -o /dev/null -w "%{http_code}"
-        http://localhost:{{ _http_port_detected.stdout | trim }}/openspecimen/rest/ng/config-settings/app-props
-        | grep -qE '^(200|401)$'
+    - name: Wait for service active and startup logged
+      ansible.builtin.shell: |
+        systemctl is-active openspecimen || exit 1
+        grep -q 'Server startup in' {{ tomcat_home }}/logs/catalina.out 2>/dev/null || exit 1
       register: health_check
       until: health_check.rc == 0
       retries: 90
       delay: 10
       changed_when: false
   rescue:
+    - name: Show service status on failure
+      ansible.builtin.shell: systemctl status openspecimen --no-pager -l 2>&1 || true
+      register: _service_status
+      changed_when: false
+
+    - name: Print service status
+      ansible.builtin.debug:
+        var: _service_status.stdout_lines
+
     - name: Tail catalina.out for diagnostics
       ansible.builtin.shell: "tail -100 {{ tomcat_home }}/logs/catalina.out 2>&1 || echo '(catalina.out not found)'"
       register: _catalina_tail
@@ -261,11 +248,12 @@
       ansible.builtin.debug:
         var: _catalina_tail.stdout_lines
 
-    - name: Fail with diagnostic message
+    - name: Fail after diagnostics
       ansible.builtin.fail:
         msg: >-
-          OpenSpecimen did not respond on port {{ _http_port_detected.stdout | trim }}
-          after {{ (90 * 10 / 60) | int }} minutes. See catalina.out output above.
+          OpenSpecimen did not reach active state with startup complete
+          after {{ (90 * 10 / 60) | int }} minutes.
+          See systemctl status and catalina.out above.
 
 - name: Deployment complete
   ansible.builtin.debug:
@@ -276,7 +264,6 @@
       Upgrade complete — {{ _installed_release | default('unknown') }} → {{ openspecimen_release }}
       {% endif %}
       | IP: {{ ansible_facts['default_ipv4']['address'] }}
-      | URL: http://{{ ansible_facts['default_ipv4']['address'] }}:{{ openspecimen_port }}/openspecimen
 
 - name: Record deployed release version
   ansible.builtin.copy:
