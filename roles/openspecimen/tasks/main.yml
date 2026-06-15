@@ -203,7 +203,7 @@
   block:
     - name: Extract openspecimen.war from release zip
       ansible.builtin.shell: |
-        set -o pipefail
+        set -eo pipefail
         WAR=$(echo "{{ _zip_contents.stdout }}" \
           | awk 'NF==4 && $NF ~ /openspecimen\.war$/ {print $NF; exit}')
         if [ -z "$WAR" ]; then
@@ -213,6 +213,7 @@
         unzip -p /tmp/{{ openspecimen_release }}.zip "$WAR" \
           > {{ tomcat_home }}/webapps/openspecimen.war
       args:
+        executable: /bin/bash
         creates: "{{ tomcat_home }}/webapps/openspecimen.war"
       notify: restart openspecimen
   rescue:
@@ -253,7 +254,7 @@
   block:
     - name: Locate and extract plugin_build/*.jar
       ansible.builtin.shell: |
-        set -o pipefail
+        set -eo pipefail
         PLUGIN_DIR=$(echo "{{ _zip_contents.stdout }}" \
           | awk 'NF==4 && $NF ~ /plugin_build\/.+\.jar$/ {sub("/[^/]+$","", $NF); print $NF; exit}')
         if [ -z "$PLUGIN_DIR" ]; then
@@ -262,6 +263,8 @@
         fi
         unzip -jo /tmp/{{ openspecimen_release }}.zip "${PLUGIN_DIR}/*.jar" \
           -d {{ openspecimen_plugin_dir }}/default/
+      args:
+        executable: /bin/bash
       register: _plugin_extract
       changed_when: _plugin_extract.stdout is search('inflating:|extracting:')
   rescue:
@@ -298,7 +301,7 @@
 
 - name: Extract JARs from paid plugin zips
   ansible.builtin.shell: |
-    set -o pipefail
+    set -eo pipefail
     OUTPUT=$(unzip -jo "/tmp/{{ item.files[0].path | basename }}" "*.jar" \
       -d {{ openspecimen_plugin_dir }}/paid/ 2>&1) || { echo "$OUTPUT"; exit 1; }
     if ! echo "$OUTPUT" | grep -qE 'inflating:|extracting:'; then
@@ -306,6 +309,8 @@
       exit 2
     fi
     echo "$OUTPUT"
+  args:
+    executable: /bin/bash
   loop: "{{ _preflight_paid_find.results }}"
   when: item.matched > 0
   register: _paid_plugin_extract
@@ -348,7 +353,7 @@
 
 - name: Extract JARs from customer plugin zips
   ansible.builtin.shell: |
-    set -o pipefail
+    set -eo pipefail
     OUTPUT=$(unzip -jo "/tmp/{{ item.files[0].path | basename }}" "*.jar" \
       -d {{ openspecimen_plugin_dir }}/zustomer/ 2>&1) || { echo "$OUTPUT"; exit 1; }
     if ! echo "$OUTPUT" | grep -qE 'inflating:|extracting:'; then
@@ -356,6 +361,8 @@
       exit 2
     fi
     echo "$OUTPUT"
+  args:
+    executable: /bin/bash
   loop: "{{ _preflight_customer_find.results }}"
   when: item.matched > 0
   register: _customer_plugin_extract
