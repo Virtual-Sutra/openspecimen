@@ -31,6 +31,20 @@ systemd issue — check the sections below or `journalctl` on the target.
 
 ---
 
+## Enabling extra diagnostics
+
+To print the inventory + variable resolution context at the top of a play (host,
+inventory_dir, release, builds_dir, db settings, plugin lists), pass:
+
+```bash
+-e openspecimen_debug=true
+```
+
+Useful during customer onboarding or when troubleshooting "variable X has the
+wrong value" issues. Off by default to keep healthy deploy logs clean.
+
+---
+
 ## Pre-flight failures
 
 Pre-flight runs as a `pre_task` in `site.yml` and `deploy.yml` — **before any role executes**.
