@@ -9,78 +9,9 @@
     tasks_from: version_check
   when: not (_version_check_done | default(false))
 
-# ── Inventory / variable diagnostics ─────────────────────────────────────────
-# Runs first so we can always see what Ansible received, regardless of later failures.
-
-- name: Show inventory and plugin variable diagnostics
-  ansible.builtin.debug:
-    msg:
-      - "=== Inventory ==="
-      - "host            : {{ inventory_hostname }}"
-      - "groups          : {{ group_names }}"
-      - "inventory_dir   : {{ inventory_dir }}"
-      - "playbook_dir    : {{ playbook_dir }}"
-      - "=== Release ==="
-      - "release         : {{ openspecimen_release }}"
-      - "release_file    : {{ openspecimen_release_file | default('(not passed)') }}"
-      - "builds_dir      : {{ openspecimen_builds_dir }}"
-      - "=== Plugins ==="
-      - "paid_plugins    : {{ openspecimen_paid_plugins }}"
-      - "customer_plugins: {{ openspecimen_customer_plugins }}"
-
-# ── Pre-flight: verify artifacts exist on control node ───────────────────────
-# Fail fast before touching the target if the release zip or any plugin zip
-# is missing. Saves a half-completed deploy and makes the error obvious.
-
-- name: Set plugin version for pre-flight
-  ansible.builtin.set_fact:
-    _preflight_plugin_version: "{{ openspecimen_release | regex_replace('^openspecimen_', '') }}"
-
-- name: Check release zip exists on control node
-  ansible.builtin.stat:
-    path: "{{ openspecimen_zip_path | expanduser }}"
-  delegate_to: localhost
-  register: _release_zip_stat
-  failed_when: not _release_zip_stat.stat.exists
-  changed_when: false
-
-- name: Find paid plugin zips under builds_dir (pre-flight)
-  ansible.builtin.find:
-    paths: "{{ openspecimen_builds_dir | expanduser }}"
-    patterns: "{{ item }}-{{ _preflight_plugin_version }}.zip"
-    recurse: true
-  delegate_to: localhost
-  loop: "{{ openspecimen_paid_plugins }}"
-  register: _preflight_paid_find
-  changed_when: false
-
-- name: Fail if paid plugin zip not found anywhere under builds_dir
-  ansible.builtin.fail:
-    msg: >-
-      Plugin zip not found under {{ openspecimen_builds_dir }}:
-      {{ item.item }}-{{ _preflight_plugin_version }}.zip
-      — place it in the same directory as the release zip before running.
-  loop: "{{ _preflight_paid_find.results }}"
-  when: item.matched == 0
-
-- name: Find customer plugin zips under builds_dir (pre-flight)
-  ansible.builtin.find:
-    paths: "{{ openspecimen_builds_dir | expanduser }}"
-    patterns: "{{ item }}-{{ _preflight_plugin_version }}.zip"
-    recurse: true
-  delegate_to: localhost
-  loop: "{{ openspecimen_customer_plugins }}"
-  register: _preflight_customer_find
-  changed_when: false
-
-- name: Fail if customer plugin zip not found anywhere under builds_dir
-  ansible.builtin.fail:
-    msg: >-
-      Plugin zip not found under {{ openspecimen_builds_dir }}:
-      {{ item.item }}-{{ _preflight_plugin_version }}.zip
-      — place it in the same directory as the release zip before running.
-  loop: "{{ _preflight_customer_find.results }}"
-  when: item.matched == 0
+# Pre-flight artifact / inventory check ran as a pre_task in site.yml / deploy.yml.
+# It populated _preflight_plugin_version, _preflight_paid_find, and
+# _preflight_customer_find which the plugin deploy tasks below reuse.
 
 # ── Detect install type ───────────────────────────────────────────────────────
 # Checks the database, not the WAR. A WAR on disk with an empty DB (e.g. after

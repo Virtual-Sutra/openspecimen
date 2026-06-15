@@ -11,6 +11,14 @@
   hosts: openspecimen
   become: true
 
+  pre_tasks:
+    # Verify the release zip and every paid/customer plugin zip exists on the
+    # control node before any role runs. Fails fast if anything is missing.
+    - name: Pre-flight artifact check
+      ansible.builtin.include_role:
+        name: openspecimen
+        tasks_from: preflight
+
   roles:
     - common
     - java
