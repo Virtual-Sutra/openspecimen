@@ -1,7 +1,7 @@
 ---
-# Pre-flight artifact and inventory check.
-# Runs as a pre_task in site.yml / deploy.yml — before any role executes —
-# so missing artifacts fail the play before the target is modified.
+# Pre-flight checks. Runs as a pre_task in site.yml / deploy.yml — before any
+# role executes — so misconfiguration fails the play before the target is
+# modified. Every failure message tells the operator what's wrong AND what to fix.
 
 # ── Inventory / variable diagnostics ─────────────────────────────────────────
 
@@ -14,16 +14,74 @@
       - "inventory_dir   : {{ inventory_dir }}"
       - "playbook_dir    : {{ playbook_dir }}"
       - "=== Release ==="
-      - "release         : {{ openspecimen_release }}"
+      - "release         : {{ openspecimen_release | default('(not set)') }}"
       - "release_file    : {{ openspecimen_release_file | default('(not passed)') }}"
-      - "builds_dir      : {{ openspecimen_builds_dir }}"
+      - "builds_dir      : {{ openspecimen_builds_dir | default('(not set)') }}"
+      - "=== Database ==="
+      - "db_type         : {{ db_type | default('(not set)') }}"
+      - "db_managed      : {{ db_managed | default('(not set)') }}"
+      - "db_host         : {{ mysql_db_host | default('(not set)') }}"
       - "=== Plugins ==="
-      - "paid_plugins    : {{ openspecimen_paid_plugins }}"
-      - "customer_plugins: {{ openspecimen_customer_plugins }}"
+      - "paid_plugins    : {{ openspecimen_paid_plugins | default([]) }}"
+      - "customer_plugins: {{ openspecimen_customer_plugins | default([]) }}"
+
+# ── Required input validation ────────────────────────────────────────────────
+# Catches operator mistakes — unset variables, blank values, wrong formats —
+# before any time is wasted trying to reach the target.
+
+- name: Validate openspecimen_release is set
+  ansible.builtin.fail:
+    msg: |
+      ✗ openspecimen_release is not set.
+
+      What to do:
+        Pass at run time:  -e openspecimen_release=openspecimen_v12.2.RC12
+        Or set in inventory: inventory/customers/<name>/group_vars/openspecimen.yml
+
+      The value must match the release zip filename (without .zip).
+  when: openspecimen_release is not defined or not openspecimen_release | trim
+
+- name: Validate openspecimen_release format
+  ansible.builtin.fail:
+    msg: |
+      ✗ openspecimen_release format is invalid: "{{ openspecimen_release }}"
+
+      Expected format: openspecimen_<version>   (e.g. openspecimen_v12.2.RC12)
+
+      What to check:
+        - The release zip filename in BUILDS_DIR — strip the .zip extension and use that exact value.
+        - The plugin version is derived as the part after 'openspecimen_'.
+  when: not (openspecimen_release | regex_search('^openspecimen_.+'))
+
+- name: Validate openspecimen_builds_dir is set
+  ansible.builtin.fail:
+    msg: |
+      ✗ openspecimen_builds_dir is not set.
+
+      What to do:
+        Set in inventory/group_vars/all.yml (default: /var/lib/jenkins/jobs)
+        Or pass at run time:  -e openspecimen_builds_dir=/path/to/builds
+  when: openspecimen_builds_dir is not defined or not openspecimen_builds_dir | trim
+
+- name: Validate mysql_db_password is set when MySQL is managed locally
+  ansible.builtin.fail:
+    msg: |
+      ✗ mysql_db_password is not set, but db_managed=true.
+
+      What to do:
+        Set in secrets/<customer>.yml (Ansible Vault encrypted):
+            mysql_db_password: "<password>"
+        Or pass at run time:  -e mysql_db_password=<password>
+
+        For Jenkins runs, the password comes from the openspecimen-vault-<customer>
+        credential and is decrypted from secrets/<customer>.yml at deploy time.
+  when:
+    - db_type | default('mysql') == 'mysql'
+    - mysql_db_password is not defined or not mysql_db_password | string | trim
 
 # ── Verify artifacts exist on control node ───────────────────────────────────
 
-- name: Set plugin version for pre-flight
+- name: Compute plugin version from openspecimen_release
   ansible.builtin.set_fact:
     _preflight_plugin_version: "{{ openspecimen_release | regex_replace('^openspecimen_', '') }}"
 
@@ -32,8 +90,32 @@
     path: "{{ openspecimen_zip_path | expanduser }}"
   delegate_to: localhost
   register: _release_zip_stat
-  failed_when: not _release_zip_stat.stat.exists
   changed_when: false
+
+- name: Fail with operator guidance when release zip is missing
+  ansible.builtin.fail:
+    msg: |
+      ✗ Release zip not found on the Jenkins VM.
+
+      Expected at:    {{ openspecimen_zip_path | expanduser }}
+      Customer:       {{ inventory_hostname }}
+      Release:        {{ openspecimen_release }}
+
+      What to check:
+        1. Is the zip uploaded to {{ openspecimen_builds_dir }} on the Jenkins VM?
+           Run on Jenkins VM:
+             ls -la {{ openspecimen_builds_dir }}/
+
+        2. Does the filename exactly match {{ openspecimen_release }}.zip?
+           (Common mistake: '-' vs '_' in version string)
+
+        3. Is openspecimen_release set correctly?
+           Currently: openspecimen_release = "{{ openspecimen_release }}"
+
+      How to fix:
+        - Upload the zip with the upload-releases.yml playbook, OR
+        - SCP it directly:  scp openspecimen_<ver>.zip <jenkins>:{{ openspecimen_builds_dir }}/
+  when: not _release_zip_stat.stat.exists
 
 - name: Find paid plugin zips under builds_dir (pre-flight)
   ansible.builtin.find:
@@ -41,16 +123,36 @@
     patterns: "{{ item }}-{{ _preflight_plugin_version }}.zip"
     recurse: true
   delegate_to: localhost
-  loop: "{{ openspecimen_paid_plugins }}"
+  loop: "{{ openspecimen_paid_plugins | default([]) }}"
   register: _preflight_paid_find
   changed_when: false
 
-- name: Fail if paid plugin zip not found anywhere under builds_dir
+- name: Fail with operator guidance when a paid plugin zip is missing
   ansible.builtin.fail:
-    msg: >-
-      Plugin zip not found under {{ openspecimen_builds_dir }}:
-      {{ item.item }}-{{ _preflight_plugin_version }}.zip
-      — place it in the same directory as the release zip before running.
+    msg: |
+      ✗ Paid plugin zip not found anywhere under {{ openspecimen_builds_dir }}.
+
+      Plugin name:    {{ item.item }}
+      Expected file:  {{ item.item }}-{{ _preflight_plugin_version }}.zip
+      Customer:       {{ inventory_hostname }}
+
+      What to check:
+        1. Is the plugin zip uploaded to the same directory as the release zip on Jenkins?
+           Run on Jenkins VM:
+             find {{ openspecimen_builds_dir }} -name '{{ item.item }}*'
+
+        2. Does the filename match exactly?
+           The version suffix is derived from openspecimen_release ({{ openspecimen_release }})
+           → expected:  {{ item.item }}-{{ _preflight_plugin_version }}.zip
+
+        3. Is the plugin still required for this release?
+           Remove from openspecimen_paid_plugins in inventory/host_vars/{{ inventory_hostname }}.yml
+           if no longer needed.
+
+      How to fix:
+        - Place {{ item.item }}-{{ _preflight_plugin_version }}.zip in the same directory
+          as openspecimen_{{ _preflight_plugin_version }}.zip, OR
+        - Remove "{{ item.item }}" from openspecimen_paid_plugins in inventory.
   loop: "{{ _preflight_paid_find.results }}"
   when: item.matched == 0
 
@@ -60,15 +162,38 @@
     patterns: "{{ item }}-{{ _preflight_plugin_version }}.zip"
     recurse: true
   delegate_to: localhost
-  loop: "{{ openspecimen_customer_plugins }}"
+  loop: "{{ openspecimen_customer_plugins | default([]) }}"
   register: _preflight_customer_find
   changed_when: false
 
-- name: Fail if customer plugin zip not found anywhere under builds_dir
+- name: Fail with operator guidance when a customer plugin zip is missing
   ansible.builtin.fail:
-    msg: >-
-      Plugin zip not found under {{ openspecimen_builds_dir }}:
-      {{ item.item }}-{{ _preflight_plugin_version }}.zip
-      — place it in the same directory as the release zip before running.
+    msg: |
+      ✗ Customer plugin zip not found anywhere under {{ openspecimen_builds_dir }}.
+
+      Plugin name:    {{ item.item }}
+      Expected file:  {{ item.item }}-{{ _preflight_plugin_version }}.zip
+      Customer:       {{ inventory_hostname }}
+
+      What to check:
+        1. Is the plugin zip uploaded to the same directory as the release zip on Jenkins?
+           Run on Jenkins VM:
+             find {{ openspecimen_builds_dir }} -name '{{ item.item }}*'
+
+        2. Does the filename match exactly?
+           Expected:  {{ item.item }}-{{ _preflight_plugin_version }}.zip
+
+      How to fix:
+        - Place {{ item.item }}-{{ _preflight_plugin_version }}.zip in the same directory
+          as openspecimen_{{ _preflight_plugin_version }}.zip, OR
+        - Remove "{{ item.item }}" from openspecimen_customer_plugins in inventory.
   loop: "{{ _preflight_customer_find.results }}"
   when: item.matched == 0
+
+- name: Show pre-flight summary
+  ansible.builtin.debug:
+    msg:
+      - "✓ Pre-flight checks passed"
+      - "  release zip   : {{ openspecimen_zip_path | expanduser }}"
+      - "  paid plugins  : {{ (_preflight_paid_find.results | map(attribute='files') | flatten | map(attribute='path') | list) | default([]) }}"
+      - "  customer plug : {{ (_preflight_customer_find.results | map(attribute='files') | flatten | map(attribute='path') | list) | default([]) }}"
