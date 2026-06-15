@@ -27,6 +27,14 @@
     # Default to upgrade; override with -e openspecimen_install_type=fresh for DB recovery
     openspecimen_install_type: "{{ openspecimen_install_type | default('upgrade') }}"
 
+  pre_tasks:
+    # Verify the release zip and every paid/customer plugin zip exists on the
+    # control node before the openspecimen role runs. Fails fast if missing.
+    - name: Pre-flight artifact check
+      ansible.builtin.include_role:
+        name: openspecimen
+        tasks_from: preflight
+
   roles:
     - openspecimen
     - role: plugins
