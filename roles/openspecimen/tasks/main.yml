@@ -200,11 +200,32 @@
   ansible.builtin.set_fact:
     _plugin_version: "{{ openspecimen_release | regex_replace('^openspecimen_', '') }}"
 
-- name: Find paid plugin zips under openspecimen_builds_dir
+- name: Derive plugin directory from RELEASE_FILE path
+  # openspecimen_release_file is e.g. "v12.2.RC12/workspace/openspecimen_v12.2.RC12.zip"
+  # dirname gives "v12.2.RC12/workspace" → joined with builds_dir gives the exact
+  # directory where the plugin zip sits alongside the release zip.
+  # Falls back to openspecimen_builds_dir if RELEASE_FILE has no path component.
+  ansible.builtin.set_fact:
+    _plugin_dir: >-
+      {{
+        (openspecimen_builds_dir.rstrip('/') + '/' + (openspecimen_release_file | dirname))
+        if (openspecimen_release_file is defined and '/' in openspecimen_release_file)
+        else openspecimen_builds_dir
+      }}
+
+- name: Show plugin search directory
+  ansible.builtin.debug:
+    msg:
+      - "release_file : {{ openspecimen_release_file | default('(not set)') }}"
+      - "plugin_dir   : {{ _plugin_dir }}"
+      - "plugin_ver   : {{ _plugin_version }}"
+      - "paid         : {{ openspecimen_paid_plugins }}"
+
+- name: Find paid plugin zips in plugin directory
   ansible.builtin.find:
-    paths: "{{ openspecimen_builds_dir | expanduser }}"
+    paths: "{{ _plugin_dir | expanduser }}"
     patterns: "{{ item }}-{{ _plugin_version }}.zip"
-    recurse: true
+    recurse: false
   delegate_to: localhost
   loop: "{{ openspecimen_paid_plugins }}"
   register: _paid_zip_search
@@ -244,11 +265,11 @@
   loop: "{{ _paid_zip_search.results }}"
   when: item.files | length > 0
 
-- name: Find customer plugin zips under openspecimen_builds_dir
+- name: Find customer plugin zips in plugin directory
   ansible.builtin.find:
-    paths: "{{ openspecimen_builds_dir | expanduser }}"
+    paths: "{{ _plugin_dir | expanduser }}"
     patterns: "{{ item }}-{{ _plugin_version }}.zip"
-    recurse: true
+    recurse: false
   delegate_to: localhost
   loop: "{{ openspecimen_customer_plugins }}"
   register: _customer_zip_search
