@@ -198,6 +198,14 @@
   ansible.builtin.set_fact:
     _plugin_version: "{{ openspecimen_release | regex_replace('^openspecimen_', '') }}"
 
+- name: Show resolved plugin paths
+  ansible.builtin.debug:
+    msg:
+      - "builds_dir : {{ openspecimen_builds_dir }}"
+      - "plugin_ver : {{ _plugin_version }}"
+      - "paid       : {{ openspecimen_paid_plugins | map('regex_replace', '$', '-' + _plugin_version + '.zip') | list }}"
+      - "customer   : {{ openspecimen_customer_plugins | map('regex_replace', '$', '-' + _plugin_version + '.zip') | list }}"
+
 - name: Upload paid plugin zips to target
   ansible.builtin.copy:
     src:  "{{ openspecimen_builds_dir | expanduser }}/{{ item }}-{{ _plugin_version }}.zip"
