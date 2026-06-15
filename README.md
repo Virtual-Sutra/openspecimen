@@ -6,7 +6,9 @@ Ansible automation for deploying and upgrading [OpenSpecimen](https://github.com
 
 - **Fresh install** (`site.yml`) — installs Java, MySQL (optional), Tomcat, and OpenSpecimen from a release zip
 - **Upgrade** (`deploy.yml`) — deploys a new version over an existing install with automatic WAR + plugin backup
-- **Customer-specific plugins** — optional `plugins` role installs additional `.jar`/`.zip` plugins alongside the standard release
+- **Plugin tiers** — `openspecimen_paid_plugins` (→ `plugins/paid/`) and `openspecimen_customer_plugins` (→ `plugins/zustomer/`) extract JARs from named zips alongside the release zip
+- **Pre-flight validation** — fails fast before touching the target if the release zip or any plugin zip is missing
+- **Bounded backup history** — keeps `openspecimen_backup_retention` snapshots (default 3); older backups are pruned automatically
 
 Supports Ubuntu 22.04, Ubuntu 24.04, and RHEL 9. Works with local MySQL, Amazon RDS, and Oracle databases.
 

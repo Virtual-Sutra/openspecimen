@@ -97,6 +97,8 @@ Key settings in `mysqld.cnf`:
 | `$TOMCAT_HOME/conf/openspecimen.properties` | `db_type`, `openspecimen_data_dir`, `openspecimen_plugin_dir`, `openspecimen_backup_dir`, `openspecimen_app_url`, `openspecimen_node_name` | Application behaviour, paths, public URL | Yes |
 | `$TOMCAT_HOME/webapps/openspecimen.war` | _(from release zip)_ | The application WAR | Yes (via Tomcat hot-deploy) |
 | `$PLUGIN_DIR/default/*.jar` | _(from release zip)_ | Common plugin JARs | Yes (Tomcat re-scans on startup) |
+| `$PLUGIN_DIR/paid/*.jar` | `openspecimen_paid_plugins` | Licensed enterprise plugin JARs | Yes (Tomcat re-scans on startup) |
+| `$PLUGIN_DIR/zustomer/*.jar` | `openspecimen_customer_plugins` | Customer-specific plugin JARs | Yes (Tomcat re-scans on startup) |
 | `/usr/local/openspecimen/.release` | `openspecimen_release` | Deployed version marker for downgrade guard | No |
 
 `$PLUGIN_DIR` = `openspecimen_plugin_dir` = `/usr/local/openspecimen/plugins`
@@ -112,6 +114,42 @@ Key settings in `mysqld.cnf`:
 | `app.data_dir` | `openspecimen_data_dir` | |
 | `plugin.dir` | `openspecimen_plugin_dir` | Tomcat scans all subdirectories |
 | `app.backup_dir` | `openspecimen_backup_dir` | Upgrade backup location |
+
+**Plugin deployment** (additional plugins delivered alongside the release zip):
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `openspecimen_paid_plugins` | `[]` | Plugin names (no version, no extension). Role looks for `<name>-<version>.zip` in the release directory. JARs deployed to `$PLUGIN_DIR/paid/`. |
+| `openspecimen_customer_plugins` | `[]` | Plugin names. Role looks for `<name>-<version>.zip`. JARs deployed to `$PLUGIN_DIR/zustomer/`. |
+| `openspecimen_release_file` | _(unset)_ | When set (Jenkins pipeline passes this), used to derive the plugin search directory as `dirname(openspecimen_release_file)`. Otherwise the role searches recursively under `openspecimen_builds_dir`. |
+
+The version is derived from `openspecimen_release` by stripping the `openspecimen_` prefix
+(e.g. `openspecimen_v12.2.RC12` → plugin filename suffix `-v12.2.RC12.zip`). The same release
+upgrade therefore picks up the matching plugin version automatically — no inventory edit needed
+on every upgrade.
+
+**Backup retention:**
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `openspecimen_backup_retention` | `3` | Number of timestamped backup directories under `openspecimen_backup_dir` to keep. Older ones are pruned at the end of every deploy. Override per customer in `inventory/host_vars/<customer>.yml`. |
+
+The pre-deploy backup pattern is consistent across the WAR, default plugins (openspecimen role),
+and the MySQL connector JAR (tomcat role):
+
+```
+{{ openspecimen_backup_dir }}/<DDMMYYYY_HHMMSS>/
+  ├─ openspecimen.war
+  ├─ plugins/
+  │    ├─ default/
+  │    ├─ paid/
+  │    └─ zustomer/
+  └─ lib/
+       └─ mysql-connector-*.jar
+```
+
+The `config-changes/` subdirectory at the backup root is excluded from pruning — it's a flat log
+directory written by the `update-config.sh` operator script, not a snapshot.
 
 ---
 

@@ -25,6 +25,38 @@ Before deploying:
 - Customer inventory exists under `inventory/customers/<name>/`
 - The release zip is accessible on the Ansible controller
 - The database password is available to pass via `-e` or your CI/CD secrets manager
+- Any paid or customer plugin zips referenced in inventory are placed alongside the release zip
+
+---
+
+## Pre-flight checks
+
+Every play (`site.yml` or `deploy.yml`) runs a pre_task block that fails fast — **before any
+target modification** — if the operator's inputs are wrong. Checks include:
+
+- `openspecimen_release` is set and matches the expected `openspecimen_<version>` format
+- `openspecimen_builds_dir` is set
+- `mysql_db_password` is set when `db_managed=true`
+- The release zip exists at `openspecimen_zip_path` on the control node
+- Every plugin name in `openspecimen_paid_plugins` and `openspecimen_customer_plugins`
+  has a matching `<name>-<version>.zip` file under `openspecimen_builds_dir`
+
+When a check fails, the operator gets a structured message with the exact path/value that
+was wrong, what to check, and how to fix it — for example:
+
+```
+✗ Paid plugin zip not found anywhere under /var/lib/jenkins/jobs.
+
+Plugin name:    os-automated-freezers
+Expected file:  os-automated-freezers-v12.2.RC12.zip
+Customer:       k-testvm
+
+What to check:
+  1. Is the plugin zip uploaded to the same directory as the release zip on Jenkins?
+     Run on Jenkins VM:
+       find /var/lib/jenkins/jobs -name 'os-automated-freezers*'
+  ...
+```
 
 ---
 
@@ -58,16 +90,100 @@ ansible-playbook -i inventory/customers/<name>/ deploy.yml \
 ```
 
 The playbook:
-1. Reads the marker file on the target node to detect the current version
-2. Stops the service
-3. Backs up WAR and plugins to `openspecimen_backup_dir/<timestamp>/`
-4. Deploys the new WAR and plugins
-5. Starts the service and polls the health check
+1. Runs the pre-flight check (release zip + every plugin zip present on the controller)
+2. Reads the marker file on the target node to detect the current version
+3. Stops the service
+4. Backs up WAR and plugins to `openspecimen_backup_dir/<timestamp>/`
+5. Deploys the new WAR and plugins (default from release zip; paid + customer from separate zips)
+6. Prunes old backups beyond `openspecimen_backup_retention` (default 3)
+7. Starts the service and polls the health check
 
 ### Dry-run
 
 ```bash
 ansible-playbook ... --check
+```
+
+---
+
+## Plugin deployment
+
+OpenSpecimen ships with **default plugins** bundled in the release zip
+(`os-distribution-invoicing`, `os-task-manager`, `os-edc`, `os-extras`). These are extracted
+to `plugins/default/` automatically — no inventory configuration is needed.
+
+Two additional tiers are supported for plugins delivered as separate zips alongside the release zip:
+
+| Tier | Inventory variable | Deployed to | Use case |
+|------|--------------------|-----------------|---------|
+| Paid | `openspecimen_paid_plugins` | `plugins/paid/` | Licensed enterprise plugins |
+| Customer | `openspecimen_customer_plugins` | `plugins/zustomer/` | Customer-specific plugins |
+
+### Naming convention
+
+Inventory lists **plugin names only** — no version, no extension. The role derives the zip
+filename at runtime:
+
+```
+<plugin-name>-<version>.zip
+```
+
+`<version>` is derived from `openspecimen_release` by stripping the `openspecimen_` prefix.
+Example: with `openspecimen_release=openspecimen_v12.2.RC12` and inventory entry
+`os-automated-freezers`, the role looks for `os-automated-freezers-v12.2.RC12.zip`.
+
+This means **inventory does not need to be updated on every OpenSpecimen upgrade** — only the
+plugin zip on disk needs to be replaced with the new version.
+
+### Where to place the plugin zip
+
+The plugin zip must live in the same directory as the release zip on the Ansible control node
+(or in any subdirectory of `openspecimen_builds_dir`). Each zip must contain at least one `.jar`
+file — `unzip -jo` extracts JARs from any path inside the zip.
+
+### Inventory example
+
+```yaml
+# inventory/host_vars/<customer>.yml
+openspecimen_paid_plugins:
+  - os-automated-freezers
+  - enterprise-billing
+
+openspecimen_customer_plugins:
+  - acme-custom-workflow
+```
+
+> **Important:** put these in `inventory/host_vars/<customer>.yml`, **not** in
+> `inventory/customers/<customer>/group_vars/openspecimen.yml`. Per-customer `group_vars/`
+> subdirectories are skipped when Ansible runs with `-i inventory/` (as the Jenkins pipeline does).
+
+---
+
+## Backup retention
+
+At the end of every deploy, the openspecimen role lists all timestamped backup subdirectories
+under `openspecimen_backup_dir` (excluding `config-changes/`), sorts them by modification time
+descending, and removes everything beyond `openspecimen_backup_retention`.
+
+Default: **3**. Override per customer in `inventory/host_vars/<customer>.yml`:
+
+```yaml
+openspecimen_backup_retention: 10   # keep more for prod customer
+```
+
+Or at run time:
+
+```bash
+-e openspecimen_backup_retention=5
+```
+
+Each timestamped directory holds a complete snapshot:
+
+```
+{{ openspecimen_backup_dir }}/<DDMMYYYY_HHMMSS>/
+  ├─ openspecimen.war
+  ├─ plugins/{default,paid,zustomer}/*.jar
+  └─ lib/mysql-connector-*.jar
 ```
 
 ---
@@ -137,3 +253,7 @@ via `-e mysql_db_password=<password>` (or your CI/CD secrets manager).
 | `tomcat_heap_max` | auto (RAM × 0.5, min 2048 MB) | Override with `tomcat_heap_max_override` (integer MB) |
 | `tomcat_pool_max_active` | `100` | JDBC connection pool size |
 | `openspecimen_backup_dir` | `/usr/local/openspecimen/backup` | Timestamped backup location on upgrade |
+| `openspecimen_backup_retention` | `3` | Number of timestamped backups to keep; older ones are pruned at end of deploy |
+| `openspecimen_paid_plugins` | `[]` | List of paid plugin names (no version, no extension) — see [Plugin deployment](#plugin-deployment) |
+| `openspecimen_customer_plugins` | `[]` | List of customer plugin names |
+| `openspecimen_release_file` | _(unset)_ | Set by the Jenkins pipeline. When set, plugin search dir = `dirname(openspecimen_release_file)`. Otherwise the role searches recursively under `openspecimen_builds_dir`. |
