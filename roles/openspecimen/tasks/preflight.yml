@@ -4,6 +4,8 @@
 # modified. Every failure message tells the operator what's wrong AND what to fix.
 
 # ── Inventory / variable diagnostics ─────────────────────────────────────────
+# Opt-in: enable with -e openspecimen_debug=true (or set in inventory) when
+# troubleshooting customer onboarding or unexpected variable resolution.
 
 - name: Show inventory and plugin variable diagnostics
   ansible.builtin.debug:
@@ -24,6 +26,7 @@
       - "=== Plugins ==="
       - "paid_plugins    : {{ openspecimen_paid_plugins | default([]) }}"
       - "customer_plugins: {{ openspecimen_customer_plugins | default([]) }}"
+  when: openspecimen_debug | default(false) | bool
 
 # ── Required input validation ────────────────────────────────────────────────
 # Catches operator mistakes — unset variables, blank values, wrong formats —
