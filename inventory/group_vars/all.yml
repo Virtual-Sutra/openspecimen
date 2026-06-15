@@ -31,8 +31,10 @@ openspecimen_builds_dir: /opt/openspecimen/builds
 openspecimen_zip_path:   "{{ openspecimen_builds_dir }}/{{ openspecimen_release }}.zip"
 
 # ── Plugins ───────────────────────────────────────────────────────────────────
-# Zip filenames (exact, including version) relative to openspecimen_builds_dir.
-# Zips must exist on the control node before the playbook runs.
+# Plugin names (no version, no extension). The role derives the zip filename at
+# runtime: <name>-<version>.zip where version = openspecimen_release stripped of
+# the "openspecimen_" prefix (e.g. openspecimen_v12.2.RC12 → v12.2.RC12).
+# Zips must exist in openspecimen_builds_dir on the control node before the run.
 # Default plugins ship in the release zip and are deployed automatically.
 #
 # openspecimen_paid_plugins     → JARs extracted to plugins/paid/
