@@ -186,6 +186,60 @@
   register: _plugin_extract
   changed_when: _plugin_extract.stdout is search('inflating:|extracting:')
 
+# ── Deploy additional plugin zips ─────────────────────────────────────────────
+# openspecimen_paid_plugins / openspecimen_customer_plugins are plugin names
+# (no version, no extension). The zip filename is derived at runtime:
+#   <name>-<version>.zip
+# where version = openspecimen_release with the "openspecimen_" prefix stripped
+# (e.g. openspecimen_v12.2.RC12 → os-automated-freezers-v12.2.RC12.zip).
+# Zips must exist in openspecimen_builds_dir on the control node before the run.
+
+- name: Derive plugin version from openspecimen_release
+  ansible.builtin.set_fact:
+    _plugin_version: "{{ openspecimen_release | regex_replace('^openspecimen_', '') }}"
+
+- name: Upload paid plugin zips to target
+  ansible.builtin.copy:
+    src:  "{{ openspecimen_builds_dir | expanduser }}/{{ item }}-{{ _plugin_version }}.zip"
+    dest: "/tmp/{{ item }}-{{ _plugin_version }}.zip"
+    mode: '0644'
+  loop: "{{ openspecimen_paid_plugins }}"
+
+- name: Extract JARs from paid plugin zips
+  ansible.builtin.shell: >-
+    unzip -jo "/tmp/{{ item }}-{{ _plugin_version }}.zip" "*.jar"
+    -d {{ openspecimen_plugin_dir }}/paid/
+  loop: "{{ openspecimen_paid_plugins }}"
+  register: _paid_plugin_extract
+  changed_when: _paid_plugin_extract.stdout is search('inflating:|extracting:')
+
+- name: Remove paid plugin zips from target
+  ansible.builtin.file:
+    path: "/tmp/{{ item }}-{{ _plugin_version }}.zip"
+    state: absent
+  loop: "{{ openspecimen_paid_plugins }}"
+
+- name: Upload customer plugin zips to target
+  ansible.builtin.copy:
+    src:  "{{ openspecimen_builds_dir | expanduser }}/{{ item }}-{{ _plugin_version }}.zip"
+    dest: "/tmp/{{ item }}-{{ _plugin_version }}.zip"
+    mode: '0644'
+  loop: "{{ openspecimen_customer_plugins }}"
+
+- name: Extract JARs from customer plugin zips
+  ansible.builtin.shell: >-
+    unzip -jo "/tmp/{{ item }}-{{ _plugin_version }}.zip" "*.jar"
+    -d {{ openspecimen_plugin_dir }}/zustomer/
+  loop: "{{ openspecimen_customer_plugins }}"
+  register: _customer_plugin_extract
+  changed_when: _customer_plugin_extract.stdout is search('inflating:|extracting:')
+
+- name: Remove customer plugin zips from target
+  ansible.builtin.file:
+    path: "/tmp/{{ item }}-{{ _plugin_version }}.zip"
+    state: absent
+  loop: "{{ openspecimen_customer_plugins }}"
+
 - name: Set plugin ownership
   ansible.builtin.file:
     path: "{{ openspecimen_plugin_dir }}"
