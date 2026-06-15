@@ -32,14 +32,8 @@
 # Fail fast before touching the target if the release zip or any plugin zip
 # is missing. Saves a half-completed deploy and makes the error obvious.
 
-- name: Derive plugin directory from RELEASE_FILE
+- name: Set plugin version for pre-flight
   ansible.builtin.set_fact:
-    _preflight_plugin_dir: >-
-      {{
-        (openspecimen_builds_dir.rstrip('/') + '/' + (openspecimen_release_file | dirname))
-        if (openspecimen_release_file is defined and '/' in openspecimen_release_file)
-        else openspecimen_builds_dir
-      }}
     _preflight_plugin_version: "{{ openspecimen_release | regex_replace('^openspecimen_', '') }}"
 
 - name: Check release zip exists on control node
@@ -50,23 +44,43 @@
   failed_when: not _release_zip_stat.stat.exists
   changed_when: false
 
-- name: Check paid plugin zips exist on control node
-  ansible.builtin.stat:
-    path: "{{ _preflight_plugin_dir | expanduser }}/{{ item }}-{{ _preflight_plugin_version }}.zip"
+- name: Find paid plugin zips under builds_dir (pre-flight)
+  ansible.builtin.find:
+    paths: "{{ openspecimen_builds_dir | expanduser }}"
+    patterns: "{{ item }}-{{ _preflight_plugin_version }}.zip"
+    recurse: true
   delegate_to: localhost
   loop: "{{ openspecimen_paid_plugins }}"
-  register: _paid_plugin_stat
-  failed_when: not _paid_plugin_stat.stat.exists
+  register: _preflight_paid_find
   changed_when: false
 
-- name: Check customer plugin zips exist on control node
-  ansible.builtin.stat:
-    path: "{{ _preflight_plugin_dir | expanduser }}/{{ item }}-{{ _preflight_plugin_version }}.zip"
+- name: Fail if paid plugin zip not found anywhere under builds_dir
+  ansible.builtin.fail:
+    msg: >-
+      Plugin zip not found under {{ openspecimen_builds_dir }}:
+      {{ item.item }}-{{ _preflight_plugin_version }}.zip
+      — place it in the same directory as the release zip before running.
+  loop: "{{ _preflight_paid_find.results }}"
+  when: item.matched == 0
+
+- name: Find customer plugin zips under builds_dir (pre-flight)
+  ansible.builtin.find:
+    paths: "{{ openspecimen_builds_dir | expanduser }}"
+    patterns: "{{ item }}-{{ _preflight_plugin_version }}.zip"
+    recurse: true
   delegate_to: localhost
   loop: "{{ openspecimen_customer_plugins }}"
-  register: _customer_plugin_stat
-  failed_when: not _customer_plugin_stat.stat.exists
+  register: _preflight_customer_find
   changed_when: false
+
+- name: Fail if customer plugin zip not found anywhere under builds_dir
+  ansible.builtin.fail:
+    msg: >-
+      Plugin zip not found under {{ openspecimen_builds_dir }}:
+      {{ item.item }}-{{ _preflight_plugin_version }}.zip
+      — place it in the same directory as the release zip before running.
+  loop: "{{ _preflight_customer_find.results }}"
+  when: item.matched == 0
 
 # ── Detect install type ───────────────────────────────────────────────────────
 # Checks the database, not the WAR. A WAR on disk with an empty DB (e.g. after
@@ -246,74 +260,24 @@
   changed_when: _plugin_extract.stdout is search('inflating:|extracting:')
 
 # ── Deploy additional plugin zips ─────────────────────────────────────────────
-# openspecimen_paid_plugins / openspecimen_customer_plugins are plugin names
-# (no version, no extension). The zip filename is derived at runtime:
-#   <name>-<version>.zip
-# where version = openspecimen_release with the "openspecimen_" prefix stripped.
-#
-# The role locates each zip by searching recursively under openspecimen_builds_dir
-# on the control node (Jenkins VM) so the exact subdirectory does not need to be
-# known — the zip just needs to exist somewhere under the builds directory.
-
-- name: Derive plugin version from openspecimen_release
-  ansible.builtin.set_fact:
-    _plugin_version: "{{ openspecimen_release | regex_replace('^openspecimen_', '') }}"
-
-- name: Derive plugin directory from RELEASE_FILE path
-  # openspecimen_release_file is e.g. "v12.2.RC12/workspace/openspecimen_v12.2.RC12.zip"
-  # dirname gives "v12.2.RC12/workspace" → joined with builds_dir gives the exact
-  # directory where the plugin zip sits alongside the release zip.
-  # Falls back to openspecimen_builds_dir if RELEASE_FILE has no path component.
-  ansible.builtin.set_fact:
-    _plugin_dir: >-
-      {{
-        (openspecimen_builds_dir.rstrip('/') + '/' + (openspecimen_release_file | dirname))
-        if (openspecimen_release_file is defined and '/' in openspecimen_release_file)
-        else openspecimen_builds_dir
-      }}
-
-- name: Show plugin search directory
-  ansible.builtin.debug:
-    msg:
-      - "release_file : {{ openspecimen_release_file | default('(not set)') }}"
-      - "plugin_dir   : {{ _plugin_dir }}"
-      - "plugin_ver   : {{ _plugin_version }}"
-      - "paid         : {{ openspecimen_paid_plugins }}"
-
-- name: Find paid plugin zips in plugin directory
-  ansible.builtin.find:
-    paths: "{{ _plugin_dir | expanduser }}"
-    patterns: "{{ item }}-{{ _plugin_version }}.zip"
-    recurse: false
-  delegate_to: localhost
-  loop: "{{ openspecimen_paid_plugins }}"
-  register: _paid_zip_search
-
-- name: Show paid plugin search results
-  ansible.builtin.debug:
-    msg: "{{ item.item }}-{{ _plugin_version }}.zip → {{ item.files | map(attribute='path') | list }}"
-  loop: "{{ _paid_zip_search.results }}"
+# Pre-flight already searched recursively under openspecimen_builds_dir and
+# stored results in _preflight_paid_find / _preflight_customer_find.
+# Reuse those here — no second find needed.
 
 - name: Upload paid plugin zips to target
   ansible.builtin.copy:
     src:  "{{ item.files[0].path }}"
     dest: "/tmp/{{ item.files[0].path | basename }}"
     mode: '0644'
-  loop: "{{ _paid_zip_search.results }}"
-  when: item.files | length > 0
-
-- name: Fail if a paid plugin zip was not found
-  ansible.builtin.fail:
-    msg: "Plugin zip not found under {{ openspecimen_builds_dir }}: {{ item.item }}-{{ _plugin_version }}.zip"
-  loop: "{{ _paid_zip_search.results }}"
-  when: item.files | length == 0 and openspecimen_paid_plugins | length > 0
+  loop: "{{ _preflight_paid_find.results }}"
+  when: item.matched > 0
 
 - name: Extract JARs from paid plugin zips
   ansible.builtin.shell: >-
     unzip -jo "/tmp/{{ item.files[0].path | basename }}" "*.jar"
     -d {{ openspecimen_plugin_dir }}/paid/
-  loop: "{{ _paid_zip_search.results }}"
-  when: item.files | length > 0
+  loop: "{{ _preflight_paid_find.results }}"
+  when: item.matched > 0
   register: _paid_plugin_extract
   changed_when: _paid_plugin_extract.stdout is search('inflating:|extracting:')
 
@@ -321,38 +285,23 @@
   ansible.builtin.file:
     path: "/tmp/{{ item.files[0].path | basename }}"
     state: absent
-  loop: "{{ _paid_zip_search.results }}"
-  when: item.files | length > 0
-
-- name: Find customer plugin zips in plugin directory
-  ansible.builtin.find:
-    paths: "{{ _plugin_dir | expanduser }}"
-    patterns: "{{ item }}-{{ _plugin_version }}.zip"
-    recurse: false
-  delegate_to: localhost
-  loop: "{{ openspecimen_customer_plugins }}"
-  register: _customer_zip_search
+  loop: "{{ _preflight_paid_find.results }}"
+  when: item.matched > 0
 
 - name: Upload customer plugin zips to target
   ansible.builtin.copy:
     src:  "{{ item.files[0].path }}"
     dest: "/tmp/{{ item.files[0].path | basename }}"
     mode: '0644'
-  loop: "{{ _customer_zip_search.results }}"
-  when: item.files | length > 0
-
-- name: Fail if a customer plugin zip was not found
-  ansible.builtin.fail:
-    msg: "Plugin zip not found under {{ openspecimen_builds_dir }}: {{ item.item }}-{{ _plugin_version }}.zip"
-  loop: "{{ _customer_zip_search.results }}"
-  when: item.files | length == 0 and openspecimen_customer_plugins | length > 0
+  loop: "{{ _preflight_customer_find.results }}"
+  when: item.matched > 0
 
 - name: Extract JARs from customer plugin zips
   ansible.builtin.shell: >-
     unzip -jo "/tmp/{{ item.files[0].path | basename }}" "*.jar"
     -d {{ openspecimen_plugin_dir }}/zustomer/
-  loop: "{{ _customer_zip_search.results }}"
-  when: item.files | length > 0
+  loop: "{{ _preflight_customer_find.results }}"
+  when: item.matched > 0
   register: _customer_plugin_extract
   changed_when: _customer_plugin_extract.stdout is search('inflating:|extracting:')
 
@@ -360,9 +309,8 @@
   ansible.builtin.file:
     path: "/tmp/{{ item.files[0].path | basename }}"
     state: absent
-  loop: "{{ _customer_zip_search.results }}"
-  when: item.files | length > 0
-  loop: "{{ openspecimen_customer_plugins }}"
+  loop: "{{ _preflight_customer_find.results }}"
+  when: item.matched > 0
 
 - name: Set plugin ownership
   ansible.builtin.file:
