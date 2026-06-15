@@ -4,6 +4,49 @@ Common errors and their fixes.
 
 ---
 
+## Error message format
+
+Every failure path in the role emits an operator-friendly message in this format:
+
+```
+✗ <one-line summary of what failed>
+
+<context: customer, release, host, paths>
+
+What likely happened: (when diagnosable)
+What to check:
+  1. <concrete check + command you can copy-paste>
+  2. <concrete check + command>
+  ...
+
+How to fix:
+  - <specific action or inventory edit>
+```
+
+If you see this format, the message itself usually contains everything you need — paths to
+inspect, commands to run on the Jenkins VM or target, and the inventory file to edit.
+
+If you see a plain Ansible failure (no `✗` prefix), it's likely a generic SSH, package, or
+systemd issue — check the sections below or `journalctl` on the target.
+
+---
+
+## Pre-flight failures
+
+Pre-flight runs as a `pre_task` in `site.yml` and `deploy.yml` — **before any role executes**.
+Most failures here mean inventory + on-disk state are out of sync.
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `openspecimen_release is not set` | Missing `-e openspecimen_release=...` | Pass it at run time. Never store in `group_vars`. |
+| `openspecimen_release format is invalid` | Value doesn't match `openspecimen_<version>` | Use the exact zip filename minus `.zip` — e.g. `openspecimen_v12.2.RC12`. |
+| `mysql_db_password is not set, but db_managed=true` | Vault secrets file not loaded, or `-e mysql_db_password` not passed | Pass via `-e @secrets/<customer>.yml` (Vault) or `-e mysql_db_password=<pwd>` |
+| `Release zip not found on the Jenkins VM` | Zip not uploaded, or wrong filename | Upload to `openspecimen_builds_dir` on the Jenkins VM; filename must match `openspecimen_release` exactly. |
+| `Paid plugin zip not found anywhere under <builds_dir>` | Plugin zip missing or wrong version suffix | Place `<plugin-name>-<version>.zip` in the same directory as the release zip. Version = `openspecimen_release` minus `openspecimen_` prefix. |
+| `Customer plugin zip not found...` | Same as above for customer plugins | Same fix; or remove the plugin from `inventory/host_vars/<customer>.yml` if it's no longer needed. |
+
+---
+
 ## `openspecimen_release` is empty — "downgrade" or "version required" error
 
 **Symptom:** Version check reports `Requesting:  ` (empty string) and blocks
@@ -94,6 +137,43 @@ sudo rm -rf /var/lib/mysql
 ```
 
 Then re-run `site.yml`.
+
+---
+
+## Plugin zip contained no `.jar` files
+
+**Symptom:**
+```
+✗ Paid plugin zip <name> contained no .jar files.
+```
+
+**Cause:** The zip was found, but `unzip -jo "<zip>" "*.jar"` extracted nothing.
+The zip might be empty, contain only documentation, or contain the JAR under a glob that
+shells expand differently.
+
+**Fix:** Inspect the zip and re-package it so it contains at least one `.jar` at any path
+depth:
+
+```bash
+unzip -l /path/to/<plugin>-<version>.zip
+# Should list at least one *.jar entry
+```
+
+If the plugin is no longer needed, remove it from `openspecimen_paid_plugins` or
+`openspecimen_customer_plugins` in `inventory/host_vars/<customer>.yml`.
+
+---
+
+## `set: Illegal option -o pipefail`
+
+**Symptom:** A `shell` task fails with `/bin/sh: 1: set: Illegal option -o pipefail`,
+typically before the actual work starts.
+
+**Cause:** The task uses `set -o pipefail` but the default shell is `/bin/sh` (dash on
+Ubuntu), which does not support pipefail.
+
+**Fix:** This is a regression in the role — report it. The fix is to add
+`args: executable: /bin/bash` to the affected task.
 
 ---
 
