@@ -9,6 +9,46 @@
     tasks_from: version_check
   when: not (_version_check_done | default(false))
 
+# ── Pre-flight: verify artifacts exist on control node ───────────────────────
+# Fail fast before touching the target if the release zip or any plugin zip
+# is missing. Saves a half-completed deploy and makes the error obvious.
+
+- name: Derive plugin directory from RELEASE_FILE
+  ansible.builtin.set_fact:
+    _preflight_plugin_dir: >-
+      {{
+        (openspecimen_builds_dir.rstrip('/') + '/' + (openspecimen_release_file | dirname))
+        if (openspecimen_release_file is defined and '/' in openspecimen_release_file)
+        else openspecimen_builds_dir
+      }}
+    _preflight_plugin_version: "{{ openspecimen_release | regex_replace('^openspecimen_', '') }}"
+
+- name: Check release zip exists on control node
+  ansible.builtin.stat:
+    path: "{{ openspecimen_zip_path | expanduser }}"
+  delegate_to: localhost
+  register: _release_zip_stat
+  failed_when: not _release_zip_stat.stat.exists
+  changed_when: false
+
+- name: Check paid plugin zips exist on control node
+  ansible.builtin.stat:
+    path: "{{ _preflight_plugin_dir | expanduser }}/{{ item }}-{{ _preflight_plugin_version }}.zip"
+  delegate_to: localhost
+  loop: "{{ openspecimen_paid_plugins }}"
+  register: _paid_plugin_stat
+  failed_when: not _paid_plugin_stat.stat.exists
+  changed_when: false
+
+- name: Check customer plugin zips exist on control node
+  ansible.builtin.stat:
+    path: "{{ _preflight_plugin_dir | expanduser }}/{{ item }}-{{ _preflight_plugin_version }}.zip"
+  delegate_to: localhost
+  loop: "{{ openspecimen_customer_plugins }}"
+  register: _customer_plugin_stat
+  failed_when: not _customer_plugin_stat.stat.exists
+  changed_when: false
+
 # ── Detect install type ───────────────────────────────────────────────────────
 # Checks the database, not the WAR. A WAR on disk with an empty DB (e.g. after
 # DB reset) must be treated as fresh — using upgrade mode on an empty DB skips
