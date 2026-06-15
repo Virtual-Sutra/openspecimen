@@ -30,6 +30,16 @@ openspecimen_port:    8080
 openspecimen_builds_dir: /opt/openspecimen/builds
 openspecimen_zip_path:   "{{ openspecimen_builds_dir }}/{{ openspecimen_release }}.zip"
 
+# ── Plugins ───────────────────────────────────────────────────────────────────
+# Zip filenames (exact, including version) relative to openspecimen_builds_dir.
+# Zips must exist on the control node before the playbook runs.
+# Default plugins ship in the release zip and are deployed automatically.
+#
+# openspecimen_paid_plugins     → JARs extracted to plugins/paid/
+# openspecimen_customer_plugins → JARs extracted to plugins/zustomer/
+openspecimen_paid_plugins:     []
+openspecimen_customer_plugins: []
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 tomcat_home:                /usr/local/openspecimen/tomcat-as
 openspecimen_data_dir:      /usr/local/openspecimen/data
