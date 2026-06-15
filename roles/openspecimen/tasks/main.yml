@@ -9,6 +9,25 @@
     tasks_from: version_check
   when: not (_version_check_done | default(false))
 
+# ── Inventory / variable diagnostics ─────────────────────────────────────────
+# Runs first so we can always see what Ansible received, regardless of later failures.
+
+- name: Show inventory and plugin variable diagnostics
+  ansible.builtin.debug:
+    msg:
+      - "=== Inventory ==="
+      - "host            : {{ inventory_hostname }}"
+      - "groups          : {{ group_names }}"
+      - "inventory_dir   : {{ inventory_dir }}"
+      - "playbook_dir    : {{ playbook_dir }}"
+      - "=== Release ==="
+      - "release         : {{ openspecimen_release }}"
+      - "release_file    : {{ openspecimen_release_file | default('(not passed)') }}"
+      - "builds_dir      : {{ openspecimen_builds_dir }}"
+      - "=== Plugins ==="
+      - "paid_plugins    : {{ openspecimen_paid_plugins }}"
+      - "customer_plugins: {{ openspecimen_customer_plugins }}"
+
 # ── Pre-flight: verify artifacts exist on control node ───────────────────────
 # Fail fast before touching the target if the release zip or any plugin zip
 # is missing. Saves a half-completed deploy and makes the error obvious.
