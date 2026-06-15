@@ -49,6 +49,11 @@ openspecimen_plugin_dir:    /usr/local/openspecimen/plugins
 openspecimen_backup_dir:    /usr/local/openspecimen/backup
 openspecimen_release_marker: /usr/local/openspecimen/.release
 
+# Number of timestamped backup directories under openspecimen_backup_dir to keep.
+# Older backups are pruned at the end of every deploy. Override per customer in
+# inventory/host_vars/<customer>.yml when you need a longer retention window.
+openspecimen_backup_retention: 3
+
 # ── High Availability (optional) ──────────────────────────────────────────────
 # Uncomment and set a unique name per node when running multiple OpenSpecimen
 # nodes behind a load balancer. Name must not contain whitespace.
