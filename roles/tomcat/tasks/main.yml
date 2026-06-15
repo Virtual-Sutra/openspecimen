@@ -106,16 +106,39 @@
   register: _mysql_connectors
   when: db_type == 'mysql'
 
-- name: Backup existing MySQL connector before replacement
-  ansible.builtin.copy:
-    src:        "{{ item.path }}"
-    dest:       "{{ openspecimen_backup_dir }}/config-changes/"
-    remote_src: true
-    owner:      root
-    group:      root
-    mode:       '0640'
-  loop: "{{ _mysql_connectors.files }}"
-  when: db_type == 'mysql' and _mysql_connectors.files | length > 0
+# ── Backup existing MySQL connector before replacement ───────────────────────
+# Mirrors the openspecimen role's WAR/plugin backup pattern:
+#   {{ openspecimen_backup_dir }}/<timestamp>/lib/
+# Creates intermediate dirs if openspecimen_backup_dir doesn't exist yet
+# (tomcat role runs before openspecimen role on a fresh install).
+
+- name: Backup existing MySQL connector to timestamped lib backup
+  when:
+    - db_type == 'mysql'
+    - _mysql_connectors.files | default([]) | length > 0
+  block:
+    - name: Generate backup timestamp for tomcat lib changes
+      ansible.builtin.command: date '+%d%m%Y_%H%M%S'
+      register: _tomcat_backup_ts
+      changed_when: false
+
+    - name: Create timestamped lib backup directory
+      ansible.builtin.file:
+        path: "{{ openspecimen_backup_dir }}/{{ _tomcat_backup_ts.stdout }}/lib"
+        state: directory
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_user }}"
+        mode: '0755'
+
+    - name: Copy existing MySQL connector to timestamped lib backup
+      ansible.builtin.copy:
+        src:        "{{ item.path }}"
+        dest:       "{{ openspecimen_backup_dir }}/{{ _tomcat_backup_ts.stdout }}/lib/"
+        remote_src: true
+        owner:      root
+        group:      root
+        mode:       '0640'
+      loop: "{{ _mysql_connectors.files }}"
 
 - name: Extract MySQL connector from release zip
   ansible.builtin.shell: |
