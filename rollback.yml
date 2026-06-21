@@ -1,0 +1,275 @@
+---
+# Day-2: Roll back OpenSpecimen to a previous timestamped backup.
+#
+# Default behaviour: restores the most recent backup (the one created by the
+# last deploy/upgrade). Optionally pass -e backup_timestamp=<DDMMYYYY_HHMMSS>
+# to roll back to a specific older backup.
+#
+# What it restores:
+#   - openspecimen.war
+#   - plugins/{default,paid,zustomer}/*.jar
+#   - lib/mysql-connector-*.jar  (when present in the backup)
+#
+# What it does NOT restore:
+#   - Database schema  — Liquibase rollback is not modelled; downgrades that
+#     require schema changes are not supported by this playbook.
+#   - openspecimen.properties — config drift is the operator's responsibility;
+#     re-run site.yml with the desired vars if you need a config rollback.
+#
+# Usage:
+#   # Roll back to the most recent backup (default)
+#   ansible-playbook -i inventory/customers/<name>/ rollback.yml \
+#     -e @secrets/<name>.yml --vault-password-file .vault-pass
+#
+#   # Roll back to a specific timestamped backup
+#   ansible-playbook -i inventory/customers/<name>/ rollback.yml \
+#     -e backup_timestamp=15062026_103247 \
+#     -e @secrets/<name>.yml --vault-password-file .vault-pass
+#
+#   # Dry run (no service stop, no file moves, just confirms the backup exists)
+#   ansible-playbook -i inventory/customers/<name>/ rollback.yml --check
+#
+# Target: ≤ 5 minutes total.
+
+- name: Roll back OpenSpecimen
+  hosts: openspecimen
+  become: true
+
+  pre_tasks:
+    - name: Show rollback diagnostics
+      ansible.builtin.debug:
+        msg:
+          - "=== Rollback ==="
+          - "host             : {{ inventory_hostname }}"
+          - "backup_dir       : {{ openspecimen_backup_dir }}"
+          - "requested target : {{ backup_timestamp | default('(latest)') }}"
+      when: openspecimen_debug | default(false) | bool
+
+  tasks:
+
+    # ── 1. Resolve which backup to restore ───────────────────────────────────
+
+    - name: List timestamped backup directories on target
+      ansible.builtin.find:
+        paths:     "{{ openspecimen_backup_dir }}"
+        file_type: directory
+        excludes:  "config-changes"
+        recurse:   false
+      register: _backup_dirs
+
+    - name: Fail with operator guidance if no backups exist
+      ansible.builtin.fail:
+        msg: |
+          ✗ No timestamped backups found under {{ openspecimen_backup_dir }}.
+
+          Customer:  {{ inventory_hostname }}
+
+          What likely happened:
+            - This is the first deploy and no upgrade has occurred yet, OR
+            - All backups were pruned by openspecimen_backup_retention, OR
+            - The target node was rebuilt and previous backups are lost.
+
+          What to check:
+            ls -la {{ openspecimen_backup_dir }}/
+
+          How to fix:
+            - There is nothing to roll back to. To deploy an older version,
+              run deploy.yml with -e openspecimen_release=<older-version>
+              and the older release zip in openspecimen_builds_dir.
+      when: _backup_dirs.files | length == 0
+
+    - name: Compute most-recent backup path (used when backup_timestamp is unset)
+      ansible.builtin.set_fact:
+        _latest_backup_path: "{{ (_backup_dirs.files | sort(attribute='mtime', reverse=true) | first).path }}"
+      when: _backup_dirs.files | length > 0
+
+    - name: Resolve backup directory to restore from
+      ansible.builtin.set_fact:
+        _restore_path: >-
+          {{
+            (openspecimen_backup_dir.rstrip('/') + '/' + backup_timestamp)
+            if (backup_timestamp is defined and backup_timestamp | trim)
+            else _latest_backup_path
+          }}
+
+    - name: Verify the requested backup exists
+      ansible.builtin.stat:
+        path: "{{ _restore_path }}"
+      register: _restore_stat
+
+    - name: Fail with operator guidance if the requested timestamp is missing
+      ansible.builtin.fail:
+        msg: |
+          ✗ Backup directory not found: {{ _restore_path }}
+
+          Customer:  {{ inventory_hostname }}
+          Requested: {{ backup_timestamp | default('(latest)') }}
+
+          Available backups (most recent first):
+          {% for f in (_backup_dirs.files | sort(attribute='mtime', reverse=true)) %}
+            - {{ f.path | basename }}   (mtime {{ '%Y-%m-%d %H:%M:%S' | strftime(f.mtime) }})
+          {% endfor %}
+
+          How to fix:
+            ansible-playbook -i inventory/customers/{{ inventory_hostname }}/ rollback.yml \
+              -e backup_timestamp=<one-of-the-timestamps-above>
+      when: not _restore_stat.stat.exists
+
+    # ── 2. Verify the backup contains a WAR (sanity check) ───────────────────
+
+    - name: Verify the backup contains openspecimen.war
+      ansible.builtin.stat:
+        path: "{{ _restore_path }}/openspecimen.war"
+      register: _war_stat
+
+    - name: Fail if the backup is incomplete (no WAR)
+      ansible.builtin.fail:
+        msg: |
+          ✗ Backup is incomplete: {{ _restore_path }}/openspecimen.war is missing.
+
+          This backup directory may have been partially deleted, or was created
+          by an older version of the playbook that did not back up the WAR.
+          Pick a different timestamp from the list above.
+      when: not _war_stat.stat.exists
+
+    - name: Show planned rollback
+      ansible.builtin.debug:
+        msg:
+          - "Restoring from: {{ _restore_path }}"
+          - "Backup mtime  : {{ '%Y-%m-%d %H:%M:%S' | strftime(_restore_stat.stat.mtime) }}"
+          - "WAR size      : {{ (_war_stat.stat.size / 1024 / 1024) | round(1) }} MB"
+
+    # ── 3. Stop the service ──────────────────────────────────────────────────
+
+    - name: Stop openspecimen service
+      ansible.builtin.systemd:
+        name:  openspecimen
+        state: stopped
+
+    # ── 4. Restore WAR (replace the live one) ───────────────────────────────
+
+    - name: Remove current WAR + expanded webapp directory
+      ansible.builtin.file:
+        path:  "{{ item }}"
+        state: absent
+      loop:
+        - "{{ tomcat_home }}/webapps/openspecimen.war"
+        - "{{ tomcat_home }}/webapps/openspecimen"
+
+    - name: Restore openspecimen.war from backup
+      ansible.builtin.copy:
+        src:        "{{ _restore_path }}/openspecimen.war"
+        dest:       "{{ tomcat_home }}/webapps/openspecimen.war"
+        remote_src: true
+        owner:      "{{ tomcat_user }}"
+        group:      "{{ tomcat_user }}"
+        mode:       '0644'
+
+    # ── 5. Restore plugins — all three tiers ────────────────────────────────
+
+    - name: Probe backup plugin subdirectories
+      ansible.builtin.stat:
+        path: "{{ _restore_path }}/plugins/{{ item }}"
+      loop: [default, paid, zustomer]
+      register: _backup_plugin_stat
+
+    - name: Wipe current plugin tier (only when backup has it)
+      ansible.builtin.shell: |
+        rm -f {{ openspecimen_plugin_dir }}/{{ item.item }}/*.jar
+      loop: "{{ _backup_plugin_stat.results }}"
+      when: item.stat.exists
+      changed_when: true
+
+    - name: Restore plugin JARs from backup
+      ansible.builtin.shell: |
+        if compgen -G "{{ _restore_path }}/plugins/{{ item.item }}/*.jar" > /dev/null; then
+          cp {{ _restore_path }}/plugins/{{ item.item }}/*.jar {{ openspecimen_plugin_dir }}/{{ item.item }}/
+          chown {{ tomcat_user }}:{{ tomcat_user }} {{ openspecimen_plugin_dir }}/{{ item.item }}/*.jar
+          chmod 0644 {{ openspecimen_plugin_dir }}/{{ item.item }}/*.jar
+          echo "restored"
+        else
+          echo "empty"
+        fi
+      args:
+        executable: /bin/bash
+      loop: "{{ _backup_plugin_stat.results }}"
+      when: item.stat.exists
+      register: _restore_plugins
+      changed_when: _restore_plugins.stdout == 'restored'
+
+    # ── 6. Restore MySQL connector JAR if backed up ─────────────────────────
+
+    - name: Probe backup lib directory
+      ansible.builtin.stat:
+        path: "{{ _restore_path }}/lib"
+      register: _backup_lib_stat
+
+    - name: Restore MySQL connector JAR from backup lib/
+      ansible.builtin.shell: |
+        if compgen -G "{{ _restore_path }}/lib/mysql-connector*.jar" > /dev/null; then
+          rm -f {{ tomcat_home }}/lib/mysql-connector*.jar
+          cp {{ _restore_path }}/lib/mysql-connector*.jar {{ tomcat_home }}/lib/
+          chown {{ tomcat_user }}:{{ tomcat_user }} {{ tomcat_home }}/lib/mysql-connector*.jar
+          chmod 0644 {{ tomcat_home }}/lib/mysql-connector*.jar
+          echo "restored"
+        else
+          echo "skipped"
+        fi
+      args:
+        executable: /bin/bash
+      when: _backup_lib_stat.stat.exists
+      register: _restore_connector
+      changed_when: _restore_connector.stdout == 'restored'
+
+    # ── 7. Update the release marker to reflect the rolled-back version ─────
+
+    - name: Probe backed-up release marker (if present)
+      ansible.builtin.stat:
+        path: "{{ _restore_path }}/.release"
+      register: _backup_release_marker
+
+    - name: Restore release marker from backup
+      ansible.builtin.copy:
+        src:        "{{ _restore_path }}/.release"
+        dest:       "{{ openspecimen_release_marker }}"
+        remote_src: true
+        owner:      "{{ tomcat_user }}"
+        group:      "{{ tomcat_user }}"
+        mode:       '0644'
+      when: _backup_release_marker.stat.exists
+
+    - name: Warn when no release marker is in the backup
+      ansible.builtin.debug:
+        msg: >-
+          NOTE: backup {{ _restore_path | basename }} has no .release marker.
+          The on-disk marker still shows the previous (rolled-forward) version
+          and may incorrectly block the next deploy as a downgrade. If that
+          happens, remove {{ openspecimen_release_marker }} manually before
+          re-running deploy.yml.
+      when: not _backup_release_marker.stat.exists
+
+    # ── 8. Start service and wait for readiness ─────────────────────────────
+
+    - name: Start openspecimen service
+      ansible.builtin.systemd:
+        name:  openspecimen
+        state: started
+        daemon_reload: true
+
+    - name: Wait for the app to respond
+      ansible.builtin.shell: >
+        curl -sf -o /dev/null -w "%{http_code}"
+        http://localhost:{{ openspecimen_port }}/openspecimen/rest/ng/config-settings/app-props
+        | grep -qE '^(200|401)$'
+      register: _rollback_health
+      until: _rollback_health.rc == 0
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Rollback complete
+      ansible.builtin.debug:
+        msg: >-
+          ✓ Rolled back to {{ _restore_path | basename }}
+          (mtime {{ '%Y-%m-%d %H:%M:%S' | strftime(_restore_stat.stat.mtime) }})
+          on {{ inventory_hostname }}.

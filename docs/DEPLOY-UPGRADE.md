@@ -190,45 +190,63 @@ Each timestamped directory holds a complete snapshot:
 
 ## Day-2: Rollback
 
-Rollback restores from the timestamped backup created during the last upgrade.
-Target: ≤ 5 minutes.
+Use the `rollback.yml` playbook. It restores the WAR, all three plugin tiers,
+the MySQL connector JAR (when backed up), and the `.release` marker from a
+timestamped backup, then waits for the health check. Target: ≤ 5 minutes.
 
-### 1. SSH into the target node
-
-```bash
-ssh -i ~/.ssh/<deploy-key>.pem ubuntu@<host>
-```
-
-### 2. Identify the backup
+### Roll back to the most recent backup (default)
 
 ```bash
-ls /usr/local/openspecimen/backup/
-# example output: 17052026_093247/
+ansible-playbook -i inventory/customers/<name>/ rollback.yml \
+  -e @secrets/<name>.yml --vault-password-file .vault-pass
 ```
 
-### 3. Stop → restore → start
+### Roll back to a specific timestamped backup
+
+List available backups:
 
 ```bash
-sudo systemctl stop openspecimen
-
-BACKUP=/usr/local/openspecimen/backup/<timestamp>
-TOMCAT=/usr/local/openspecimen/tomcat-as
-PLUGINS=/usr/local/openspecimen/plugins
-
-# Restore WAR
-sudo rm -f  $TOMCAT/webapps/openspecimen.war
-sudo rm -rf $TOMCAT/webapps/openspecimen
-sudo cp $BACKUP/openspecimen.war $TOMCAT/webapps/
-sudo chown openspecimen:openspecimen $TOMCAT/webapps/openspecimen.war
-
-# Restore plugins
-sudo rm -f $PLUGINS/default/*.jar
-sudo cp $BACKUP/plugins/default/*.jar $PLUGINS/default/
-sudo chown openspecimen:openspecimen $PLUGINS/default/*.jar
-
-sudo systemctl start openspecimen
-sudo tail -f $TOMCAT/logs/catalina.out   # watch for "Server startup in"
+ansible -i inventory/customers/<name>/ openspecimen -b \
+  -a "ls /usr/local/openspecimen/backup/"
+# example output: 17052026_093247  18052026_104530  19052026_110042
 ```
+
+Then pass the chosen timestamp:
+
+```bash
+ansible-playbook -i inventory/customers/<name>/ rollback.yml \
+  -e backup_timestamp=17052026_093247 \
+  -e @secrets/<name>.yml --vault-password-file .vault-pass
+```
+
+### Dry run
+
+```bash
+ansible-playbook -i inventory/customers/<name>/ rollback.yml --check
+```
+
+Confirms the requested backup exists and contains a WAR without stopping the
+service or moving any files.
+
+### What gets restored
+
+| Item | Restored from backup |
+|------|---------------------|
+| `openspecimen.war` | Yes — required, playbook fails if missing |
+| `plugins/default/*.jar` | Yes (if present in backup) |
+| `plugins/paid/*.jar` | Yes (if present in backup) |
+| `plugins/zustomer/*.jar` | Yes (if present in backup) |
+| `lib/mysql-connector-*.jar` | Yes (if present in backup) |
+| `/usr/local/openspecimen/.release` | Yes (if present in backup) — keeps the marker consistent with the live version |
+| Database schema | **No** — Liquibase rollback is not modelled. Schema-incompatible downgrades are not supported. |
+| `openspecimen.properties` | **No** — config rollback is out of scope. Re-run `site.yml` with the desired vars if needed. |
+
+### When no backup exists
+
+The playbook fails fast with operator guidance and lists the available
+backups. If all backups have been pruned (`openspecimen_backup_retention`
+reached), use `deploy.yml` with the older release zip instead — there is
+nothing to restore from.
 
 ---
 
