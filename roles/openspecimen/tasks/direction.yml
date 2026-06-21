@@ -1,8 +1,14 @@
 ---
-# Detect deploy/rollback direction from openspecimen_release vs the on-target
-# .release marker. When a downgrade is detected, the rollback flow is invoked
-# automatically (using openspecimen_release as the target_version), then the
-# play ends — site.yml's other roles do not run.
+# Detect what to do based on openspecimen_release vs the on-target .release
+# marker — and on whether the installed plugin JARs match.
+#
+# Outcomes:
+#   rollback  — requested version < installed → restore matching backup, end play
+#   no-op     — requested version == installed AND every paid + customer plugin
+#               JAR is present at the matching version on disk → end play
+#               (override with -e force_deploy=true)
+#   deploy    — fresh install, upgrade, or same-version run with a missing/new
+#               plugin → continue to the rest of the play
 #
 # Called as the FIRST pre_task from site.yml and deploy.yml.
 
@@ -65,3 +71,85 @@
 - name: End play after rollback (skip deploy roles)
   ansible.builtin.meta: end_play
   when: _direction.stdout == 'rollback'
+
+# ── Skip-if-current — same-version re-deploy with matching plugin JARs ───────
+# When the requested version equals the installed version AND every paid +
+# customer plugin already has a matching JAR on disk, skip the rest of the play.
+# Override with: -e force_deploy=true   (re-runs the deploy even when current)
+
+- name: Compute expected plugin version suffix
+  ansible.builtin.set_fact:
+    _expected_plugin_version: "{{ openspecimen_release | regex_replace('^openspecimen_', '') }}"
+  when:
+    - _direction.stdout == 'deploy'
+    - _installed_release == openspecimen_release
+    - not (force_deploy | default(false) | bool)
+
+- name: Probe installed paid plugin JARs
+  ansible.builtin.find:
+    paths:    "{{ openspecimen_plugin_dir }}/paid"
+    patterns: "{{ item }}-{{ _expected_plugin_version }}.jar"
+  loop: "{{ openspecimen_paid_plugins | default([]) }}"
+  register: _installed_paid_jars
+  when:
+    - _direction.stdout == 'deploy'
+    - _installed_release == openspecimen_release
+    - not (force_deploy | default(false) | bool)
+
+- name: Probe installed customer plugin JARs
+  ansible.builtin.find:
+    paths:    "{{ openspecimen_plugin_dir }}/zustomer"
+    patterns: "{{ item }}-{{ _expected_plugin_version }}.jar"
+  loop: "{{ openspecimen_customer_plugins | default([]) }}"
+  register: _installed_customer_jars
+  when:
+    - _direction.stdout == 'deploy'
+    - _installed_release == openspecimen_release
+    - not (force_deploy | default(false) | bool)
+
+- name: Decide whether everything is already current
+  ansible.builtin.set_fact:
+    _all_paid_current: >-
+      {{ (_installed_paid_jars.results | default([]) | selectattr('matched', 'eq', 0) | list | length) == 0 }}
+    _all_customer_current: >-
+      {{ (_installed_customer_jars.results | default([]) | selectattr('matched', 'eq', 0) | list | length) == 0 }}
+  when:
+    - _direction.stdout == 'deploy'
+    - _installed_release == openspecimen_release
+    - not (force_deploy | default(false) | bool)
+
+- name: Show no-op summary
+  ansible.builtin.debug:
+    msg:
+      - "✓ Already at openspecimen_release={{ openspecimen_release }} with all plugins matching."
+      - "  paid_plugins    : {{ openspecimen_paid_plugins | default([]) }}"
+      - "  customer_plugins: {{ openspecimen_customer_plugins | default([]) }}"
+      - "  Skipping the deploy. Pass -e force_deploy=true to override."
+  when:
+    - _direction.stdout == 'deploy'
+    - _installed_release == openspecimen_release
+    - not (force_deploy | default(false) | bool)
+    - _all_paid_current | default(false)
+    - _all_customer_current | default(false)
+
+- name: End play when nothing to deploy
+  ansible.builtin.meta: end_play
+  when:
+    - _direction.stdout == 'deploy'
+    - _installed_release == openspecimen_release
+    - not (force_deploy | default(false) | bool)
+    - _all_paid_current | default(false)
+    - _all_customer_current | default(false)
+
+- name: Announce why deploy will continue (mismatched plugins) on a same-version run
+  ansible.builtin.debug:
+    msg: >-
+      WAR is already at {{ openspecimen_release }} but one or more plugins differ —
+      missing paid: {{ (_installed_paid_jars.results | default([]) | selectattr('matched', 'eq', 0) | map(attribute='item') | list) }},
+      missing customer: {{ (_installed_customer_jars.results | default([]) | selectattr('matched', 'eq', 0) | map(attribute='item') | list) }}.
+      Continuing with deploy to install the missing plugins.
+  when:
+    - _direction.stdout == 'deploy'
+    - _installed_release == openspecimen_release
+    - not (force_deploy | default(false) | bool)
+    - not (_all_paid_current | default(true) and _all_customer_current | default(true))
