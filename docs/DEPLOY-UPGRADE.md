@@ -237,9 +237,54 @@ service or moving any files.
 | `plugins/paid/*.jar` | Yes (if present in backup) |
 | `plugins/zustomer/*.jar` | Yes (if present in backup) |
 | `lib/mysql-connector-*.jar` | Yes (if present in backup) |
+| `conf/openspecimen.properties` | Yes (if present in backup) — restores the exact config the old WAR ran with |
+| `bin/setenv.sh` (JVM heap) | Yes (if present in backup) |
+| `conf/context.xml` (JDBC pool) | Yes (if present in backup) |
 | `/usr/local/openspecimen/.release` | Yes (if present in backup) — keeps the marker consistent with the live version |
-| Database schema | **No** — Liquibase rollback is not modelled. Schema-incompatible downgrades are not supported. |
-| `openspecimen.properties` | **No** — config rollback is out of scope. Re-run `site.yml` with the desired vars if needed. |
+| Database schema | **No** — Liquibase rollback is not modelled. See "Schema-downgrade safeguard" below. |
+
+No separate `site.yml` run is needed for config — `rollback.yml` restores the
+exact config snapshot taken at the time of the previous deploy.
+
+### Schema-downgrade safeguard
+
+Before stopping the service, the playbook queries Liquibase's
+`DATABASECHANGELOG` table for changesets applied after the backup's mtime.
+If any new migrations exist, the rollback **halts** with diagnostics:
+
+```
+✗ Schema-incompatible downgrade detected.
+
+  Customer:        <name>
+  Live release:    openspecimen_v12.2.RC12
+  Backup release:  openspecimen_v12.1.RC8
+  Backup mtime:    2026-05-04 09:42:12
+  New migrations:  47 row(s) in DATABASECHANGELOG since backup
+
+  What to check (list the offending changesets):
+    mysql ... -e "SELECT ID, AUTHOR, FILENAME, DATEEXECUTED
+                  FROM DATABASECHANGELOG
+                  WHERE DATEEXECUTED > FROM_UNIXTIME(<backup_mtime>)
+                  ORDER BY DATEEXECUTED ASC;"
+
+  How to fix (pick one):
+    1. Use a MORE RECENT backup that postdates the new migrations.
+    2. Restore the database from an RDS snapshot before the backup time,
+       then re-run rollback.
+    3. Override (only if schema is known safe): -e allow_downgrade=true
+```
+
+This protects against rolling the WAR back to a version that doesn't know
+about columns/tables the newer Liquibase migrations added — a class of failure
+that's silent at startup but blows up at first user request.
+
+To override after manual schema fix or a confirmed-safe downgrade:
+
+```bash
+ansible-playbook -i inventory/customers/<name>/ rollback.yml \
+  -e allow_downgrade=true \
+  -e @secrets/<name>.yml --vault-password-file .vault-pass
+```
 
 ### When no backup exists
 
