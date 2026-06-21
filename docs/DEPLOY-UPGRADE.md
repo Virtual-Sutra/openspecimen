@@ -11,7 +11,12 @@ target node to determine what is currently installed, then compare against the
 requested `openspecimen_release` using natural version sort (`sort -V`):
 
 - **Marker absent** → fresh install (all five roles run in order)
-- **Marker present, same version** → re-deploy (idempotent run)
+- **Marker present, same version** AND every paid + customer plugin JAR matches the
+  requested version → **no-op** (play ends without touching the target). Override with
+  `-e force_deploy=true` to re-run regardless.
+- **Marker present, same version** but a plugin in the inventory has no matching JAR
+  on disk → deploy continues to install just the missing plugins. WAR redeploys happen
+  too — the upgrade flow doesn't differentiate between WAR-changed and plugin-changed.
 - **Marker present, requested > installed** → upgrade (backup → deploy → restart)
 - **Marker present, requested < installed** → automatic rollback (see "Rollback" below) —
   the requested version's backup is restored and the play ends. No separate job needed.
