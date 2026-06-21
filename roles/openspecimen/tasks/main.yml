@@ -667,3 +667,22 @@
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
     mode: '0644'
+
+# Explicit success flag written ONLY here, as the absolute last step of the
+# deploy. The skip-if-current logic in roles/openspecimen/tasks/direction.yml
+# requires this file to match the requested release before it will short-circuit
+# a re-deploy. If a previous run failed before this point — even partway through
+# WAR/plugin extraction — the file is stale and the next run proceeds with a
+# full deploy without needing -e force_deploy=true.
+- name: Record successful deploy
+  ansible.builtin.copy:
+    content: |
+      release: {{ openspecimen_release }}
+      paid_plugins: {{ openspecimen_paid_plugins | default([]) | to_json }}
+      customer_plugins: {{ openspecimen_customer_plugins | default([]) | to_json }}
+      timestamp: {{ ansible_date_time.iso8601 | default('') }}
+      install_type: {{ openspecimen_install_type | default('unknown') }}
+    dest: "{{ openspecimen_deploy_success_marker }}"
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0644'

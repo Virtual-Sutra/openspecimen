@@ -49,6 +49,13 @@ openspecimen_plugin_dir:    /usr/local/openspecimen/plugins
 openspecimen_backup_dir:    /usr/local/openspecimen/backup
 openspecimen_release_marker: /usr/local/openspecimen/.release
 
+# Written ONLY at the very last task of a successful deploy. Read by
+# roles/openspecimen/tasks/direction.yml — the skip-if-current shortcut requires
+# this file to match the requested release. If the previous deploy failed before
+# reaching the end, the file is stale and the next run will redeploy without
+# needing -e force_deploy=true.
+openspecimen_deploy_success_marker: /usr/local/openspecimen/.deploy_success
+
 # Number of timestamped backup directories under openspecimen_backup_dir to keep.
 # Older backups are pruned at the end of every deploy. Override per customer in
 # inventory/host_vars/<customer>.yml when you need a longer retention window.
