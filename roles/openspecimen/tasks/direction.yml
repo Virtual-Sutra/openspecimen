@@ -1,0 +1,67 @@
+---
+# Detect deploy/rollback direction from openspecimen_release vs the on-target
+# .release marker. When a downgrade is detected, the rollback flow is invoked
+# automatically (using openspecimen_release as the target_version), then the
+# play ends — site.yml's other roles do not run.
+#
+# Called as the FIRST pre_task from site.yml and deploy.yml.
+
+- name: Validate openspecimen_release is set (required for direction detection)
+  ansible.builtin.fail:
+    msg: |
+      ✗ openspecimen_release is not set.
+
+      What to do:
+        Pass at run time:  -e openspecimen_release=openspecimen_v12.2.RC12
+        From Jenkins:      select RELEASE_FILE in the deploy job.
+  when: not (openspecimen_release | default('') | trim)
+
+- name: Read installed version marker on target
+  ansible.builtin.slurp:
+    src: "{{ openspecimen_release_marker }}"
+  register: _direction_marker
+  failed_when: false
+  changed_when: false
+
+- name: Set installed release fact
+  ansible.builtin.set_fact:
+    _installed_release: >-
+      {{ (_direction_marker.content | b64decode | trim)
+         if _direction_marker.content is defined else '' }}
+
+# Use sort -V (natural version sort) so RC12 > RC8 sorts correctly.
+- name: Detect direction (deploy / rollback)
+  ansible.builtin.shell: |
+    INSTALLED="{{ _installed_release }}"
+    REQUESTED="{{ openspecimen_release }}"
+    if [ -z "$INSTALLED" ] || [ "$INSTALLED" = "$REQUESTED" ]; then
+      echo deploy
+    elif [ "$(printf '%s\n%s\n' "$INSTALLED" "$REQUESTED" | sort -V | head -1)" = "$REQUESTED" ]; then
+      echo rollback
+    else
+      echo deploy
+    fi
+  register: _direction
+  changed_when: false
+
+- name: Announce detected direction
+  ansible.builtin.debug:
+    msg: >-
+      {% if _direction.stdout == 'rollback' %}
+      ⤺ Downgrade detected: installed {{ _installed_release }} → requested {{ openspecimen_release }}.
+      Switching to ROLLBACK flow — will restore from the backup whose .release matches {{ openspecimen_release }}.
+      {% elif _installed_release %}
+      → Deploy: installed {{ _installed_release }} → requested {{ openspecimen_release }}.
+      {% else %}
+      → Fresh install: requested {{ openspecimen_release }}.
+      {% endif %}
+
+- name: Run rollback flow when downgrade detected
+  ansible.builtin.include_tasks: rollback.yml
+  vars:
+    target_version: "{{ openspecimen_release }}"
+  when: _direction.stdout == 'rollback'
+
+- name: End play after rollback (skip deploy roles)
+  ansible.builtin.meta: end_play
+  when: _direction.stdout == 'rollback'

@@ -6,16 +6,23 @@ Day-1 fresh install, Day-2 upgrade, and rollback procedures for OpenSpecimen.
 
 ## How version detection works
 
-The roles use the marker file `/usr/local/openspecimen/.release` on the target
-node to determine what is currently installed:
+The playbooks use the marker file `/usr/local/openspecimen/.release` on the
+target node to determine what is currently installed, then compare against the
+requested `openspecimen_release` using natural version sort (`sort -V`):
 
-- **File absent** → fresh install (all five roles run in order)
-- **File present, same version** → no-op (idempotent run)
-- **File present, lower version** → upgrade (backup → deploy → restart)
-- **File present, higher version** → downgrade — **blocked** with a clear error
+- **Marker absent** → fresh install (all five roles run in order)
+- **Marker present, same version** → re-deploy (idempotent run)
+- **Marker present, requested > installed** → upgrade (backup → deploy → restart)
+- **Marker present, requested < installed** → automatic rollback (see "Rollback" below) —
+  the requested version's backup is restored and the play ends. No separate job needed.
 
-`openspecimen_release` is always supplied at run time via `-e openspecimen_release=<name>`.
-It is **not** stored in inventory `group_vars`.
+`openspecimen_release` is always supplied at run time via
+`-e openspecimen_release=<name>`. It is **not** stored in inventory `group_vars`.
+
+Direction detection runs as the **first** pre_task in both `site.yml` and
+`deploy.yml` — `roles/openspecimen/tasks/direction.yml`. When a downgrade is
+detected, the play dispatches to `tasks_from: rollback` (target_version =
+requested release) and ends; the remaining roles never run.
 
 ---
 
@@ -190,32 +197,56 @@ Each timestamped directory holds a complete snapshot:
 
 ## Day-2: Rollback
 
-Use the `rollback.yml` playbook. It restores the WAR, all three plugin tiers,
-the MySQL connector JAR (when backed up), and the `.release` marker from a
-timestamped backup, then waits for the health check. Target: ≤ 5 minutes.
+Rollback has two paths — both backed by the same `roles/openspecimen/tasks/rollback.yml`:
 
-### Roll back to the most recent backup (default)
+### A. Automatic (via deploy job — recommended)
+
+Just pick a lower release in `site.yml` / `deploy.yml` (or in the Jenkins
+deploy job). Direction detection notices the requested version is older than
+what's installed, finds the backup whose `.release` matches the request,
+runs the rollback, and ends the play. **No separate rollback job or playbook
+invocation required.**
+
+```bash
+# Installed: openspecimen_v12.2.RC12, want to go back to RC8
+ansible-playbook -i inventory/customers/<name>/ site.yml \
+  -e openspecimen_release=openspecimen_v12.2.RC8 \
+  -e @secrets/<name>.yml --vault-password-file .vault-pass
+```
+
+If no backup of the requested version exists, the play fails with a list of
+available backups and the operator can either pick a version that does have
+one or override with `-e allow_downgrade=true`.
+
+### B. Explicit — direct rollback.yml invocation
+
+Use this when you want to roll back to a specific backup directory (or the
+most recent one) rather than a specific version.
+
+**Most recent backup (default):**
 
 ```bash
 ansible-playbook -i inventory/customers/<name>/ rollback.yml \
   -e @secrets/<name>.yml --vault-password-file .vault-pass
 ```
 
-### Roll back to a specific timestamped backup
-
-List available backups:
+**Specific timestamped backup** (list first, then pass):
 
 ```bash
 ansible -i inventory/customers/<name>/ openspecimen -b \
   -a "ls /usr/local/openspecimen/backup/"
 # example output: 17052026_093247  18052026_104530  19052026_110042
+
+ansible-playbook -i inventory/customers/<name>/ rollback.yml \
+  -e backup_timestamp=17052026_093247 \
+  -e @secrets/<name>.yml --vault-password-file .vault-pass
 ```
 
-Then pass the chosen timestamp:
+**Specific OpenSpecimen version** (let the playbook locate the matching backup):
 
 ```bash
 ansible-playbook -i inventory/customers/<name>/ rollback.yml \
-  -e backup_timestamp=17052026_093247 \
+  -e target_version=openspecimen_v12.1.RC8 \
   -e @secrets/<name>.yml --vault-password-file .vault-pass
 ```
 
