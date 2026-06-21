@@ -682,7 +682,7 @@
       customer_plugins: {{ openspecimen_customer_plugins | default([]) | to_json }}
       timestamp: {{ ansible_date_time.iso8601 | default('') }}
       install_type: {{ openspecimen_install_type | default('unknown') }}
-    dest: "{{ openspecimen_deploy_success_marker }}"
+    dest: "{{ openspecimen_deploy_success_marker | default('/usr/local/openspecimen/.deploy_success') }}"
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
     mode: '0644'

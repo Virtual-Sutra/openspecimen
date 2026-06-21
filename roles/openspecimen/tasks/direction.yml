@@ -82,9 +82,12 @@
 #   3. Every paid + customer plugin has a matching JAR on disk
 # Override with: -e force_deploy=true   (re-runs the deploy even when current)
 
+# Use a default so this also works against inventories that don't yet declare
+# openspecimen_deploy_success_marker (e.g. the ops repo's inventory/group_vars/all.yml
+# until it's synced with ansible-deploy).
 - name: Read deploy-success marker on target
   ansible.builtin.slurp:
-    src: "{{ openspecimen_deploy_success_marker }}"
+    src: "{{ openspecimen_deploy_success_marker | default('/usr/local/openspecimen/.deploy_success') }}"
   register: _success_marker_slurp
   failed_when: false
   changed_when: false
@@ -94,7 +97,7 @@
     _last_deploy_success_release: >-
       {{ (_success_marker_slurp.content | b64decode
           | regex_search('release:\s*(\S+)', '\1') | first)
-         if _success_marker_slurp.content is defined else '' }}
+         if (_success_marker_slurp.content is defined and _success_marker_slurp.content) else '' }}
 
 - name: Compute expected plugin version suffix
   ansible.builtin.set_fact:
