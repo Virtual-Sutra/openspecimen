@@ -8,13 +8,20 @@
 # What it restores:
 #   - openspecimen.war
 #   - plugins/{default,paid,zustomer}/*.jar
-#   - lib/mysql-connector-*.jar  (when present in the backup)
+#   - lib/mysql-connector-*.jar         (when present in the backup)
+#   - config/openspecimen.properties    (when present in the backup)
+#   - config/setenv.sh                  (JVM heap — when present in the backup)
+#   - config/context.xml                (JDBC pool — when present in the backup)
+#   - .release marker                   (so the next deploy doesn't misfire)
+#
+# Safety: halts the rollback when Liquibase has applied changesets after the
+#   backup was created (schema-incompatible downgrade). Override only if you
+#   have verified the schema is safe: -e allow_downgrade=true
 #
 # What it does NOT restore:
-#   - Database schema  — Liquibase rollback is not modelled; downgrades that
-#     require schema changes are not supported by this playbook.
-#   - openspecimen.properties — config drift is the operator's responsibility;
-#     re-run site.yml with the desired vars if you need a config rollback.
+#   - Database schema — Liquibase rollback is not modelled. If a schema
+#     downgrade is required, restore the DB from an RDS snapshot first,
+#     then run rollback.yml.
 #
 # Usage:
 #   # Roll back to the most recent backup (default)
@@ -24,6 +31,11 @@
 #   # Roll back to a specific timestamped backup
 #   ansible-playbook -i inventory/customers/<name>/ rollback.yml \
 #     -e backup_timestamp=15062026_103247 \
+#     -e @secrets/<name>.yml --vault-password-file .vault-pass
+#
+#   # Override schema-downgrade halt (use only when you're sure)
+#   ansible-playbook -i inventory/customers/<name>/ rollback.yml \
+#     -e allow_downgrade=true \
 #     -e @secrets/<name>.yml --vault-password-file .vault-pass
 #
 #   # Dry run (no service stop, no file moves, just confirms the backup exists)
@@ -139,6 +151,93 @@
           - "Backup mtime  : {{ '%Y-%m-%d %H:%M:%S' | strftime(_restore_stat.stat.mtime) }}"
           - "WAR size      : {{ (_war_stat.stat.size / 1024 / 1024) | round(1) }} MB"
 
+    # ── 2b. Schema-incompatible downgrade detection ──────────────────────────
+    # If any Liquibase changesets have been applied AFTER the backup was created,
+    # the live schema has moved forward — rolling the WAR back to an older version
+    # may produce runtime errors or refuse to start. Halt unless explicitly
+    # overridden with -e allow_downgrade=true.
+
+    - name: Read live release marker (for diagnostics)
+      ansible.builtin.slurp:
+        src: "{{ openspecimen_release_marker }}"
+      register: _live_marker_slurp
+      failed_when: false
+      changed_when: false
+
+    - name: Read backup release marker (for diagnostics)
+      ansible.builtin.slurp:
+        src: "{{ _restore_path }}/.release"
+      register: _backup_marker_slurp
+      failed_when: false
+      changed_when: false
+
+    - name: Count Liquibase migrations applied after the backup
+      ansible.builtin.shell: |
+        set -eo pipefail
+        mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' \
+          -h {{ mysql_db_host }} {{ mysql_db_name }} \
+          -sNe "SELECT COUNT(*) FROM DATABASECHANGELOG
+                WHERE DATEEXECUTED > FROM_UNIXTIME({{ _restore_stat.stat.mtime | int }});"
+      args:
+        executable: /bin/bash
+      register: _changelog_count
+      changed_when: false
+      failed_when: false
+      no_log: true
+      when:
+        - db_type | default('mysql') == 'mysql'
+        - mysql_db_password is defined
+
+    - name: Halt rollback if schema has moved forward since backup
+      ansible.builtin.fail:
+        msg: |
+          ✗ Schema-incompatible downgrade detected.
+
+          Customer:           {{ inventory_hostname }}
+          Live release:       {{ (_live_marker_slurp.content | b64decode | trim) if _live_marker_slurp.content is defined else '(no marker)' }}
+          Backup release:     {{ (_backup_marker_slurp.content | b64decode | trim) if _backup_marker_slurp.content is defined else '(no marker)' }}
+          Backup mtime:       {{ '%Y-%m-%d %H:%M:%S' | strftime(_restore_stat.stat.mtime) }}
+          New migrations:     {{ _changelog_count.stdout | trim }} row(s) in DATABASECHANGELOG since backup
+
+          What likely happened:
+            OpenSpecimen applied Liquibase migrations after this backup was created.
+            Rolling back the WAR without rolling back the schema would leave the older
+            application running against a newer schema — risk of runtime errors, missing
+            columns, or refused startup.
+
+          What to check (list the offending changesets):
+            mysql -u {{ mysql_db_user }} -p -h {{ mysql_db_host }} {{ mysql_db_name }} \
+              -e "SELECT ID, AUTHOR, FILENAME, DATEEXECUTED FROM DATABASECHANGELOG \
+                  WHERE DATEEXECUTED > FROM_UNIXTIME({{ _restore_stat.stat.mtime | int }}) \
+                  ORDER BY DATEEXECUTED ASC;"
+
+          How to fix (pick one):
+            1. Use a MORE RECENT backup that postdates the new migrations:
+                 ansible-playbook ... rollback.yml -e backup_timestamp=<newer>
+
+            2. Restore the database from an RDS snapshot taken before
+               {{ '%Y-%m-%d %H:%M:%S' | strftime(_restore_stat.stat.mtime) }}, then re-run rollback.
+
+            3. Override if you have already rolled back the schema by hand,
+               or know the new changesets are compatible with the older WAR:
+                 ansible-playbook ... rollback.yml -e allow_downgrade=true
+      when:
+        - not (allow_downgrade | default(false) | bool)
+        - _changelog_count is defined
+        - _changelog_count.stdout is defined
+        - (_changelog_count.stdout | trim | int) > 0
+
+    - name: Warn that schema-downgrade detection was bypassed
+      ansible.builtin.debug:
+        msg: >-
+          ⚠ allow_downgrade=true — skipping schema-downgrade detection.
+          Proceeding with the rollback. Make sure the database schema is
+          compatible with the target WAR before continuing.
+      when:
+        - allow_downgrade | default(false) | bool
+        - _changelog_count is defined
+        - (_changelog_count.stdout | default('0') | trim | int) > 0
+
     # ── 3. Stop the service ──────────────────────────────────────────────────
 
     - name: Stop openspecimen service
@@ -221,7 +320,45 @@
       register: _restore_connector
       changed_when: _restore_connector.stdout == 'restored'
 
-    # ── 7. Update the release marker to reflect the rolled-back version ─────
+    # ── 7. Restore config files from <backup>/config/ ───────────────────────
+    # Captures openspecimen.properties, setenv.sh, and context.xml as they were
+    # at the time of the backup — no separate site.yml run needed for config.
+
+    - name: Probe backup config files
+      ansible.builtin.stat:
+        path: "{{ _restore_path }}/config/{{ item.name }}"
+      loop:
+        - { name: openspecimen.properties, dest: "{{ tomcat_home }}/conf/openspecimen.properties", mode: '0640' }
+        - { name: setenv.sh,               dest: "{{ tomcat_home }}/bin/setenv.sh",                mode: '0755' }
+        - { name: context.xml,             dest: "{{ tomcat_home }}/conf/context.xml",             mode: '0640' }
+      loop_control:
+        label: "{{ item.name }}"
+      register: _backup_config_stat
+      changed_when: false
+
+    - name: Restore config files from backup
+      ansible.builtin.copy:
+        src:        "{{ _restore_path }}/config/{{ item.item.name }}"
+        dest:       "{{ item.item.dest }}"
+        remote_src: true
+        owner:      "{{ tomcat_user }}"
+        group:      "{{ tomcat_user }}"
+        mode:       "{{ item.item.mode }}"
+      loop: "{{ _backup_config_stat.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: item.stat.exists
+
+    - name: Warn when backup has no config snapshot
+      ansible.builtin.debug:
+        msg: >-
+          NOTE: backup {{ _restore_path | basename }} has no config/ subdirectory.
+          The live openspecimen.properties / setenv.sh / context.xml are left in
+          place. If config was changed between this backup and now, re-run
+          site.yml to re-template them from inventory.
+      when: not (_backup_config_stat.results | map(attribute='stat.exists') | select | list | length > 0)
+
+    # ── 8. Update the release marker to reflect the rolled-back version ─────
 
     - name: Probe backed-up release marker (if present)
       ansible.builtin.stat:

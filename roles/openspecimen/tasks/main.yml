@@ -169,12 +169,16 @@
 
 - name: Create backup directory structure
   ansible.builtin.file:
-    path: "{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/plugins/{{ item }}"
+    path: "{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/{{ item }}"
     state: directory
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
     mode: '0755'
-  loop: [default, paid, zustomer]
+  loop:
+    - plugins/default
+    - plugins/paid
+    - plugins/zustomer
+    - config
   when: openspecimen_install_type == 'upgrade'
 
 - name: Backup old WAR
@@ -196,6 +200,57 @@
     ls "$SRC/zustomer/"*.jar 2>/dev/null && mv "$SRC/zustomer/"*.jar "$DEST/zustomer/"  || true
     ls "$SRC/"*.jar          2>/dev/null && mv "$SRC/"*.jar          "$DEST/default/"   || true
   when: openspecimen_install_type == 'upgrade'
+
+# ── Backup config files and .release marker ──────────────────────────────────
+# Captures the *exact* config the OLD WAR was running against, so rollback can
+# restore them as a single unit (no separate site.yml run needed for config).
+
+- name: Probe config files for backup
+  ansible.builtin.stat:
+    path: "{{ item.src }}"
+  loop:
+    - { name: openspecimen.properties, src: "{{ tomcat_home }}/conf/openspecimen.properties" }
+    - { name: setenv.sh,               src: "{{ tomcat_home }}/bin/setenv.sh" }
+    - { name: context.xml,             src: "{{ tomcat_home }}/conf/context.xml" }
+  loop_control:
+    label: "{{ item.name }}"
+  register: _backup_config_probe
+  when: openspecimen_install_type == 'upgrade'
+
+- name: Backup config files that exist
+  ansible.builtin.copy:
+    src:        "{{ item.item.src }}"
+    dest:       "{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/config/{{ item.item.name }}"
+    remote_src: true
+    owner:      "{{ tomcat_user }}"
+    group:      "{{ tomcat_user }}"
+    mode:       '0640'
+  loop: "{{ _backup_config_probe.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name | default('(skipped)') }}"
+  when:
+    - openspecimen_install_type == 'upgrade'
+    - item.stat is defined
+    - item.stat.exists
+
+- name: Probe previous .release marker for backup
+  ansible.builtin.stat:
+    path: "{{ openspecimen_release_marker }}"
+  register: _backup_marker_probe
+  when: openspecimen_install_type == 'upgrade'
+
+- name: Backup previous .release marker
+  ansible.builtin.copy:
+    src:        "{{ openspecimen_release_marker }}"
+    dest:       "{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/.release"
+    remote_src: true
+    owner:      "{{ tomcat_user }}"
+    group:      "{{ tomcat_user }}"
+    mode:       '0644'
+  when:
+    - openspecimen_install_type == 'upgrade'
+    - _backup_marker_probe.stat is defined
+    - _backup_marker_probe.stat.exists
 
 # ── Deploy WAR ────────────────────────────────────────────────────────────────
 
