@@ -12,8 +12,17 @@
   become: true
 
   pre_tasks:
+    # Detect deploy vs rollback direction by comparing openspecimen_release
+    # against the on-target .release marker. On downgrade, the rollback flow
+    # is invoked automatically and the play ends — the roles below do not run.
+    - name: Detect direction (deploy or rollback)
+      ansible.builtin.include_role:
+        name: openspecimen
+        tasks_from: direction
+
     # Verify the release zip and every paid/customer plugin zip exists on the
     # control node before any role runs. Fails fast if anything is missing.
+    # (Only reached on forward / fresh deploys — rollback ended the play.)
     - name: Pre-flight artifact check
       ansible.builtin.include_role:
         name: openspecimen

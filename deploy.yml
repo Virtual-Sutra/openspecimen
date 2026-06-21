@@ -28,6 +28,14 @@
     openspecimen_install_type: "{{ openspecimen_install_type | default('upgrade') }}"
 
   pre_tasks:
+    # Detect deploy vs rollback direction. On downgrade, the rollback flow
+    # is invoked automatically and the play ends — the openspecimen role
+    # below does not run.
+    - name: Detect direction (deploy or rollback)
+      ansible.builtin.include_role:
+        name: openspecimen
+        tasks_from: direction
+
     # Verify the release zip and every paid/customer plugin zip exists on the
     # control node before the openspecimen role runs. Fails fast if missing.
     - name: Pre-flight artifact check
