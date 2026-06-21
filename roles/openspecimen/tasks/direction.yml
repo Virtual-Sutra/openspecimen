@@ -4,11 +4,13 @@
 #
 # Outcomes:
 #   rollback  — requested version < installed → restore matching backup, end play
-#   no-op     — requested version == installed AND every paid + customer plugin
-#               JAR is present at the matching version on disk → end play
+#   no-op     — requested version == installed AND .deploy_success marker shows
+#               the prior deploy reached its very last task AND every paid +
+#               customer plugin JAR is present at the matching version → end play
 #               (override with -e force_deploy=true)
-#   deploy    — fresh install, upgrade, or same-version run with a missing/new
-#               plugin → continue to the rest of the play
+#   deploy    — fresh install, upgrade, same-version run after a failed deploy
+#               (.deploy_success stale), or a missing/new plugin → continue with
+#               the rest of the play
 #
 # Called as the FIRST pre_task from site.yml and deploy.yml.
 
@@ -73,9 +75,26 @@
   when: _direction.stdout == 'rollback'
 
 # ── Skip-if-current — same-version re-deploy with matching plugin JARs ───────
-# When the requested version equals the installed version AND every paid +
-# customer plugin already has a matching JAR on disk, skip the rest of the play.
+# When ALL of the following are true, the play ends without touching the target:
+#   1. Requested version equals the installed .release marker
+#   2. .deploy_success marker exists and references the same version
+#      (proves the prior deploy reached the very last task — no partial state)
+#   3. Every paid + customer plugin has a matching JAR on disk
 # Override with: -e force_deploy=true   (re-runs the deploy even when current)
+
+- name: Read deploy-success marker on target
+  ansible.builtin.slurp:
+    src: "{{ openspecimen_deploy_success_marker }}"
+  register: _success_marker_slurp
+  failed_when: false
+  changed_when: false
+
+- name: Set deploy-success-confirmed fact
+  ansible.builtin.set_fact:
+    _last_deploy_success_release: >-
+      {{ (_success_marker_slurp.content | b64decode
+          | regex_search('release:\s*(\S+)', '\1') | first)
+         if _success_marker_slurp.content is defined else '' }}
 
 - name: Compute expected plugin version suffix
   ansible.builtin.set_fact:
@@ -83,6 +102,7 @@
   when:
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
+    - _last_deploy_success_release == openspecimen_release
     - not (force_deploy | default(false) | bool)
 
 - name: Probe installed paid plugin JARs
@@ -94,6 +114,7 @@
   when:
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
+    - _last_deploy_success_release == openspecimen_release
     - not (force_deploy | default(false) | bool)
 
 - name: Probe installed customer plugin JARs
@@ -105,6 +126,7 @@
   when:
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
+    - _last_deploy_success_release == openspecimen_release
     - not (force_deploy | default(false) | bool)
 
 - name: Decide whether everything is already current
@@ -116,6 +138,7 @@
   when:
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
+    - _last_deploy_success_release == openspecimen_release
     - not (force_deploy | default(false) | bool)
 
 - name: Show no-op summary
@@ -128,6 +151,7 @@
   when:
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
+    - _last_deploy_success_release == openspecimen_release
     - not (force_deploy | default(false) | bool)
     - _all_paid_current | default(false)
     - _all_customer_current | default(false)
@@ -137,6 +161,7 @@
   when:
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
+    - _last_deploy_success_release == openspecimen_release
     - not (force_deploy | default(false) | bool)
     - _all_paid_current | default(false)
     - _all_customer_current | default(false)
@@ -151,5 +176,6 @@
   when:
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
+    - _last_deploy_success_release == openspecimen_release
     - not (force_deploy | default(false) | bool)
     - not (_all_paid_current | default(true) and _all_customer_current | default(true))
