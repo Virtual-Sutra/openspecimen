@@ -1,0 +1,30 @@
+# ── Same-host (local) inventory ──────────────────────────────────────────────
+# Run the deploy ON the OpenSpecimen server itself — the Ansible controller and
+# the target are the same machine, so no SSH is used (ansible_connection=local).
+#
+# Prerequisites on THIS box (it is both controller and target):
+#   - Ansible >= 2.15 and the collections:
+#       sudo pip3 install 'ansible>=2.15'
+#       ansible-galaxy collection install -r requirements.yml
+#   - Python 3 >= 3.9
+#   - A sudo-capable user (the roles use `become` to install packages and write
+#     system config). Add -K to the command below if sudo needs a password.
+#   - Outbound internet (or a local package mirror) so the roles can install
+#     Java, MySQL and Tomcat. On RHEL the `common` role enables EPEL and the
+#     `mysql` role adds the MySQL community repo automatically.
+#
+# Usage (from the repo root, on the box):
+#   ansible-playbook -i inventory/hosts-local.sample site.yml \
+#     -e openspecimen_release=openspecimen_v12.3 \
+#     -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
+#     -e mysql_db_password=<password>
+#
+# Customer variable overrides go in inventory/group_vars/ or are passed via -e.
+# For RDS/Oracle set db_managed=false and the relevant db_* vars (see README).
+# ─────────────────────────────────────────────────────────────────────────────
+
+[openspecimen]
+localhost  ansible_connection=local
+
+[all:vars]
+ansible_python_interpreter = /usr/bin/python3
