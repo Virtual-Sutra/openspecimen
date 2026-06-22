@@ -77,16 +77,12 @@
       when: apache_enabled | default(false)
 
   post_tasks:
-    # Post-deploy health checks (both non-fatal by default, individually gated):
-    #  1. Local — HTTP check on the target's own Tomcat (no DNS / proxy needed).
-    #  2. Public URL — runs after ALL roles (notably apache) so it validates the
-    #     public path once the proxy that serves it is in place.
-    - name: Local health check (post-deploy)
-      ansible.builtin.include_role:
-        name: openspecimen
-        tasks_from: verify-local
-
-    - name: Verify app reachable via public URL (post-deploy)
+    # The primary readiness check is Phase 1 (Tomcat startup) in the openspecimen
+    # role — always runs, local, no DNS needed. This optional public-URL (app_url)
+    # check runs ONLY when openspecimen_verify_app_url is enabled (default false;
+    # turn on once public DNS exists). It runs after ALL roles (notably apache) so
+    # the proxy that serves the URL is in place.
+    - name: Verify app reachable via public URL (opt-in)
       ansible.builtin.include_role:
         name: openspecimen
         tasks_from: verify-public-url
