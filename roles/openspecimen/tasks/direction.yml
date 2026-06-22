@@ -132,12 +132,49 @@
     - _last_deploy_success_release == openspecimen_release
     - not (force_deploy | default(false) | bool)
 
+# Detect orphan JARs — those present on disk but NOT in the current inventory
+# list. The orphan list is consumed twice:
+#   1. Here (same-version re-deploy): forces deploy to continue (no skip-if-
+#      current) so the operator's "remove this plugin" intent is acted on.
+#   2. In main.yml's "Remove orphan plugin JARs" task (any upgrade): deletes
+#      the JARs before the backup mv, so neither the live state nor the backup
+#      retains them.
+# Run on every deploy direction (not gated on skip-if-current conditions) so
+# upgrades-that-also-remove-a-plugin get a clean backup too. Skipped on
+# rollback because rollback restores from backup, not from inventory.
+- name: Detect orphan paid plugin JARs (on disk, not in inventory)
+  ansible.builtin.shell: |
+    expected="{{ openspecimen_paid_plugins | default([]) | join(' ') }}"
+    for jar in {{ openspecimen_plugin_dir }}/paid/*.jar; do
+      [ -f "$jar" ] || continue
+      name=$(basename "$jar" | sed 's/-[^-]*\.jar$//')
+      case " $expected " in *" $name "*) ;; *) echo "$jar" ;; esac
+    done
+  register: _orphan_paid_jars
+  changed_when: false
+  when: _direction.stdout == 'deploy'
+
+- name: Detect orphan customer plugin JARs (on disk, not in inventory)
+  ansible.builtin.shell: |
+    expected="{{ openspecimen_customer_plugins | default([]) | join(' ') }}"
+    for jar in {{ openspecimen_plugin_dir }}/zustomer/*.jar; do
+      [ -f "$jar" ] || continue
+      name=$(basename "$jar" | sed 's/-[^-]*\.jar$//')
+      case " $expected " in *" $name "*) ;; *) echo "$jar" ;; esac
+    done
+  register: _orphan_customer_jars
+  changed_when: false
+  when: _direction.stdout == 'deploy'
+
 - name: Decide whether everything is already current
   ansible.builtin.set_fact:
     _all_paid_current: >-
       {{ (_installed_paid_jars.results | default([]) | selectattr('matched', 'eq', 0) | list | length) == 0 }}
     _all_customer_current: >-
       {{ (_installed_customer_jars.results | default([]) | selectattr('matched', 'eq', 0) | list | length) == 0 }}
+    _no_orphans: >-
+      {{ (_orphan_paid_jars.stdout | default('') | trim) == ''
+         and (_orphan_customer_jars.stdout | default('') | trim) == '' }}
   when:
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
@@ -158,6 +195,7 @@
     - not (force_deploy | default(false) | bool)
     - _all_paid_current | default(false)
     - _all_customer_current | default(false)
+    - _no_orphans | default(false)
 
 - name: End play when nothing to deploy
   ansible.builtin.meta: end_play
@@ -168,17 +206,20 @@
     - not (force_deploy | default(false) | bool)
     - _all_paid_current | default(false)
     - _all_customer_current | default(false)
+    - _no_orphans | default(false)
 
-- name: Announce why deploy will continue (mismatched plugins) on a same-version run
+- name: Announce why deploy will continue (mismatched or orphan plugins) on a same-version run
   ansible.builtin.debug:
     msg: >-
-      WAR is already at {{ openspecimen_release }} but one or more plugins differ —
+      WAR is already at {{ openspecimen_release }} but plugin state differs —
       missing paid: {{ (_installed_paid_jars.results | default([]) | selectattr('matched', 'eq', 0) | map(attribute='item') | list) }},
-      missing customer: {{ (_installed_customer_jars.results | default([]) | selectattr('matched', 'eq', 0) | map(attribute='item') | list) }}.
-      Continuing with deploy to install the missing plugins.
+      missing customer: {{ (_installed_customer_jars.results | default([]) | selectattr('matched', 'eq', 0) | map(attribute='item') | list) }},
+      orphan paid: {{ _orphan_paid_jars.stdout_lines | default([]) }},
+      orphan customer: {{ _orphan_customer_jars.stdout_lines | default([]) }}.
+      Continuing with deploy to converge.
   when:
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
     - _last_deploy_success_release == openspecimen_release
     - not (force_deploy | default(false) | bool)
-    - not (_all_paid_current | default(true) and _all_customer_current | default(true))
+    - not (_all_paid_current | default(true) and _all_customer_current | default(true) and _no_orphans | default(true))

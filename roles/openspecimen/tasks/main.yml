@@ -191,6 +191,19 @@
     fi
   when: openspecimen_install_type == 'upgrade'
 
+# Remove orphan plugin JARs BEFORE the backup mv — without this, the backup
+# would snapshot the orphan and a rollback to that timestamp would resurrect
+# the plugin the operator just removed from inventory.
+# _orphan_paid_jars / _orphan_customer_jars are populated by direction.yml
+# only on same-version re-deploys; on upgrades they are not registered, so
+# the loop iterates an empty list — safe.
+- name: Remove orphan plugin JARs (no longer in inventory) before backup
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ (_orphan_paid_jars.stdout_lines | default([])) + (_orphan_customer_jars.stdout_lines | default([])) }}"
+  when: openspecimen_install_type == 'upgrade'
+
 - name: Backup plugins
   ansible.builtin.shell: |
     SRC="{{ openspecimen_plugin_dir }}"
