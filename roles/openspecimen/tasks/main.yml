@@ -148,6 +148,19 @@
 
 # ── openspecimen.properties ───────────────────────────────────────────────────
 
+# Slurp the pre-template content of openspecimen.properties so the upgrade
+# backup (further below) can write the OLD content — otherwise the template
+# task one line down overwrites the live file before backup runs, and the
+# backup ends up snapshotting the NEW content. Without this, a rollback to
+# this timestamp would not restore the prior config.
+- name: Read current openspecimen.properties for backup (before re-template)
+  ansible.builtin.slurp:
+    src: "{{ tomcat_home }}/conf/openspecimen.properties"
+  register: _openspecimen_properties_pre_template
+  failed_when: false
+  changed_when: false
+  when: openspecimen_install_type == 'upgrade'
+
 - name: Template openspecimen.properties
   ansible.builtin.template:
     src: openspecimen.properties.j2
@@ -266,11 +279,12 @@
 # Captures the *exact* config the OLD WAR was running against, so rollback can
 # restore them as a single unit (no separate site.yml run needed for config).
 
+# openspecimen.properties handled via the slurp+separate-backup pair above.
+# Probe only the files this loop's remote_src backup task actually copies.
 - name: Probe config files for backup
   ansible.builtin.stat:
     path: "{{ item.src }}"
   loop:
-    - { name: openspecimen.properties, src: "{{ tomcat_home }}/conf/openspecimen.properties" }
     - { name: setenv.sh,               src: "{{ tomcat_home }}/bin/setenv.sh" }
     - { name: context.xml,             src: "{{ tomcat_home }}/conf/context.xml" }
   loop_control:
@@ -278,7 +292,25 @@
   register: _backup_config_probe
   when: openspecimen_install_type == 'upgrade'
 
-- name: Backup config files that exist
+# openspecimen.properties is handled separately because the Template task
+# above has already overwritten the live file by this point. Use the slurped
+# pre-template content instead, so the backup snapshots the OLD config.
+- name: Backup openspecimen.properties (pre-template content)
+  ansible.builtin.copy:
+    content: "{{ _openspecimen_properties_pre_template.content | b64decode }}"
+    dest:    "{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/config/openspecimen.properties"
+    owner:   "{{ tomcat_user }}"
+    group:   "{{ tomcat_user }}"
+    mode:    '0640'
+  when:
+    - openspecimen_install_type == 'upgrade'
+    - _openspecimen_properties_pre_template.content is defined
+
+# setenv.sh and context.xml are templated only by the tomcat role (which runs
+# on site.yml fresh installs, not on deploy.yml upgrades). On the upgrade path
+# these files are untouched between the prior deploy and this point, so the
+# live file IS the OLD file — remote_src copy captures the right content.
+- name: Backup config files that exist (setenv.sh, context.xml)
   ansible.builtin.copy:
     src:        "{{ item.item.src }}"
     dest:       "{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/config/{{ item.item.name }}"
