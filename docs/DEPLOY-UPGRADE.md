@@ -37,10 +37,21 @@ requested release) and ends; the remaining roles never run.
 ## Prerequisites
 
 Before deploying:
-- Customer inventory exists under `inventory/customers/<name>/`
+- Customer inventory exists under `inventory/customers/<name>/` (or use
+  `inventory/hosts-ec2.sample` / `inventory/hosts-local.sample`)
 - The release zip is accessible on the Ansible controller
 - The database password is available to pass via `-e` or your CI/CD secrets manager
 - Any paid or customer plugin zips referenced in inventory are placed alongside the release zip
+
+**Host / package prerequisites:**
+- Ansible ≥ 2.15 + collections (`ansible-galaxy collection install -r requirements.yml`)
+  and Python 3 ≥ 3.9 on the target
+- **sudo/root** on the target — the roles use `become` to install packages and write system config
+- **Outbound internet** (or a local mirror) so the roles can install Java, MySQL and
+  Tomcat. On RHEL the `common` role enables **EPEL**; the `mysql` role adds the MySQL
+  community repo
+- Connectivity: SSH key from a controller, **or** run on the box itself with a localhost
+  inventory (`ansible_connection=local`, no SSH) — see `inventory/hosts-local.sample`
 
 ---
 
