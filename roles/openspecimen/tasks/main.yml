@@ -191,6 +191,48 @@
     fi
   when: openspecimen_install_type == 'upgrade'
 
+# Remove orphan plugin JARs BEFORE the backup mv — without this, the backup
+# would snapshot the orphan and a rollback to that timestamp would resurrect
+# the plugin the operator just removed from inventory.
+- name: Remove orphan plugin JARs from live dirs (no longer in inventory)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ (_orphan_paid_jars.stdout_lines | default([])) + (_orphan_customer_jars.stdout_lines | default([])) }}"
+  when: openspecimen_install_type == 'upgrade'
+
+# Also purge the orphan from EXISTING backups under paid/ and zustomer/. The
+# rationale is licensing: paid + customer plugins ride on contractual entitlements,
+# so a lapsed license must not survive in a backup that a future rollback could
+# restore. Scoped strictly to plugins/paid/ and plugins/zustomer/ — plugins/default/
+# (open-source, from the release zip) is left intact, as is the WAR.
+# Matches every version of the orphan plugin (e.g. os-hl7-v12.1.jar,
+# os-hl7-v12.2.RC8.jar) so backups taken under prior releases are also cleaned.
+- name: Purge orphan paid/customer plugin JARs from existing backups (licensing compliance)
+  ansible.builtin.shell: |
+    set -e
+    deleted=0
+    for jar_path in {{ ((_orphan_paid_jars.stdout_lines | default([])) + (_orphan_customer_jars.stdout_lines | default([]))) | map('quote') | join(' ') }}; do
+      name=$(basename "$jar_path" | sed 's/-[^-]*\.jar$//')
+      [ -n "$name" ] || continue
+      while IFS= read -r match; do
+        echo "purging: $match"
+        rm -f "$match"
+        deleted=$((deleted + 1))
+      done < <(find {{ openspecimen_backup_dir }} \
+                 \( -path "*/plugins/paid/${name}-*.jar" \
+                 -o -path "*/plugins/zustomer/${name}-*.jar" \) \
+                 -type f 2>/dev/null)
+    done
+    echo "total purged from backups: $deleted"
+  args:
+    executable: /bin/bash
+  register: _orphan_backup_purge
+  changed_when: _orphan_backup_purge.stdout is search('purging:')
+  when:
+    - openspecimen_install_type == 'upgrade'
+    - ((_orphan_paid_jars.stdout_lines | default([])) + (_orphan_customer_jars.stdout_lines | default([]))) | length > 0
+
 - name: Backup plugins
   ansible.builtin.shell: |
     SRC="{{ openspecimen_plugin_dir }}"
