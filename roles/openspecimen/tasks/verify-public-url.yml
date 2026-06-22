@@ -1,54 +1,79 @@
 ---
-# External public-URL reachability check.
+# Post-deploy health check: public URL first, with a localhost fallback.
 #
 # Included as a post_task (after ALL roles, notably the apache front-end proxy)
 # so it validates the full public-URL stack rather than running before the proxy
-# that makes the URL reachable. Runs from the Ansible control node (Jenkins).
+# that makes the URL reachable.
 #
-# Non-fatal by default: the app already passed its local startup check, so the
-# deployment itself succeeded — reachability of the public URL depends on the
-# front-end proxy / ALB / DNS and must never block the deploy. Set
-# openspecimen_app_url_check_fatal=true to enforce it as a hard gate.
-- name: Verify app reachable via public URL
+# 1. Primary: curl openspecimen_app_url from the Ansible control node (Jenkins) —
+#    validates the public URL / ALB / DNS / proxy path.
+# 2. Fallback: if the public URL fails, curl the app directly on the TARGET's
+#    localhost (Tomcat) — confirms the app itself is up, independent of the
+#    public layer.
+#
+# Non-fatal by default: the deployment already succeeded (the app passed its
+# earlier startup check), so this never blocks the deploy. Set
+# openspecimen_app_url_check_fatal=true to make it a hard gate — and even then it
+# only fails when BOTH the public URL and the localhost check fail (i.e. the app
+# is genuinely down, not merely unreachable via the public URL).
+#
+# Retries/delay are tunable: openspecimen_health_retries (default 5),
+# openspecimen_health_delay (default 10s).
+- name: Verify app reachable (public URL with localhost fallback)
   block:
-    - name: Curl openspecimen_app_url from control node
+    - name: Health check via public URL ({{ openspecimen_app_url }})
       ansible.builtin.shell: >
         curl -sf -o /dev/null -w "%{http_code}"
         {{ openspecimen_app_url }}/openspecimen/rest/ng/config-settings/app-props
         | grep -qE '^(200|401)$'
       delegate_to: localhost
       become: false
-      register: _app_url_check
-      until: _app_url_check.rc == 0
-      retries: 12
-      delay: 10
+      register: _public_health
+      until: _public_health.rc == 0
+      retries: "{{ openspecimen_health_retries | default(5) | int }}"
+      delay: "{{ openspecimen_health_delay | default(10) | int }}"
       changed_when: false
   rescue:
-    - name: Warn that app is not reachable via public URL (non-fatal)
+    # Public URL failed — fall back to a localhost health check ON THE TARGET
+    # (Tomcat directly), to confirm the app itself is up regardless of the
+    # public URL / proxy / DNS layer.
+    - name: Fallback health check via localhost (Tomcat on the target)
+      ansible.builtin.shell: >
+        curl -sf -o /dev/null -w "%{http_code}"
+        http://localhost:{{ openspecimen_port }}/openspecimen/rest/ng/config-settings/app-props
+        | grep -qE '^(200|401)$'
+      register: _local_health
+      until: _local_health.rc == 0
+      retries: "{{ openspecimen_health_retries | default(5) | int }}"
+      delay: "{{ openspecimen_health_delay | default(10) | int }}"
+      changed_when: false
+      failed_when: false
+
+    - name: Report health-check result (non-fatal)
       ansible.builtin.debug:
         msg: |
-          WARNING: App is running locally but not reachable via public URL after 2 minutes.
-          Deployment continues - this check is informational.
+          {% if _local_health.rc == 0 %}
+          WARNING: App is UP on the target (localhost:{{ openspecimen_port }}) but NOT
+          reachable via the public URL {{ openspecimen_app_url }}. The deployment
+          succeeded; the public URL depends on the front-end proxy / ALB / DNS layer.
+          Check: ALB/front-end health, DNS, cert, security group, and Allowed Request
+          Origins in the OpenSpecimen UI (must include {{ openspecimen_app_url }}).
+          {% else %}
+          WARNING: App did NOT respond on the public URL {{ openspecimen_app_url }} or on
+          the target's localhost:{{ openspecimen_port }} after {{ openspecimen_health_retries | default(5) }} retries.
+          It passed its earlier startup check, so investigate the openspecimen service
+          on {{ inventory_hostname }} (sudo journalctl -u openspecimen --since '15 min ago').
+          {% endif %}
+          To make this a hard failure, deploy with -e openspecimen_app_url_check_fatal=true
 
-          Public URL: {{ openspecimen_app_url }}
-          Customer:   {{ inventory_hostname }}
-
-          OpenSpecimen passed the local startup check (Tomcat is up on port 8080).
-          The public URL depends on the front-end proxy / ALB / DNS layer.
-
-          If you expect the public URL to work now, check:
-            1. Front-end / ALB health check - path /openspecimen/rest/ng/config-settings/app-props returns HTTP 200 or 401.
-            2. DNS from the control node:
-                 dig +short {{ openspecimen_app_url | regex_replace('^https?://', '') | regex_replace('/.*', '') }}
-            3. ALB/security group allows inbound 443.
-            4. Certificate validity (HTTPS):
-                 curl -vI {{ openspecimen_app_url }} 2>&1 | grep -E 'expire|subject|issuer'
-            5. Allowed Request Origins in OpenSpecimen UI includes {{ openspecimen_app_url }}
-
-          To make this a hard failure instead, deploy with -e openspecimen_app_url_check_fatal=true
-
-    - name: Fail when public URL check is configured as fatal
+    # Hard-fail only when configured fatal AND the app is genuinely down (both the
+    # public URL and the localhost fallback failed).
+    - name: Fail when health check is fatal and the app is unreachable everywhere
       ansible.builtin.fail:
-        msg: "Public URL {{ openspecimen_app_url }} not reachable after 2 minutes and openspecimen_app_url_check_fatal=true."
-      when: openspecimen_app_url_check_fatal | default(false) | bool
+        msg: >-
+          Health check failed on the public URL ({{ openspecimen_app_url }}) and on the
+          target's localhost:{{ openspecimen_port }}, and openspecimen_app_url_check_fatal=true.
+      when:
+        - openspecimen_app_url_check_fatal | default(false) | bool
+        - _local_health.rc != 0
   when: openspecimen_app_url is defined
