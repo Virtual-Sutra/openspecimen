@@ -25,6 +25,58 @@
     - apache_enable_ssl
   notify: reload apache
 
+# RedHat ships mod_proxy / mod_proxy_http / mod_proxy_ajp / mod_headers in the
+# base httpd package (auto-loaded via conf.modules.d), but mod_ssl is a separate
+# package that is NOT installed by default. Without it, SSLEngine is unknown and
+# `apachectl -t` / startup fail. Install it whenever SSL is terminated here.
+- name: Install mod_ssl (RedHat)
+  ansible.builtin.package:
+    name: mod_ssl
+    state: present
+  when:
+    - ansible_os_family == 'RedHat'
+    - apache_enable_ssl
+  notify: reload apache
+
+# Self-signed cert for internal / test environments with no CA-issued cert.
+# Generated only when missing (creates:) so it never churns or forces a reload
+# on subsequent runs. Must precede the VirtualHost template task below, whose
+# `apachectl -t` validate (and apache startup) load SSLCertificateFile.
+- name: Ensure TLS private key directory exists
+  ansible.builtin.file:
+    path: "{{ apache_ssl_key_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  when:
+    - apache_enable_ssl
+    - apache_ssl_self_signed
+
+- name: Generate self-signed TLS certificate
+  ansible.builtin.command:
+    cmd: >
+      openssl req -x509 -nodes -newkey rsa:2048
+      -keyout {{ apache_ssl_key_file }}
+      -out {{ apache_ssl_cert_file }}
+      -days 3650
+      -subj "/CN={{ apache_server_name }}"
+    creates: "{{ apache_ssl_cert_file }}"
+  when:
+    - apache_enable_ssl
+    - apache_ssl_self_signed
+  notify: reload apache
+
+- name: Restrict self-signed key permissions
+  ansible.builtin.file:
+    path: "{{ apache_ssl_key_file }}"
+    owner: root
+    group: root
+    mode: '0600'
+  when:
+    - apache_enable_ssl
+    - apache_ssl_self_signed
+
 - name: Deploy maintenance page and logo
   ansible.builtin.copy:
     src: "{{ item }}"
