@@ -101,7 +101,7 @@
     mode: '0644'
   args:
     creates: "/tmp/{{ openspecimen_release }}.zip"
-  when: not (_plugins_only_change | default(false))
+  when: not (_plugins_only_change | default(false) or _config_only_change | default(false))
 
 # ── Cache zip contents listing ────────────────────────────────────────────────
 # Listed once here; reused for WAR and plugin extraction below.
@@ -112,7 +112,7 @@
   ansible.builtin.shell: unzip -l /tmp/{{ openspecimen_release }}.zip
   register: _zip_contents
   changed_when: false
-  when: not (_plugins_only_change | default(false))
+  when: not (_plugins_only_change | default(false) or _config_only_change | default(false))
 
 # ── Create required directories ───────────────────────────────────────────────
 # Plugin subdirectory structure matches install.sh:
@@ -170,13 +170,17 @@
     state: stopped
   when: openspecimen_install_type == 'upgrade'
 
-# On plugins-only deploys, deliberately omit plugins/default from the backup
-# tree. Rollback (rollback.yml line 274) wipes a live plugin tier only if the
-# corresponding backup tier exists — an empty plugins/default/ in this backup
-# would cause a future rollback to that timestamp to wipe live default plugins
-# (which are tied to the WAR and aren't changing here). Skipping the directory
-# also makes the `Backup plugins` mv into default/ safely no-op (no dest dir),
-# keeping the live default JARs in place.
+# Per-tier backup directories are conditional so that rollback.yml line 274
+# ("Wipe current plugin tier — only when backup has it") doesn't clobber live
+# state from a fast-path backup that didn't capture that tier:
+#   - plugins-only: skip plugins/default (WAR unchanged → default JARs live and
+#                   correct; an empty default/ in backup would wipe them on
+#                   rollback). Keep paid/zustomer (plugin drift is what's being
+#                   backed up) and config (cheap).
+#   - config-only: skip plugins/default, plugins/paid, plugins/zustomer (all
+#                  unchanged). Keep only config — the openspecimen.properties
+#                  snapshot for rollback.
+#   - full deploy: all four (default, paid, zustomer, config).
 - name: Create backup directory structure
   ansible.builtin.file:
     path: "{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/{{ item }}"
@@ -184,7 +188,12 @@
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
     mode: '0755'
-  loop: "{{ ['plugins/paid', 'plugins/zustomer', 'config'] + (['plugins/default'] if not (_plugins_only_change | default(false)) else []) }}"
+  loop: >-
+    {{
+      ['config']
+      + (['plugins/paid', 'plugins/zustomer'] if not (_config_only_change | default(false)) else [])
+      + (['plugins/default'] if not (_plugins_only_change | default(false) or _config_only_change | default(false)) else [])
+    }}
   when: openspecimen_install_type == 'upgrade'
 
 - name: Backup old WAR
@@ -197,7 +206,7 @@
     fi
   when:
     - openspecimen_install_type == 'upgrade'
-    - not (_plugins_only_change | default(false))
+    - not (_plugins_only_change | default(false) or _config_only_change | default(false))
 
 # Remove orphan plugin JARs BEFORE the backup mv — without this, the backup
 # would snapshot the orphan and a rollback to that timestamp would resurrect
@@ -249,7 +258,9 @@
     ls "$SRC/paid/"*.jar     2>/dev/null && mv "$SRC/paid/"*.jar     "$DEST/paid/"      || true
     ls "$SRC/zustomer/"*.jar 2>/dev/null && mv "$SRC/zustomer/"*.jar "$DEST/zustomer/"  || true
     ls "$SRC/"*.jar          2>/dev/null && mv "$SRC/"*.jar          "$DEST/default/"   || true
-  when: openspecimen_install_type == 'upgrade'
+  when:
+    - openspecimen_install_type == 'upgrade'
+    - not (_config_only_change | default(false))
 
 # ── Backup config files and .release marker ──────────────────────────────────
 # Captures the *exact* config the OLD WAR was running against, so rollback can
@@ -347,7 +358,7 @@
 
             3. Verify Tomcat is installed and the webapps dir exists:
                  ls -la {{ tomcat_home }}/webapps/
-  when: not (_plugins_only_change | default(false))
+  when: not (_plugins_only_change | default(false) or _config_only_change | default(false))
 
 - name: Set WAR ownership
   ansible.builtin.file:
@@ -355,7 +366,7 @@
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
     mode: '0644'
-  when: not (_plugins_only_change | default(false))
+  when: not (_plugins_only_change | default(false) or _config_only_change | default(false))
 
 # ── Deploy plugins ────────────────────────────────────────────────────────────
 
@@ -396,20 +407,25 @@
             2. Confirm with the build/release team this zip is the correct artifact.
   # Default plugins are tied to the WAR release — on plugins-only deploys the
   # WAR is unchanged so the existing default JARs are already correct.
-  when: not (_plugins_only_change | default(false))
+  when: not (_plugins_only_change | default(false) or _config_only_change | default(false))
 
 # ── Deploy additional plugin zips ─────────────────────────────────────────────
 # Pre-flight already searched recursively under openspecimen_builds_dir and
 # stored results in _preflight_paid_find / _preflight_customer_find.
 # Reuse those here — no second find needed.
 
+# Paid + customer plugin upload/extract: skipped on config-only fast path
+# (no plugin drift — extracting them again would just rewrite identical JARs).
+# Still runs on plugins-only and full deploy.
 - name: Upload paid plugin zips to target
   ansible.builtin.copy:
     src:  "{{ item.files[0].path }}"
     dest: "/tmp/{{ item.files[0].path | basename }}"
     mode: '0644'
   loop: "{{ _preflight_paid_find.results }}"
-  when: item.matched > 0
+  when:
+    - item.matched > 0
+    - not (_config_only_change | default(false))
 
 - name: Extract JARs from paid plugin zips
   ansible.builtin.shell: |
@@ -424,7 +440,9 @@
   args:
     executable: /bin/bash
   loop: "{{ _preflight_paid_find.results }}"
-  when: item.matched > 0
+  when:
+    - item.matched > 0
+    - not (_config_only_change | default(false))
   register: _paid_plugin_extract
   changed_when: _paid_plugin_extract.stdout is search('inflating:|extracting:')
   failed_when: _paid_plugin_extract.rc | default(0) != 0
@@ -453,7 +471,9 @@
     path: "/tmp/{{ item.files[0].path | basename }}"
     state: absent
   loop: "{{ _preflight_paid_find.results }}"
-  when: item.matched > 0
+  when:
+    - item.matched > 0
+    - not (_config_only_change | default(false))
 
 - name: Upload customer plugin zips to target
   ansible.builtin.copy:
@@ -461,7 +481,9 @@
     dest: "/tmp/{{ item.files[0].path | basename }}"
     mode: '0644'
   loop: "{{ _preflight_customer_find.results }}"
-  when: item.matched > 0
+  when:
+    - item.matched > 0
+    - not (_config_only_change | default(false))
 
 - name: Extract JARs from customer plugin zips
   ansible.builtin.shell: |
@@ -476,7 +498,9 @@
   args:
     executable: /bin/bash
   loop: "{{ _preflight_customer_find.results }}"
-  when: item.matched > 0
+  when:
+    - item.matched > 0
+    - not (_config_only_change | default(false))
   register: _customer_plugin_extract
   changed_when: _customer_plugin_extract.stdout is search('inflating:|extracting:')
   failed_when: _customer_plugin_extract.rc | default(0) != 0
@@ -505,7 +529,9 @@
     path: "/tmp/{{ item.files[0].path | basename }}"
     state: absent
   loop: "{{ _preflight_customer_find.results }}"
-  when: item.matched > 0
+  when:
+    - item.matched > 0
+    - not (_config_only_change | default(false))
 
 - name: Set plugin ownership
   ansible.builtin.file:

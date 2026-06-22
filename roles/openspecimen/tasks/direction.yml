@@ -166,7 +166,7 @@
   changed_when: false
   when: _direction.stdout == 'deploy'
 
-- name: Decide whether everything is already current
+- name: Decide whether plugins are already current
   ansible.builtin.set_fact:
     _all_paid_current: >-
       {{ (_installed_paid_jars.results | default([]) | selectattr('matched', 'eq', 0) | list | length) == 0 }}
@@ -181,12 +181,69 @@
     - _last_deploy_success_release == openspecimen_release
     - not (force_deploy | default(false) | bool)
 
-# Plugins-only optimisation. When the WAR is already at the requested release
-# AND the last deploy succeeded AND the ONLY drift is the plugin list (missing
-# or orphan), we can skip every WAR-related step (zip upload, WAR backup, WAR
-# extraction, default-plugin extraction) and run only the plugin tasks +
-# service restart. Cuts a fresh-zip-upload-and-extract redeploy down to a
-# few-MB plugin extraction.
+# ── Config drift detection ────────────────────────────────────────────────────
+# Probe-render openspecimen.properties to a temp location and SHA-256 compare
+# with the live file. Tells us whether re-templating would actually change
+# anything — without writing to the live file yet. The role's main.yml runs
+# the real template task later; if config differs, main.yml's task writes the
+# new content and the config-only fast path skips every WAR/plugin step.
+- name: Render openspecimen.properties to probe location
+  ansible.builtin.template:
+    src: openspecimen.properties.j2
+    dest: /tmp/.openspecimen.properties.probe
+    mode: '0640'
+  changed_when: false
+  when:
+    - _direction.stdout == 'deploy'
+    - _installed_release == openspecimen_release
+    - _last_deploy_success_release == openspecimen_release
+    - not (force_deploy | default(false) | bool)
+
+- name: Compute live vs probe config checksums
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    checksum_algorithm: sha256
+  loop:
+    - "{{ tomcat_home }}/conf/openspecimen.properties"
+    - /tmp/.openspecimen.properties.probe
+  loop_control:
+    label: "{{ item | basename }}"
+  register: _config_stat
+  changed_when: false
+  when:
+    - _direction.stdout == 'deploy'
+    - _installed_release == openspecimen_release
+    - _last_deploy_success_release == openspecimen_release
+    - not (force_deploy | default(false) | bool)
+
+- name: Remove config probe
+  ansible.builtin.file:
+    path: /tmp/.openspecimen.properties.probe
+    state: absent
+  changed_when: false
+  when:
+    - _direction.stdout == 'deploy'
+    - _installed_release == openspecimen_release
+    - _last_deploy_success_release == openspecimen_release
+    - not (force_deploy | default(false) | bool)
+
+- name: Set config-drift fact
+  ansible.builtin.set_fact:
+    _config_changed: >-
+      {{ ((_config_stat.results | first).stat.checksum | default('')) !=
+         ((_config_stat.results | last).stat.checksum | default('')) }}
+  when:
+    - _direction.stdout == 'deploy'
+    - _installed_release == openspecimen_release
+    - _last_deploy_success_release == openspecimen_release
+    - not (force_deploy | default(false) | bool)
+
+# ── Fast-path selection ──────────────────────────────────────────────────────
+# Plugins-only and config-only are independent — both can be true on the same
+# run (plugin list AND properties both changed), and both share the
+# "WAR is already at requested release, skip the WAR redeploy" optimisation.
+# The combined `_skip_war_redeploy` is what main.yml gates WAR/default-plugin
+# tasks on.
 - name: Detect plugins-only change
   ansible.builtin.set_fact:
     _plugins_only_change: >-
@@ -203,6 +260,21 @@
     - _last_deploy_success_release == openspecimen_release
     - not (force_deploy | default(false) | bool)
 
+- name: Detect config-only change
+  ansible.builtin.set_fact:
+    _config_only_change: >-
+      {{ _direction.stdout == 'deploy'
+         and _installed_release == openspecimen_release
+         and _last_deploy_success_release == openspecimen_release
+         and not (force_deploy | default(false) | bool)
+         and (_config_changed | default(false))
+         and not (_plugins_only_change | default(false)) }}
+  when:
+    - _direction.stdout == 'deploy'
+    - _installed_release == openspecimen_release
+    - _last_deploy_success_release == openspecimen_release
+    - not (force_deploy | default(false) | bool)
+
 - name: Announce plugins-only deploy
   ansible.builtin.debug:
     msg: >-
@@ -210,12 +282,25 @@
       Skipping zip upload, WAR backup, WAR extraction, and default-plugin
       extraction. Running plugin backup + orphan cleanup + paid/customer
       plugin install + Tomcat restart only.
+      {% if _config_changed | default(false) %}
+      Config also drifted — re-templating openspecimen.properties as part of the same run.
+      {% endif %}
   when: _plugins_only_change | default(false)
+
+- name: Announce config-only deploy
+  ansible.builtin.debug:
+    msg: >-
+      ⚡ Config-only deploy — WAR is already at {{ openspecimen_release }} and
+      every plugin matches inventory. Skipping zip upload, WAR backup, WAR
+      extraction, default-plugin extraction, and ALL paid/customer plugin
+      uploads + extractions. Re-templating openspecimen.properties and
+      restarting Tomcat only.
+  when: _config_only_change | default(false)
 
 - name: Show no-op summary
   ansible.builtin.debug:
     msg:
-      - "✓ Already at openspecimen_release={{ openspecimen_release }} with all plugins matching."
+      - "✓ Already at openspecimen_release={{ openspecimen_release }} with all plugins matching and config unchanged."
       - "  paid_plugins    : {{ openspecimen_paid_plugins | default([]) }}"
       - "  customer_plugins: {{ openspecimen_customer_plugins | default([]) }}"
       - "  Skipping the deploy. Pass -e force_deploy=true to override."
@@ -227,6 +312,7 @@
     - _all_paid_current | default(false)
     - _all_customer_current | default(false)
     - _no_orphans | default(false)
+    - not (_config_changed | default(false))
 
 - name: End play when nothing to deploy
   ansible.builtin.meta: end_play
@@ -238,6 +324,7 @@
     - _all_paid_current | default(false)
     - _all_customer_current | default(false)
     - _no_orphans | default(false)
+    - not (_config_changed | default(false))
 
 - name: Announce why deploy will continue (mismatched or orphan plugins) on a same-version run
   ansible.builtin.debug:
