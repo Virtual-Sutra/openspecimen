@@ -153,6 +153,33 @@ directory written by the `update-config.sh` operator script, not a snapshot.
 
 ---
 
+## apache role
+
+Optional TLS-terminating reverse proxy in front of Tomcat. The role is **skipped unless
+`apache_enabled` is true** (`site.yml` runs it only `when: apache_enabled`). On the AWS/ALB path
+leave it disabled — the ALB terminates TLS instead.
+
+| Variable | Default | What it sets |
+|----------|---------|--------------|
+| `apache_enabled` | `true` when `openspecimen_app_url` is set, else `false` | Whether the role runs. Override explicitly, or via `-e apache_enabled=...` (Jenkins job / playbook), which takes precedence over inventory. |
+| `apache_proxy_protocol` | `http` | Backend to Tomcat: `http` (`http://localhost:<openspecimen_port>/openspecimen/`, avoids Ghostcat) or `ajp` (`ajp://127.0.0.1:<apache_ajp_port>/openspecimen/`). |
+| `apache_ajp_port` | `8009` | Tomcat AJP connector port (used when `apache_proxy_protocol: ajp`). The tomcat role binds this connector to `127.0.0.1`. |
+| `apache_enable_ssl` | `false` | Terminate TLS at Apache (adds an 80→443 redirect + HSTS). Requires the cert/key below. |
+| `apache_ssl_self_signed` | `false` | When SSL is on and no cert exists, generate a self-signed cert at the paths below (internal/test only — browsers warn). |
+| `apache_ssl_cert_file` / `apache_ssl_key_file` | `""` | Cert/key paths. Stage a CA-issued cert here, or let `apache_ssl_self_signed` create one. |
+| `apache_server_name` | derived from `openspecimen_app_url` (scheme/path stripped), else host FQDN | VirtualHost `ServerName`. |
+| `apache_http_port` / `apache_https_port` | `80` / `443` | Listen ports. |
+| `apache_security_headers` | `true` | Emit X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy (and HSTS when SSL). |
+
+> **RHEL note:** `mod_proxy*` / `mod_headers` are auto-loaded from the base `httpd` package, but
+> `mod_ssl` is a separate package — the role installs it automatically when `apache_enable_ssl` is set.
+
+> **ALB caveat:** because `apache_enabled` derives from `openspecimen_app_url`, setting the public
+> URL (incl. via the Jenkins `APP_URL` parameter) auto-enables Apache. ALB-fronted hosts that do not
+> want a local Apache must set `apache_enabled: false` in inventory.
+
+---
+
 ## Quick change guide
 
 For the three most common post-deploy changes without a full Ansible re-run, use:

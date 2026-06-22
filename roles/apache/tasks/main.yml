@@ -25,6 +25,19 @@
     - apache_enable_ssl
   notify: reload apache
 
+# RedHat ships mod_proxy / mod_proxy_http / mod_proxy_ajp / mod_headers in the
+# base httpd package (auto-loaded via conf.modules.d), but mod_ssl is a separate
+# package that is NOT installed by default. Without it, SSLEngine is unknown and
+# `apachectl -t` / startup fail. Install it whenever SSL is terminated here.
+- name: Install mod_ssl (RedHat)
+  ansible.builtin.package:
+    name: mod_ssl
+    state: present
+  when:
+    - ansible_os_family == 'RedHat'
+    - apache_enable_ssl
+  notify: reload apache
+
 # Self-signed cert for internal / test environments with no CA-issued cert.
 # Generated only when missing (creates:) so it never churns or forces a reload
 # on subsequent runs. Must precede the VirtualHost template task below, whose
