@@ -101,15 +101,18 @@
     mode: '0644'
   args:
     creates: "/tmp/{{ openspecimen_release }}.zip"
+  when: not (_plugins_only_change | default(false))
 
 # ── Cache zip contents listing ────────────────────────────────────────────────
 # Listed once here; reused for WAR and plugin extraction below.
 # When site.yml runs, tomcat role may have already set _zip_contents.
+# Skipped on plugins-only — no WAR or default-plugin extraction will run.
 
 - name: Cache release zip contents
   ansible.builtin.shell: unzip -l /tmp/{{ openspecimen_release }}.zip
   register: _zip_contents
   changed_when: false
+  when: not (_plugins_only_change | default(false))
 
 # ── Create required directories ───────────────────────────────────────────────
 # Plugin subdirectory structure matches install.sh:
@@ -167,6 +170,13 @@
     state: stopped
   when: openspecimen_install_type == 'upgrade'
 
+# On plugins-only deploys, deliberately omit plugins/default from the backup
+# tree. Rollback (rollback.yml line 274) wipes a live plugin tier only if the
+# corresponding backup tier exists — an empty plugins/default/ in this backup
+# would cause a future rollback to that timestamp to wipe live default plugins
+# (which are tied to the WAR and aren't changing here). Skipping the directory
+# also makes the `Backup plugins` mv into default/ safely no-op (no dest dir),
+# keeping the live default JARs in place.
 - name: Create backup directory structure
   ansible.builtin.file:
     path: "{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/{{ item }}"
@@ -174,11 +184,7 @@
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
     mode: '0755'
-  loop:
-    - plugins/default
-    - plugins/paid
-    - plugins/zustomer
-    - config
+  loop: "{{ ['plugins/paid', 'plugins/zustomer', 'config'] + (['plugins/default'] if not (_plugins_only_change | default(false)) else []) }}"
   when: openspecimen_install_type == 'upgrade'
 
 - name: Backup old WAR
@@ -189,7 +195,9 @@
       mv "$WEBAPPS/openspecimen.war" "$DEST/"
       rm -rf "$WEBAPPS/openspecimen"
     fi
-  when: openspecimen_install_type == 'upgrade'
+  when:
+    - openspecimen_install_type == 'upgrade'
+    - not (_plugins_only_change | default(false))
 
 # Remove orphan plugin JARs BEFORE the backup mv — without this, the backup
 # would snapshot the orphan and a rollback to that timestamp would resurrect
@@ -295,6 +303,8 @@
     - _backup_marker_probe.stat.exists
 
 # ── Deploy WAR ────────────────────────────────────────────────────────────────
+# Skipped entirely on plugins-only — the existing webapps/openspecimen.war is
+# already at the requested release.
 
 - name: Deploy openspecimen.war
   block:
@@ -337,6 +347,7 @@
 
             3. Verify Tomcat is installed and the webapps dir exists:
                  ls -la {{ tomcat_home }}/webapps/
+  when: not (_plugins_only_change | default(false))
 
 - name: Set WAR ownership
   ansible.builtin.file:
@@ -344,6 +355,7 @@
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
     mode: '0644'
+  when: not (_plugins_only_change | default(false))
 
 # ── Deploy plugins ────────────────────────────────────────────────────────────
 
@@ -382,6 +394,9 @@
                  unzip -l {{ openspecimen_zip_path | expanduser }} | grep -E 'plugin_build/.+\.jar'
 
             2. Confirm with the build/release team this zip is the correct artifact.
+  # Default plugins are tied to the WAR release — on plugins-only deploys the
+  # WAR is unchanged so the existing default JARs are already correct.
+  when: not (_plugins_only_change | default(false))
 
 # ── Deploy additional plugin zips ─────────────────────────────────────────────
 # Pre-flight already searched recursively under openspecimen_builds_dir and
