@@ -20,7 +20,7 @@ apache_server_name: >-
 # Proxy protocol to the local Tomcat backend: 'http' (default) or 'ajp'.
 #   http → http://localhost:<openspecimen_port>/openspecimen/ — no AJP exposure,
 #          avoids Ghostcat (CVE-2020-1938). Safe default for upstream.
-#   ajp  → ajp://localhost:<apache_ajp_port>/openspecimen/ — matches operator
+#   ajp  → ajp://127.0.0.1:<apache_ajp_port>/openspecimen/ — matches operator
 #          sample configs. The Tomcat AJP connector is bound to 127.0.0.1 by the
 #          tomcat role, so it is never reachable off-box (Ghostcat mitigation).
 apache_proxy_protocol: http
@@ -33,7 +33,7 @@ apache_ssl_key_file:  ""
 
 # Proxy backend URL — derived from apache_proxy_protocol above.
 apache_proxy_backend: >-
-  {{ ('ajp://localhost:' ~ apache_ajp_port ~ '/openspecimen/')
+  {{ ('ajp://127.0.0.1:' ~ apache_ajp_port ~ '/openspecimen/')
      if apache_proxy_protocol == 'ajp'
      else ('http://localhost:' ~ openspecimen_port ~ '/openspecimen/') }}
 

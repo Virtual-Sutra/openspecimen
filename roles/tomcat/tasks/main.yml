@@ -224,9 +224,11 @@
   changed_when: "'changed' in _ajp_patch.stdout"
   notify: restart openspecimen
 
-# Bind the AJP connector to loopback (Ghostcat / CVE-2020-1938 mitigation).
-# Apache proxies over ajp://localhost:8009, so off-box exposure is never needed.
-# Idempotent: skips if an address= attribute is already present on the connector.
+# Bind the AJP connector to IPv4 loopback (Ghostcat / CVE-2020-1938 mitigation).
+# Apache proxies over ajp://127.0.0.1:8009, so off-box exposure is never needed.
+# Stock Tomcat ships the AJP connector with address="::1" (IPv6 loopback only);
+# we force 127.0.0.1 so it matches the Apache backend regardless of how the host
+# resolves "localhost". Idempotent: no-op once address="127.0.0.1" is set.
 - name: Bind AJP connector to 127.0.0.1 in server.xml
   ansible.builtin.shell: |
     python3 -c "
@@ -234,10 +236,13 @@
     path = '{{ tomcat_home }}/conf/server.xml'
     content = open(path).read()
     def patch(m):
-        tag = m.group(1)
-        if 'address=' in tag:
+        tag, close = m.group(1), m.group(2)
+        if 'address=\"127.0.0.1\"' in tag:
             return m.group(0)
-        return tag + ' address=\"127.0.0.1\"' + m.group(2)
+        if 'address=' in tag:
+            tag = re.sub(r'address=\"[^\"]*\"', 'address=\"127.0.0.1\"', tag)
+            return tag + close
+        return tag + ' address=\"127.0.0.1\"' + close
     patched = re.sub(
         r'(<Connector[^>]*protocol=\"AJP/1\.3\"[^>]*?)(\s*/>)',
         patch, content, flags=re.DOTALL)
