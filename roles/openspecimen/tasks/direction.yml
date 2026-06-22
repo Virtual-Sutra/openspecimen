@@ -181,6 +181,37 @@
     - _last_deploy_success_release == openspecimen_release
     - not (force_deploy | default(false) | bool)
 
+# Plugins-only optimisation. When the WAR is already at the requested release
+# AND the last deploy succeeded AND the ONLY drift is the plugin list (missing
+# or orphan), we can skip every WAR-related step (zip upload, WAR backup, WAR
+# extraction, default-plugin extraction) and run only the plugin tasks +
+# service restart. Cuts a fresh-zip-upload-and-extract redeploy down to a
+# few-MB plugin extraction.
+- name: Detect plugins-only change
+  ansible.builtin.set_fact:
+    _plugins_only_change: >-
+      {{ _direction.stdout == 'deploy'
+         and _installed_release == openspecimen_release
+         and _last_deploy_success_release == openspecimen_release
+         and not (force_deploy | default(false) | bool)
+         and not (_all_paid_current | default(true)
+                  and _all_customer_current | default(true)
+                  and _no_orphans | default(true)) }}
+  when:
+    - _direction.stdout == 'deploy'
+    - _installed_release == openspecimen_release
+    - _last_deploy_success_release == openspecimen_release
+    - not (force_deploy | default(false) | bool)
+
+- name: Announce plugins-only deploy
+  ansible.builtin.debug:
+    msg: >-
+      ⚡ Plugins-only deploy — WAR is already at {{ openspecimen_release }}.
+      Skipping zip upload, WAR backup, WAR extraction, and default-plugin
+      extraction. Running plugin backup + orphan cleanup + paid/customer
+      plugin install + Tomcat restart only.
+  when: _plugins_only_change | default(false)
+
 - name: Show no-op summary
   ansible.builtin.debug:
     msg:
