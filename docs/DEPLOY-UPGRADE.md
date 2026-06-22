@@ -27,8 +27,8 @@ requested `openspecimen_release` using natural version sort (`sort -V`):
 `openspecimen_release` is always supplied at run time via
 `-e openspecimen_release=<name>`. It is **not** stored in inventory `group_vars`.
 
-Direction detection runs as the **first** pre_task in both `site.yml` and
-`deploy.yml` — `roles/openspecimen/tasks/direction.yml`. When a downgrade is
+Direction detection runs as the **first** pre_task in `site.yml` —
+`roles/openspecimen/tasks/direction.yml`. When a downgrade is
 detected, the play dispatches to `tasks_from: rollback` (target_version =
 requested release) and ends; the remaining roles never run.
 
@@ -46,7 +46,7 @@ Before deploying:
 
 ## Pre-flight checks
 
-Every play (`site.yml` or `deploy.yml`) runs a pre_task block that fails fast — **before any
+Every play (`site.yml`) runs a pre_task block that fails fast — **before any
 target modification** — if the operator's inputs are wrong. Checks include:
 
 - `openspecimen_release` is set and matches the expected `openspecimen_<version>` format
@@ -94,11 +94,13 @@ ansible-playbook -i inventory/customers/<name>/ site.yml \
 
 ## Day-2: Upgrade
 
-Use `deploy.yml` when only the WAR and plugins need updating and the
-infrastructure (MySQL, Tomcat config) is already correct. Skips infra roles.
+A normal `site.yml` run on an existing install upgrades app-only (WAR + plugins);
+`-e force_deploy=true` also re-runs the base roles. When only the WAR and plugins
+need updating and the infrastructure (MySQL, Tomcat config) is already correct,
+the base roles are skipped automatically.
 
 ```bash
-ansible-playbook -i inventory/customers/<name>/ deploy.yml \
+ansible-playbook -i inventory/customers/<name>/ site.yml \
   -e openspecimen_release=openspecimen_v12.3 \
   -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
   -e mysql_db_password=<password>
@@ -209,7 +211,7 @@ Rollback has two paths — both backed by the same `roles/openspecimen/tasks/rol
 
 ### A. Automatic (via deploy job — recommended)
 
-Just pick a lower release in `site.yml` / `deploy.yml` (or in the Jenkins
+Just pick a lower release in `site.yml` (or in the Jenkins
 deploy job). Direction detection notices the requested version is older than
 what's installed, finds the backup whose `.release` matches the request,
 runs the rollback, and ends the play. **No separate rollback job or playbook
@@ -329,7 +331,7 @@ ansible-playbook -i inventory/customers/<name>/ rollback.yml \
 
 The playbook fails fast with operator guidance and lists the available
 backups. If all backups have been pruned (`openspecimen_backup_retention`
-reached), use `deploy.yml` with the older release zip instead — there is
+reached), use `site.yml` with the older release zip instead — there is
 nothing to restore from.
 
 ---

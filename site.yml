@@ -1,11 +1,26 @@
 ---
-# Full fresh deployment — runs all roles in order.
+# Unified deploy playbook — handles both fresh install and upgrade.
+#
+# The openspecimen role auto-detects fresh vs upgrade (DB schema check) and
+# direction.yml detects deploy / rollback / no-op from the on-target .release
+# marker. Deploy scope is selected automatically:
+#   - Fresh install (no .release marker) -> FULL: base roles (common, java,
+#       mysql, tomcat) run, then the app roles.
+#   - Upgrade (existing install)         -> FAST app-only: base roles are
+#       skipped; app roles (openspecimen, plugins, apache) run.
+#   - force_deploy=true                  -> FULL (fully unified): base roles are
+#       re-run even on an upgrade.
+# The base roles are also tagged `base`, so you can force the choice directly:
+#   --skip-tags base   (app-only)      --tags base   (base only).
 #
 # Usage:
 #   ansible-playbook -i inventory/customers/<name>/ site.yml \
 #     -e openspecimen_release=openspecimen_v12.3 \
 #     -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
 #     -e mysql_db_password=<password>
+#
+#   # Full re-deploy (re-run base roles on an existing install):
+#   #   ... -e force_deploy=true
 
 - name: Deploy OpenSpecimen
   hosts: openspecimen
@@ -28,12 +43,33 @@
         name: openspecimen
         tasks_from: preflight
 
+    # Choose deploy scope: FULL (base + app) on a fresh install (no .release
+    # marker, set by direction.yml above) or when force_deploy is set; otherwise
+    # FAST app-only (base roles skipped) on an upgrade.
+    - name: Determine deploy scope (full base+app vs app-only)
+      ansible.builtin.set_fact:
+        _full_deploy: >-
+          {{ ((_installed_release | default('') | trim) | length == 0)
+             or (force_deploy | default(false) | bool) }}
+
   roles:
-    - common
-    - java
+    # ── Base roles — fresh install or force_deploy only (skipped on fast upgrades)
+    - role: common
+      when: _full_deploy
+      tags: [base]
+    - role: java
+      when: _full_deploy
+      tags: [base]
     - role: mysql
-      when: db_managed | default(true)
-    - tomcat
+      when:
+        - _full_deploy
+        - db_managed | default(true)
+      tags: [base]
+    - role: tomcat
+      when: _full_deploy
+      tags: [base]
+
+    # ── App roles — always run (install and upgrade)
     - openspecimen
     - role: plugins
       when: customer_plugins | default([]) | length > 0

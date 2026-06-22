@@ -47,7 +47,7 @@ wrong value" issues. Off by default to keep healthy deploy logs clean.
 
 ## Pre-flight failures
 
-Pre-flight runs as a `pre_task` in `site.yml` and `deploy.yml` — **before any role executes**.
+Pre-flight runs as a `pre_task` in `site.yml` — **before any role executes**.
 Most failures here mean inventory + on-disk state are out of sync.
 
 | Error | Cause | Fix |

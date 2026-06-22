@@ -5,7 +5,7 @@ Ansible automation for deploying and upgrading [OpenSpecimen](https://github.com
 ## What this does
 
 - **Fresh install** (`site.yml`) — installs Java, MySQL (optional), Tomcat, and OpenSpecimen from a release zip
-- **Upgrade** (`deploy.yml`) — deploys a new version over an existing install with automatic WAR + plugin backup
+- **Upgrade** (`site.yml`) — a normal run on an existing install upgrades app-only (WAR + plugins) with automatic backup; `-e force_deploy=true` also re-runs the base roles
 - **Plugin tiers** — `openspecimen_paid_plugins` (→ `plugins/paid/`) and `openspecimen_customer_plugins` (→ `plugins/zustomer/`) extract JARs from named zips alongside the release zip
 - **Pre-flight validation** — fails fast before touching the target if the release zip or any plugin zip is missing
 - **Bounded backup history** — keeps `openspecimen_backup_retention` snapshots (default 3); older backups are pruned automatically
@@ -25,8 +25,7 @@ Supports Ubuntu 22.04, Ubuntu 24.04, and RHEL 9. Works with local MySQL, Amazon 
 ## Repository layout
 
 ```
-site.yml                — full fresh deployment (all roles in order)
-deploy.yml              — upgrade-only re-deploy (skips infra setup)
+site.yml                — unified install + upgrade; a normal upgrade is app-only, `-e force_deploy=true` re-runs the base roles
 verify-customer.yml     — pre-deploy readiness check (SSH, disk, version)
 roles/
   common/               — OS prerequisites, system user/group
@@ -73,7 +72,7 @@ ansible-playbook -i inventory/customers/my-hospital/ site.yml \
 ## Upgrade
 
 ```bash
-ansible-playbook -i inventory/customers/my-hospital/ deploy.yml \
+ansible-playbook -i inventory/customers/my-hospital/ site.yml \
   -e openspecimen_release=openspecimen_v12.3 \
   -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
   -e mysql_db_password=<password>

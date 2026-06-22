@@ -12,7 +12,7 @@
 #               (.deploy_success stale), or a missing/new plugin → continue with
 #               the rest of the play
 #
-# Called as the FIRST pre_task from site.yml and deploy.yml.
+# Called as the FIRST pre_task from site.yml.
 
 - name: Validate openspecimen_release is set (required for direction detection)
   ansible.builtin.fail:

@@ -4,7 +4,7 @@
 # This is a thin wrapper around roles/openspecimen/tasks/rollback.yml so that
 # the same tasks are usable as both:
 #   1. A standalone playbook (operator CLI — this file), and
-#   2. An included task list (site.yml / deploy.yml when a downgrade is detected
+#   2. An included task list (site.yml when a downgrade is detected
 #      automatically — see roles/openspecimen/tasks/direction.yml).
 #
 # Backup selection (in order of precedence):

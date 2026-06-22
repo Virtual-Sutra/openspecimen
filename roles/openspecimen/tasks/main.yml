@@ -1,7 +1,9 @@
 ---
 # ── Prior version check ───────────────────────────────────────────────────────
-# site.yml: common role already ran this and set _version_check_done=true.
-# deploy.yml: common does not run, so include_role runs the check here.
+# site.yml on a fresh install: common role already ran this and set
+#   _version_check_done=true.
+# site.yml on an upgrade: base roles (incl. common) are skipped, so include_role
+#   runs the check here.
 
 - name: Prior version check
   ansible.builtin.include_role:
@@ -9,7 +11,7 @@
     tasks_from: version_check
   when: not (_version_check_done | default(false))
 
-# Pre-flight artifact / inventory check ran as a pre_task in site.yml / deploy.yml.
+# Pre-flight artifact / inventory check ran as a pre_task in site.yml.
 # It populated _preflight_plugin_version, _preflight_paid_find, and
 # _preflight_customer_find which the plugin deploy tasks below reuse.
 
@@ -92,7 +94,8 @@
       {% endif %}
 
 # ── Ensure release zip is on target ──────────────────────────────────────────
-# deploy.yml (upgrade) runs only this role — upload if not already present.
+# site.yml on an upgrade runs only the app roles (openspecimen/plugins/apache) —
+# upload if not already present.
 
 - name: Upload release zip to target (if not already present)
   ansible.builtin.copy:
@@ -307,7 +310,8 @@
     - _openspecimen_properties_pre_template.content is defined
 
 # setenv.sh and context.xml are templated only by the tomcat role (which runs
-# on site.yml fresh installs, not on deploy.yml upgrades). On the upgrade path
+# on site.yml fresh installs, not on site.yml upgrades — base roles are skipped).
+# On the upgrade path
 # these files are untouched between the prior deploy and this point, so the
 # live file IS the OLD file — remote_src copy captures the right content.
 - name: Backup config files that exist (setenv.sh, context.xml)
@@ -719,7 +723,7 @@
             - Full log:  sudo journalctl -u openspecimen --since '1 hour ago'
 
 # Phase 2 (external public-URL reachability) is intentionally NOT here. It now
-# runs as a post_task in site.yml / deploy.yml (roles/openspecimen/tasks/
+# runs as a post_task in site.yml (roles/openspecimen/tasks/
 # verify-public-url.yml) so it executes AFTER the apache front-end proxy is
 # configured — otherwise it would check the URL before the proxy that serves it.
 

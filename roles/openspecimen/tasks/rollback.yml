@@ -2,7 +2,7 @@
 # Rollback flow — included from two places:
 #
 #   1. Top-level rollback.yml  (operator runs explicitly)
-#   2. site.yml / deploy.yml pre_task — when the requested release is older
+#   2. site.yml pre_task — when the requested release is older
 #      than the installed release (downgrade direction detected)
 #
 # Backup selection (in order of precedence):
@@ -42,7 +42,7 @@
 
       How to fix:
         - There is nothing to roll back to. To deploy an older version,
-          run deploy.yml with -e openspecimen_release=<older-version> and
+          run site.yml with -e openspecimen_release=<older-version> and
           -e allow_downgrade=true, and place the older release zip in
           openspecimen_builds_dir.
   when: _backup_dirs.files | length == 0
@@ -107,7 +107,7 @@
       How to fix:
         - Pick a version that has a backup directory above, OR
         - Restore the database from an RDS snapshot taken before that version's
-          rollout and re-run with -e allow_downgrade=true on deploy.yml.
+          rollout and re-run with -e allow_downgrade=true on site.yml.
   when: _restore_path == 'NO_MATCH'
 
 - name: Verify the resolved backup exists
@@ -379,7 +379,7 @@
       The on-disk marker still shows the previous (rolled-forward) version
       and may incorrectly block the next deploy as a downgrade. If that
       happens, remove {{ openspecimen_release_marker }} manually before
-      re-running deploy.yml.
+      re-running site.yml.
   when: not _backup_release_marker.stat.exists
 
 # ── 9. Start service and wait for readiness ──────────────────────────────────

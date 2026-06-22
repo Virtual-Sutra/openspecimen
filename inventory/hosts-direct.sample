@@ -6,7 +6,11 @@
 #
 # Usage:
 #   ansible-playbook -i inventory/customers/<name>/ site.yml
-#   ansible-playbook -i inventory/customers/<name>/ deploy.yml   # upgrade
+#
+#   # site.yml auto-detects fresh vs upgrade. A normal upgrade is app-only
+#   # (openspecimen/plugins/apache); base roles are skipped. Add
+#   # -e force_deploy=true to force a full re-deploy of the entire stack.
+#   ansible-playbook -i inventory/customers/<name>/ site.yml   # upgrade
 # ─────────────────────────────────────────────────────────────────────────────
 
 [openspecimen]
