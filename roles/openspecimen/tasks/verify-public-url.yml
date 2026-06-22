@@ -4,10 +4,10 @@
 # / ALB / DNS / cert. Runs as a post_task (after ALL roles, notably apache) so
 # the proxy that serves the URL is already in place.
 #
-# Gated by openspecimen_verify_app_url (default true) — set it false until public
-# DNS exists (e.g. k-testvm). Non-fatal by default; set
-# openspecimen_app_url_check_fatal=true to make it a hard gate. The on-box check
-# lives separately in verify-local.yml.
+# OPT-IN: gated by openspecimen_verify_app_url (default false) — enable it only
+# once the public hostname resolves. The always-on local readiness check is
+# Phase 1 (Tomcat startup) in the openspecimen role. Non-fatal by default; set
+# openspecimen_app_url_check_fatal=true to make it a hard gate.
 - name: Verify app reachable via public URL
   block:
     - name: Health check via public URL ({{ openspecimen_app_url }})
@@ -45,5 +45,5 @@
           openspecimen_app_url_check_fatal=true.
       when: openspecimen_app_url_check_fatal | default(false) | bool
   when:
-    - openspecimen_verify_app_url | default(true) | bool
+    - openspecimen_verify_app_url | default(false) | bool
     - openspecimen_app_url is defined

@@ -58,12 +58,10 @@
 
 # openspecimen_app_url: "https://openspecimen.customer-domain.com"
 
-# ── Post-deploy health checks ─────────────────────────────────────────────────
-# Two non-fatal post-deploy checks (defaults in inventory/group_vars/all.yml):
-#   openspecimen_verify_local   — on-box Tomcat HTTP check (no DNS needed).
-#   openspecimen_verify_app_url — public-URL check. Set false until DNS resolves.
-# openspecimen_verify_local:   true
-# openspecimen_verify_app_url: false   # skip the public-URL check until DNS is ready
+# ── Post-deploy public-URL health check (opt-in) ──────────────────────────────
+# Phase 1 (Tomcat startup) is the always-on readiness check. The public-URL check
+# is OFF by default; enable it once this customer's public DNS resolves:
+# openspecimen_verify_app_url: true
 
 # ── Apache reverse proxy (optional TLS front-end) ─────────────────────────────
 # Role: apache

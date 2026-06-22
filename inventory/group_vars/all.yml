@@ -76,19 +76,17 @@ openspecimen_backup_retention: 3
 # Ref: https://openspecimen.atlassian.net/wiki/spaces/CAT/pages/3342041156
 # openspecimen_app_url: "https://openspecimen.yourdomain.com"
 
-# ── Post-deploy health checks ─────────────────────────────────────────────────
-# Two independent, non-fatal-by-default checks run as post_tasks after the deploy:
-#   openspecimen_verify_local   — HTTP check on the target's own Tomcat
-#       (http://localhost:<openspecimen_port>/openspecimen/...). Needs no DNS or
-#       front-end proxy. Set false to skip.
-#   openspecimen_verify_app_url — HTTP check on the public URL (openspecimen_app_url)
-#       from the control node. Set false until public DNS is in place (it also
-#       requires openspecimen_app_url to be set).
-# Make either a hard gate with openspecimen_local_check_fatal /
-# openspecimen_app_url_check_fatal (default false). Shared retry budget:
-# openspecimen_health_retries attempts x openspecimen_health_delay seconds.
-openspecimen_verify_local:   true
-openspecimen_verify_app_url: true
+# ── Post-deploy health check ──────────────────────────────────────────────────
+# The primary readiness check is Phase 1 (Tomcat startup) in the openspecimen
+# role — it always runs, is local, and needs no DNS.
+#
+# The optional public-URL check below curls openspecimen_app_url from the control
+# node to validate the front-end proxy / ALB / DNS path. It is OFF by default;
+# enable it (openspecimen_verify_app_url: true) only once the public hostname
+# resolves. It also requires openspecimen_app_url to be set, is non-fatal unless
+# openspecimen_app_url_check_fatal=true, and retries
+# openspecimen_health_retries x openspecimen_health_delay seconds.
+openspecimen_verify_app_url: false
 openspecimen_health_retries: 5
 openspecimen_health_delay:   10
 
