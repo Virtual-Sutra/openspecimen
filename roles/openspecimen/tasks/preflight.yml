@@ -1,5 +1,5 @@
 ---
-# Pre-flight checks. Runs as a pre_task in site.yml / deploy.yml — before any
+# Pre-flight checks. Runs as a pre_task in site.yml — before any
 # role executes — so misconfiguration fails the play before the target is
 # modified. Every failure message tells the operator what's wrong AND what to fix.
 
