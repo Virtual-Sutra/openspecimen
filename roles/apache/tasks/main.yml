@@ -95,7 +95,11 @@
     owner: root
     group: root
     mode: '0644'
-    validate: "{{ 'apachectl' if ansible_os_family == 'RedHat' else 'apache2ctl' }} -t -f %s"
+  # No inline `validate: apache2ctl -t -f %s`: the -f flag makes Apache use ONLY
+  # the vhost file as the whole config, so the base config (and the MPM module)
+  # is never loaded — `apache2ctl -t -f <vhost>` fails with "No MPM loaded". The
+  # full configtest below validates the real config (base + MPM + this vhost)
+  # once the site is enabled.
   notify: reload apache
 
 - name: Enable site (Debian)
@@ -105,6 +109,15 @@
     state: link
   when: ansible_os_family == 'Debian'
   notify: reload apache
+
+# Validate the FULL Apache config (base + MPM + the now-enabled vhost) before
+# (re)starting. apachectl/apache2ctl source the distro env (APACHE_* vars on
+# Debian) and load mods-enabled, unlike `apache2 -t -f`. Fails the deploy on a
+# bad vhost without leaving a broken config in a running server.
+- name: Validate full Apache configuration
+  ansible.builtin.command:
+    cmd: "{{ 'apachectl' if ansible_os_family == 'RedHat' else 'apache2ctl' }} -t"
+  changed_when: false
 
 - name: Enable and start Apache
   ansible.builtin.systemd:
