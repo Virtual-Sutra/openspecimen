@@ -42,6 +42,25 @@ openspecimen_zip_path:   "{{ openspecimen_builds_dir }}/{{ openspecimen_release 
 openspecimen_paid_plugins:     []
 openspecimen_customer_plugins: []
 
+# ── Multiple instances on one VM (multi-context) ──────────────────────────────
+# [in progress - see docs/MULTI-INSTANCE.md, epic openspecimen-ansible#71]
+# Declare more than one OpenSpecimen instance on a host with openspecimen_instances.
+# All instances run in one Tomcat as separate webapp contexts (/prod, /test, …),
+# fronted by one Apache VirtualHost. Each instance gets its own DB, paths, app_url,
+# and node_name. Leave UNSET for the normal single-instance (/openspecimen) deploy.
+#
+# openspecimen_instances:
+#   - name: prod                 # context path /prod
+#     mysql_db_name: os_prod
+#     mysql_db_user: os_prod
+#     app_url: https://host/prod
+#     node_name: prod
+#   - name: test
+#     mysql_db_name: os_test
+#     mysql_db_user: os_test
+#     app_url: https://host/test
+#     node_name: test
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 tomcat_home:                /usr/local/openspecimen/tomcat-as
 openspecimen_data_dir:      /usr/local/openspecimen/data

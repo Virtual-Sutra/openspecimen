@@ -23,14 +23,26 @@
     ServerName {{ apache_server_name }}
 
 {% endif %}
-    # Serve static error pages directly - exclusions must precede the catch-all ProxyPass
+    # Serve static error pages directly - exclusions must precede ProxyPass
     ProxyPass /downtime.html    !
     ProxyPass /OS_LOGO_BANNER.png !
 
     ProxyPreserveHost On
+{% if (openspecimen_instances | default([])) | length > 0 %}
+    # Multi-instance: one context block per OpenSpecimen instance. All contexts
+    # share one Tomcat (one AJP/HTTP backend); the context path selects the
+    # instance. See docs/MULTI-INSTANCE.md.
+{% set _proxy_base = ('ajp://127.0.0.1:' ~ apache_ajp_port) if apache_proxy_protocol == 'ajp' else ('http://127.0.0.1:' ~ openspecimen_port) %}
+{% for inst in openspecimen_instances %}
+    ProxyPass        /{{ inst.name }} {{ _proxy_base }}/{{ inst.name }}
+    ProxyPassReverse /{{ inst.name }} {{ _proxy_base }}/{{ inst.name }}
+    ProxyPassReverseCookiePath /{{ inst.name }} /
+{% endfor %}
+{% else %}
     ProxyPass        / {{ apache_proxy_backend }}
     ProxyPassReverse / {{ apache_proxy_backend }}
     ProxyPassReverseCookiePath /openspecimen/ /
+{% endif %}
 
 {% if apache_security_headers %}
     Header always set X-Frame-Options        "SAMEORIGIN"
