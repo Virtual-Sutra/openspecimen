@@ -718,52 +718,10 @@
             - Last 100 catalina.out lines: shown above
             - Full log:  sudo journalctl -u openspecimen --since '1 hour ago'
 
-# Phase 2: external URL reachability — only runs when openspecimen_app_url is set.
-# Runs from the Ansible control node (Jenkins) so it validates the full
-# ALB/proxy stack, not just local Tomcat connectivity.
-- name: Verify app reachable via public URL
-  block:
-    - name: Curl openspecimen_app_url from control node
-      ansible.builtin.shell: >
-        curl -sf -o /dev/null -w "%{http_code}"
-        {{ openspecimen_app_url }}/openspecimen/rest/ng/config-settings/app-props
-        | grep -qE '^(200|401)$'
-      delegate_to: localhost
-      become: false
-      register: _app_url_check
-      until: _app_url_check.rc == 0
-      retries: 12
-      delay: 10
-      changed_when: false
-  rescue:
-    - name: Fail with operator guidance for public URL check
-      ansible.builtin.fail:
-        msg: |
-          ✗ App is running locally but not reachable via public URL after 2 minutes.
-
-          Public URL: {{ openspecimen_app_url }}
-          Customer:   {{ inventory_hostname }}
-
-          OpenSpecimen passed the local startup check (Tomcat is up on port 8080).
-          The failure is somewhere in the ALB / reverse-proxy / DNS layer.
-
-          What to check:
-            1. ALB health check
-               → AWS Console → EC2 → Target Groups → check target health
-               → Health check path should be /openspecimen/rest/ng/config-settings/app-props
-               → Returns HTTP 200 or 401 when healthy.
-
-            2. DNS resolution from Jenkins VM:
-                 dig +short {{ openspecimen_app_url | regex_replace('^https?://', '') | regex_replace('/.*', '') }}
-
-            3. Security group on ALB allows inbound 443 from your IP.
-
-            4. Certificate validity if HTTPS:
-                 curl -vI {{ openspecimen_app_url }} 2>&1 | grep -E 'expire|subject|issuer'
-
-            5. Allowed Request Origins in OpenSpecimen UI:
-               Settings → Common → Allowed Request Origins → must include {{ openspecimen_app_url }}
-  when: openspecimen_app_url is defined
+# Phase 2 (external public-URL reachability) is intentionally NOT here. It now
+# runs as a post_task in site.yml / deploy.yml (roles/openspecimen/tasks/
+# verify-public-url.yml) so it executes AFTER the apache front-end proxy is
+# configured — otherwise it would check the URL before the proxy that serves it.
 
 - name: Deployment complete
   ansible.builtin.debug:

@@ -47,3 +47,12 @@
     - openspecimen
     - role: plugins
       when: customer_plugins | default([]) | length > 0
+
+  post_tasks:
+    # After all roles, validate the public URL (non-fatal by default).
+    # deploy.yml does not configure apache; on the apache-fronted path use
+    # site.yml. See roles/openspecimen/tasks/verify-public-url.yml.
+    - name: Verify app reachable via public URL (post-deploy)
+      ansible.builtin.include_role:
+        name: openspecimen
+        tasks_from: verify-public-url
