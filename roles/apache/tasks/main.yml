@@ -29,6 +29,17 @@
 # Generated only when missing (creates:) so it never churns or forces a reload
 # on subsequent runs. Must precede the VirtualHost template task below, whose
 # `apachectl -t` validate (and apache startup) load SSLCertificateFile.
+- name: Ensure TLS private key directory exists
+  ansible.builtin.file:
+    path: "{{ apache_ssl_key_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  when:
+    - apache_enable_ssl
+    - apache_ssl_self_signed
+
 - name: Generate self-signed TLS certificate
   ansible.builtin.command:
     cmd: >
