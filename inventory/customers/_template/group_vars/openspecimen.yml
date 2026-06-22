@@ -70,9 +70,10 @@
 
 # apache_enabled:        true   # default: true when openspecimen_app_url is set, else false
 # apache_proxy_protocol: ajp    # default: http (avoids Ghostcat). ajp → ajp://127.0.0.1:8009
-# apache_enable_ssl:     true   # default: false. Terminate TLS at Apache (adds HSTS header)
-# apache_ssl_cert_file:  /etc/ssl/private/certificate.crt
-# apache_ssl_key_file:   /etc/ssl/private/private.key
+# apache_enable_ssl:      true  # default: false. Terminate TLS at Apache (adds HSTS header)
+# apache_ssl_self_signed: true  # default: false. Generate a self-signed cert if absent (internal/test)
+# apache_ssl_cert_file:   /etc/ssl/private/certificate.crt
+# apache_ssl_key_file:    /etc/ssl/private/private.key
 
 # ── High Availability ─────────────────────────────────────────────────────────
 # Role: openspecimen

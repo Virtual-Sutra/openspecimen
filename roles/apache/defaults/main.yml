@@ -31,6 +31,11 @@ apache_enable_ssl:    false
 apache_ssl_cert_file: ""
 apache_ssl_key_file:  ""
 
+# Generate a self-signed cert at the paths above when SSL is enabled and the
+# cert is absent — for internal/test environments without a CA-issued cert
+# (browsers will warn on the untrusted cert). Set the cert/key paths when true.
+apache_ssl_self_signed: false
+
 # Proxy backend URL — derived from apache_proxy_protocol above.
 apache_proxy_backend: >-
   {{ ('ajp://127.0.0.1:' ~ apache_ajp_port ~ '/openspecimen/')
