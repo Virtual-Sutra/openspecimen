@@ -612,19 +612,20 @@
 # If a previous start was killed mid-migration (e.g. an aborted deploy), the lock
 # stays LOCKED=1 and the next boot waits on it ~5 min then fails
 # "Context [/openspecimen] startup failed". The service is stopped at this point,
-# so nothing legitimately holds the lock - release a stale one. MySQL only;
-# tolerant of the table not existing yet (fresh install, before the first migration).
+# so nothing legitimately holds the lock - release a stale one. MySQL only.
+# Best-effort (failed_when: false): tolerates the table not existing yet (fresh
+# install) and the "password on the command line" warning without aborting; if it
+# cannot clear the lock for any reason, the fail-fast readiness check below
+# surfaces the resulting startup failure within seconds, with full diagnostics.
 - name: Release stale Liquibase changelog lock (MySQL)
   ansible.builtin.shell: |
-    OUT=$(mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' \
+    mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' \
       -h {{ mysql_db_host }} {{ mysql_db_name }} \
-      -sNe "UPDATE DATABASECHANGELOGLOCK SET LOCKED=0, LOCKGRANTED=NULL, LOCKEDBY=NULL WHERE LOCKED=1;" 2>&1) || true
-    if [ -n "$OUT" ] && ! printf '%s' "$OUT" | grep -q "doesn't exist"; then
-      printf '%s\n' "$OUT" >&2
-      exit 1
-    fi
+      -sNe "UPDATE DATABASECHANGELOGLOCK SET LOCKED=0, LOCKGRANTED=NULL, LOCKEDBY=NULL WHERE LOCKED=1;"
   register: _liquibase_lock_clear
   changed_when: false
+  failed_when: false
+  no_log: true
   when: (db_type | default('mysql')) == 'mysql'
 
 # ── Start service ─────────────────────────────────────────────────────────────
