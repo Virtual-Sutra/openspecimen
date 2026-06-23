@@ -1,10 +1,10 @@
 ---
 # External public-URL health check: curl openspecimen_app_url from the Ansible
-# control node (Jenkins), which validates the full public path — front-end proxy
+# control node (Jenkins), which validates the full public path - front-end proxy
 # / ALB / DNS / cert. Runs as a post_task (after ALL roles, notably apache) so
 # the proxy that serves the URL is already in place.
 #
-# OPT-IN: gated by openspecimen_verify_app_url (default false) — enable it only
+# OPT-IN: gated by openspecimen_verify_app_url (default false) - enable it only
 # once the public hostname resolves. The always-on local readiness check is
 # Phase 1 (Tomcat startup) in the openspecimen role. Non-fatal by default; set
 # openspecimen_app_url_check_fatal=true to make it a hard gate.
@@ -13,7 +13,7 @@
     - name: Health check via public URL ({{ openspecimen_app_url }})
       ansible.builtin.shell: >
         curl -sf -o /dev/null -w "%{http_code}"
-        {{ openspecimen_app_url }}/openspecimen/rest/ng/config-settings/app-props
+        {{ openspecimen_app_url | regex_replace('/+$', '') }}/openspecimen/rest/ng/config-settings/app-props
         | grep -qE '^(200|401)$'
       delegate_to: localhost
       become: false

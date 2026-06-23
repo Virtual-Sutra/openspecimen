@@ -23,11 +23,11 @@ How to fix:
   - <specific action or inventory edit>
 ```
 
-If you see this format, the message itself usually contains everything you need — paths to
+If you see this format, the message itself usually contains everything you need - paths to
 inspect, commands to run on the Jenkins VM or target, and the inventory file to edit.
 
 If you see a plain Ansible failure (no `✗` prefix), it's likely a generic SSH, package, or
-systemd issue — check the sections below or `journalctl` on the target.
+systemd issue - check the sections below or `journalctl` on the target.
 
 ---
 
@@ -47,13 +47,13 @@ wrong value" issues. Off by default to keep healthy deploy logs clean.
 
 ## Pre-flight failures
 
-Pre-flight runs as a `pre_task` in `site.yml` — **before any role executes**.
+Pre-flight runs as a `pre_task` in `site.yml` - **before any role executes**.
 Most failures here mean inventory + on-disk state are out of sync.
 
 | Error | Cause | Fix |
 |-------|-------|-----|
 | `openspecimen_release is not set` | Missing `-e openspecimen_release=...` | Pass it at run time. Never store in `group_vars`. |
-| `openspecimen_release format is invalid` | Value doesn't match `openspecimen_<version>` | Use the exact zip filename minus `.zip` — e.g. `openspecimen_v12.2.RC12`. |
+| `openspecimen_release format is invalid` | Value doesn't match `openspecimen_<version>` | Use the exact zip filename minus `.zip` - e.g. `openspecimen_v12.2.RC12`. |
 | `mysql_db_password is not set, but db_managed=true` | Vault secrets file not loaded, or `-e mysql_db_password` not passed | Pass via `-e @secrets/<customer>.yml` (Vault) or `-e mysql_db_password=<pwd>` |
 | `Release zip not found on the Jenkins VM` | Zip not uploaded, or wrong filename | Upload to `openspecimen_builds_dir` on the Jenkins VM; filename must match `openspecimen_release` exactly. |
 | `Paid plugin zip not found anywhere under <builds_dir>` | Plugin zip missing or wrong version suffix | Place `<plugin-name>-<version>.zip` in the same directory as the release zip. Version = `openspecimen_release` minus `openspecimen_` prefix. |
@@ -61,7 +61,7 @@ Most failures here mean inventory + on-disk state are out of sync.
 
 ---
 
-## `openspecimen_release` is empty — "downgrade" or "version required" error
+## `openspecimen_release` is empty - "downgrade" or "version required" error
 
 **Symptom:** Version check reports `Requesting:  ` (empty string) and blocks
 with "Downgrade is not supported" or "openspecimen_release is required".
@@ -74,7 +74,7 @@ with "Downgrade is not supported" or "openspecimen_release is required".
 ansible-playbook ... -e openspecimen_release=openspecimen_v12.3
 ```
 
-The variable is intentionally NOT stored in `group_vars` — it must be injected
+The variable is intentionally NOT stored in `group_vars` - it must be injected
 at each run so the playbook stays idempotent regardless of who runs it.
 
 ---
@@ -122,13 +122,13 @@ than what is installed.
 **Cause:** The marker file `/usr/local/openspecimen/.release` on the target
 contains a higher version than `openspecimen_release`.
 
-**Fix:** Either specify the correct (newer) release, or — for a deliberate
-downgrade — clear the marker file manually and restore from backup:
+**Fix:** Either specify the correct (newer) release, or - for a deliberate
+downgrade - clear the marker file manually and restore from backup:
 
 ```bash
 sudo systemctl stop openspecimen
 sudo rm /usr/local/openspecimen/.release
-# restore WAR from backup — see DEPLOY-UPGRADE.md rollback section
+# restore WAR from backup - see DEPLOY-UPGRADE.md rollback section
 ```
 
 ---
@@ -186,7 +186,7 @@ typically before the actual work starts.
 **Cause:** The task uses `set -o pipefail` but the default shell is `/bin/sh` (dash on
 Ubuntu), which does not support pipefail.
 
-**Fix:** This is a regression in the role — report it. The fix is to add
+**Fix:** This is a regression in the role - report it. The fix is to add
 `args: executable: /bin/bash` to the affected task.
 
 ---

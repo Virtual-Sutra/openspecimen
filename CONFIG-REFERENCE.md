@@ -9,7 +9,7 @@ that control it and what a change requires.
 
 | File | What it does | Requires restart? |
 |------|-------------|-------------------|
-| _(no files written)_ | Installs packages and creates the `openspecimen` system user/group | — |
+| _(no files written)_ | Installs packages and creates the `openspecimen` system user/group | - |
 
 ---
 
@@ -33,10 +33,10 @@ that control it and what a change requires.
 
 | File | Ansible variable(s) | What it sets | Requires restart? |
 |------|---------------------|--------------|-------------------|
-| `/etc/mysql/mysql.conf.d/mysqld.cnf` (Debian) | See below | MySQL server config | Yes — `systemctl restart mysql` |
-| `/etc/my.cnf.d/mysqld.cnf` (RHEL) | See below | MySQL server config | Yes — `systemctl restart mysqld` |
+| `/etc/mysql/mysql.conf.d/mysqld.cnf` (Debian) | See below | MySQL server config | Yes - `systemctl restart mysql` |
+| `/etc/my.cnf.d/mysqld.cnf` (RHEL) | See below | MySQL server config | Yes - `systemctl restart mysqld` |
 
-**⚠️ Written before MySQL is installed** — `lower_case_table_names` and `character-set-server`
+**⚠️ Written before MySQL is installed** - `lower_case_table_names` and `character-set-server`
 cannot be changed after the data directory is initialised. Changing them on a running instance
 requires recreating the data directory (and on RDS, recreating the instance).
 
@@ -45,7 +45,7 @@ Key settings in `mysqld.cnf`:
 | Setting | Variable | Default | Notes |
 |---------|----------|---------|-------|
 | `bind-address` | `mysql_bind_address` | `127.0.0.1` | |
-| `character-set-server` | hardcoded | `utf8` | Must be `utf8`, NOT `utf8mb4` — Liquibase index size constraint |
+| `character-set-server` | hardcoded | `utf8` | Must be `utf8`, NOT `utf8mb4` - Liquibase index size constraint |
 | `lower_case_table_names` | hardcoded | `1` | Required for Liquibase schema migration |
 | `log_bin_trust_function_creators` | hardcoded | `1` | Required for trigger creation without SUPER |
 | `innodb_buffer_pool_size` | `mysql_innodb_buffer_pool_size` | auto-sized (RAM × 0.25) | Override: `mysql_innodb_buffer_pool_size_override` (MB) |
@@ -61,7 +61,7 @@ Key settings in `mysqld.cnf`:
 | `$TOMCAT_HOME/conf/context.xml` | `db_type`, `mysql_db_*`, `oracle_db_*`, `tomcat_pool_*` | JDBC connection pool | Yes |
 | `$TOMCAT_HOME/lib/mysql-connector*.jar` | _(from release zip)_ | MySQL JDBC driver | Yes (redeploy) |
 | `$TOMCAT_HOME/lib/ojdbc*.jar` | _(from release zip)_ | Oracle JDBC driver | Yes (redeploy) |
-| `/etc/systemd/system/openspecimen.service` | `tomcat_user`, `tomcat_home`, `db_managed` | systemd service unit | Yes — `systemctl daemon-reload` |
+| `/etc/systemd/system/openspecimen.service` | `tomcat_user`, `tomcat_home`, `db_managed` | systemd service unit | Yes - `systemctl daemon-reload` |
 
 `$TOMCAT_HOME` = `tomcat_home` = `/usr/local/openspecimen/tomcat-as`
 
@@ -71,7 +71,7 @@ Key settings in `mysqld.cnf`:
 |----------|---------|---------|
 | `tomcat_heap_max` | auto-sized | `max(2048, RAM_MB × 0.5)` then `+ "m"` |
 | `tomcat_heap_min` | auto-sized | `512m` |
-| `tomcat_heap_max_override` | _(unset)_ | Integer MB, no suffix — set in customer `group_vars` |
+| `tomcat_heap_max_override` | _(unset)_ | Integer MB, no suffix - set in customer `group_vars` |
 | `tomcat_heap_min_override` | _(unset)_ | Integer MB, no suffix |
 
 **JDBC connection pool** (`context.xml`):
@@ -107,7 +107,7 @@ Key settings in `mysqld.cnf`:
 
 | Property | Variable | Notes |
 |----------|----------|-------|
-| `datasource.type` | hardcoded `fresh` | Always `fresh` — `upgrade` is for legacy caTissue migrations only |
+| `datasource.type` | hardcoded `fresh` | Always `fresh` - `upgrade` is for legacy caTissue migrations only |
 | `database.type` | `db_type` | `mysql` or `oracle` |
 | `app.url` | `openspecimen_app_url` | Required when behind ALB or reverse proxy |
 | `node.name` | `openspecimen_node_name` | Required for multi-node HA cluster |
@@ -125,7 +125,7 @@ Key settings in `mysqld.cnf`:
 
 The version is derived from `openspecimen_release` by stripping the `openspecimen_` prefix
 (e.g. `openspecimen_v12.2.RC12` → plugin filename suffix `-v12.2.RC12.zip`). The same release
-upgrade therefore picks up the matching plugin version automatically — no inventory edit needed
+upgrade therefore picks up the matching plugin version automatically - no inventory edit needed
 on every upgrade.
 
 **Backup retention:**
@@ -148,7 +148,7 @@ and the MySQL connector JAR (tomcat role):
        └─ mysql-connector-*.jar
 ```
 
-The `config-changes/` subdirectory at the backup root is excluded from pruning — it's a flat log
+The `config-changes/` subdirectory at the backup root is excluded from pruning - it's a flat log
 directory written by the `update-config.sh` operator script, not a snapshot.
 
 ---
@@ -157,7 +157,7 @@ directory written by the `update-config.sh` operator script, not a snapshot.
 
 Optional TLS-terminating reverse proxy in front of Tomcat. The role is **skipped unless
 `apache_enabled` is true** (`site.yml` runs it only `when: apache_enabled`). On the AWS/ALB path
-leave it disabled — the ALB terminates TLS instead.
+leave it disabled - the ALB terminates TLS instead.
 
 | Variable | Default | What it sets |
 |----------|---------|--------------|
@@ -165,14 +165,14 @@ leave it disabled — the ALB terminates TLS instead.
 | `apache_proxy_protocol` | `http` | Backend to Tomcat: `http` (`http://localhost:<openspecimen_port>/openspecimen/`, avoids Ghostcat) or `ajp` (`ajp://127.0.0.1:<apache_ajp_port>/openspecimen/`). |
 | `apache_ajp_port` | `8009` | Tomcat AJP connector port (used when `apache_proxy_protocol: ajp`). The tomcat role binds this connector to `127.0.0.1`. |
 | `apache_enable_ssl` | `false` | Terminate TLS at Apache (adds an 80→443 redirect + HSTS). Requires the cert/key below. |
-| `apache_ssl_self_signed` | `false` | When SSL is on and no cert exists, generate a self-signed cert at the paths below (internal/test only — browsers warn). |
+| `apache_ssl_self_signed` | `false` | When SSL is on and no cert exists, generate a self-signed cert at the paths below (internal/test only - browsers warn). |
 | `apache_ssl_cert_file` / `apache_ssl_key_file` | `""` | Cert/key paths. Stage a CA-issued cert here, or let `apache_ssl_self_signed` create one. |
 | `apache_server_name` | derived from `openspecimen_app_url` (scheme/path stripped), else host FQDN | VirtualHost `ServerName`. |
 | `apache_http_port` / `apache_https_port` | `80` / `443` | Listen ports. |
 | `apache_security_headers` | `true` | Emit X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy (and HSTS when SSL). |
 
 > **RHEL note:** `mod_proxy*` / `mod_headers` are auto-loaded from the base `httpd` package, but
-> `mod_ssl` is a separate package — the role installs it automatically when `apache_enable_ssl` is set.
+> `mod_ssl` is a separate package - the role installs it automatically when `apache_enable_ssl` is set.
 
 > **ALB caveat:** because `apache_enabled` derives from `openspecimen_app_url`, setting the public
 > URL (incl. via the Jenkins `APP_URL` parameter) auto-enables Apache. ALB-fronted hosts that do not

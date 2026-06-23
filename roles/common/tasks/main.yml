@@ -2,7 +2,7 @@
 - name: Load OS-specific variables
   ansible.builtin.include_vars: "{{ ansible_facts['os_family'] }}.yml"
 
-# ── Prior version check — before any system change ───────────────────────────
+# ── Prior version check - before any system change ───────────────────────────
 
 - name: Prior version check
   ansible.builtin.include_tasks: version_check.yml

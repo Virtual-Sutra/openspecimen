@@ -16,5 +16,5 @@ node.name={{ openspecimen_node_name }}
 {% endif %}
 
 {% if openspecimen_app_url is defined and openspecimen_app_url %}
-app.url={{ openspecimen_app_url }}
+app.url={{ openspecimen_app_url | regex_replace('/+$', '') }}
 {% endif %}

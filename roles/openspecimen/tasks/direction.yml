@@ -1,14 +1,14 @@
 ---
 # Detect what to do based on openspecimen_release vs the on-target .release
-# marker — and on whether the installed plugin JARs match.
+# marker - and on whether the installed plugin JARs match.
 #
 # Outcomes:
-#   rollback  — requested version < installed → restore matching backup, end play
-#   no-op     — requested version == installed AND .deploy_success marker shows
+#   rollback  - requested version < installed → restore matching backup, end play
+#   no-op     - requested version == installed AND .deploy_success marker shows
 #               the prior deploy reached its very last task AND every paid +
 #               customer plugin JAR is present at the matching version → end play
 #               (override with -e force_deploy=true)
-#   deploy    — fresh install, upgrade, same-version run after a failed deploy
+#   deploy    - fresh install, upgrade, same-version run after a failed deploy
 #               (.deploy_success stale), or a missing/new plugin → continue with
 #               the rest of the play
 #
@@ -57,7 +57,7 @@
     msg: >-
       {% if _direction.stdout == 'rollback' %}
       ⤺ Downgrade detected: installed {{ _installed_release }} → requested {{ openspecimen_release }}.
-      Switching to ROLLBACK flow — will restore from the backup whose .release matches {{ openspecimen_release }}.
+      Switching to ROLLBACK flow - will restore from the backup whose .release matches {{ openspecimen_release }}.
       {% elif _installed_release %}
       → Deploy: installed {{ _installed_release }} → requested {{ openspecimen_release }}.
       {% else %}
@@ -74,11 +74,11 @@
   ansible.builtin.meta: end_play
   when: _direction.stdout == 'rollback'
 
-# ── Skip-if-current — same-version re-deploy with matching plugin JARs ───────
+# ── Skip-if-current - same-version re-deploy with matching plugin JARs ───────
 # When ALL of the following are true, the play ends without touching the target:
 #   1. Requested version equals the installed .release marker
 #   2. .deploy_success marker exists and references the same version
-#      (proves the prior deploy reached the very last task — no partial state)
+#      (proves the prior deploy reached the very last task - no partial state)
 #   3. Every paid + customer plugin has a matching JAR on disk
 # Override with: -e force_deploy=true   (re-runs the deploy even when current)
 
@@ -132,7 +132,7 @@
     - _last_deploy_success_release == openspecimen_release
     - not (force_deploy | default(false) | bool)
 
-# Detect orphan JARs — those present on disk but NOT in the current inventory
+# Detect orphan JARs - those present on disk but NOT in the current inventory
 # list. The orphan list is consumed twice:
 #   1. Here (same-version re-deploy): forces deploy to continue (no skip-if-
 #      current) so the operator's "remove this plugin" intent is acted on.
@@ -184,7 +184,7 @@
 # ── Config drift detection ────────────────────────────────────────────────────
 # Probe-render openspecimen.properties to a temp location and SHA-256 compare
 # with the live file. Tells us whether re-templating would actually change
-# anything — without writing to the live file yet. The role's main.yml runs
+# anything - without writing to the live file yet. The role's main.yml runs
 # the real template task later; if config differs, main.yml's task writes the
 # new content and the config-only fast path skips every WAR/plugin step.
 - name: Render openspecimen.properties to probe location
@@ -239,7 +239,7 @@
     - not (force_deploy | default(false) | bool)
 
 # ── Fast-path selection ──────────────────────────────────────────────────────
-# Plugins-only and config-only are independent — both can be true on the same
+# Plugins-only and config-only are independent - both can be true on the same
 # run (plugin list AND properties both changed), and both share the
 # "WAR is already at requested release, skip the WAR redeploy" optimisation.
 # The combined `_skip_war_redeploy` is what main.yml gates WAR/default-plugin
@@ -278,19 +278,19 @@
 - name: Announce plugins-only deploy
   ansible.builtin.debug:
     msg: >-
-      ⚡ Plugins-only deploy — WAR is already at {{ openspecimen_release }}.
+      ⚡ Plugins-only deploy - WAR is already at {{ openspecimen_release }}.
       Skipping zip upload, WAR backup, WAR extraction, and default-plugin
       extraction. Running plugin backup + orphan cleanup + paid/customer
       plugin install + Tomcat restart only.
       {% if _config_changed | default(false) %}
-      Config also drifted — re-templating openspecimen.properties as part of the same run.
+      Config also drifted - re-templating openspecimen.properties as part of the same run.
       {% endif %}
   when: _plugins_only_change | default(false)
 
 - name: Announce config-only deploy
   ansible.builtin.debug:
     msg: >-
-      ⚡ Config-only deploy — WAR is already at {{ openspecimen_release }} and
+      ⚡ Config-only deploy - WAR is already at {{ openspecimen_release }} and
       every plugin matches inventory. Skipping zip upload, WAR backup, WAR
       extraction, default-plugin extraction, and ALL paid/customer plugin
       uploads + extractions. Re-templating openspecimen.properties and
@@ -329,7 +329,7 @@
 - name: Announce why deploy will continue (mismatched or orphan plugins) on a same-version run
   ansible.builtin.debug:
     msg: >-
-      WAR is already at {{ openspecimen_release }} but plugin state differs —
+      WAR is already at {{ openspecimen_release }} but plugin state differs -
       missing paid: {{ (_installed_paid_jars.results | default([]) | selectattr('matched', 'eq', 0) | map(attribute='item') | list) }},
       missing customer: {{ (_installed_customer_jars.results | default([]) | selectattr('matched', 'eq', 0) | map(attribute='item') | list) }},
       orphan paid: {{ _orphan_paid_jars.stdout_lines | default([]) }},

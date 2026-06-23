@@ -1,7 +1,7 @@
-# Managed by Ansible — do not edit by hand
+# Managed by Ansible - do not edit by hand
 # Proxy backend is {{ apache_proxy_protocol | upper }} ({{ apache_proxy_backend }}).
 # When AJP is used, the Tomcat connector is bound to 127.0.0.1 (tomcat role),
-# so it is never reachable off-box — mitigates CVE-2020-1938 (Ghostcat).
+# so it is never reachable off-box - mitigates CVE-2020-1938 (Ghostcat).
 {% if apache_enable_ssl %}
 <VirtualHost *:{{ apache_http_port }}>
     ServerName {{ apache_server_name }}
@@ -23,7 +23,7 @@
     ServerName {{ apache_server_name }}
 
 {% endif %}
-    # Serve static error pages directly — exclusions must precede the catch-all ProxyPass
+    # Serve static error pages directly - exclusions must precede the catch-all ProxyPass
     ProxyPass /downtime.html    !
     ProxyPass /OS_LOGO_BANNER.png !
 

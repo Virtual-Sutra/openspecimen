@@ -1,6 +1,6 @@
 ---
-# Pre-flight checks. Runs as a pre_task in site.yml — before any
-# role executes — so misconfiguration fails the play before the target is
+# Pre-flight checks. Runs as a pre_task in site.yml - before any
+# role executes - so misconfiguration fails the play before the target is
 # modified. Every failure message tells the operator what's wrong AND what to fix.
 
 # ── Inventory / variable diagnostics ─────────────────────────────────────────
@@ -29,7 +29,7 @@
   when: openspecimen_debug | default(false) | bool
 
 # ── Required input validation ────────────────────────────────────────────────
-# Catches operator mistakes — unset variables, blank values, wrong formats —
+# Catches operator mistakes - unset variables, blank values, wrong formats -
 # before any time is wasted trying to reach the target.
 
 - name: Validate openspecimen_release is set
@@ -52,7 +52,7 @@
       Expected format: openspecimen_<version>   (e.g. openspecimen_v12.2.RC12)
 
       What to check:
-        - The release zip filename in BUILDS_DIR — strip the .zip extension and use that exact value.
+        - The release zip filename in BUILDS_DIR - strip the .zip extension and use that exact value.
         - The plugin version is derived as the part after 'openspecimen_'.
   when: not (openspecimen_release | regex_search('^openspecimen_.+'))
 

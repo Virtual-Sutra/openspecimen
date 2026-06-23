@@ -1,14 +1,14 @@
 ---
-# Rollback flow — included from two places:
+# Rollback flow - included from two places:
 #
 #   1. Top-level rollback.yml  (operator runs explicitly)
-#   2. site.yml pre_task — when the requested release is older
+#   2. site.yml pre_task - when the requested release is older
 #      than the installed release (downgrade direction detected)
 #
 # Backup selection (in order of precedence):
 #   1. backup_timestamp   : restore from this specific timestamped directory
 #   2. target_version     : restore from the backup whose .release matches this
-#                           (used by the auto-rollback path — pass the requested
+#                           (used by the auto-rollback path - pass the requested
 #                           openspecimen_release as target_version)
 #   3. (neither)          : restore from the most recent backup (mtime)
 #
@@ -204,7 +204,7 @@
       What likely happened:
         OpenSpecimen applied Liquibase migrations after this backup was created.
         Rolling back the WAR without rolling back the schema would leave the older
-        application running against a newer schema — risk of runtime errors, missing
+        application running against a newer schema - risk of runtime errors, missing
         columns, or refused startup.
 
       What to check (list the offending changesets):
@@ -219,7 +219,7 @@
            {{ '%Y-%m-%d %H:%M:%S' | strftime(_restore_stat.stat.mtime) }}, then re-run.
         3. Override (use only after manual schema fix or confirmed-safe downgrade):
              ansible-playbook ... -e allow_downgrade=true
-           — in Jenkins: tick the ALLOW_DOWNGRADE checkbox on the deploy job.
+           - in Jenkins: tick the ALLOW_DOWNGRADE checkbox on the deploy job.
   when:
     - not (allow_downgrade | default(false) | bool)
     - _changelog_count is defined
@@ -229,7 +229,7 @@
 - name: Warn that schema-downgrade detection was bypassed
   ansible.builtin.debug:
     msg: >-
-      ⚠ allow_downgrade=true — skipping schema-downgrade detection.
+      ⚠ allow_downgrade=true - skipping schema-downgrade detection.
       Proceeding with the rollback. Make sure the database schema is
       compatible with the target WAR before continuing.
   when:
@@ -263,7 +263,7 @@
     group:      "{{ tomcat_user }}"
     mode:       '0644'
 
-# ── 5. Restore plugins — all three tiers ─────────────────────────────────────
+# ── 5. Restore plugins - all three tiers ─────────────────────────────────────
 
 - name: Probe backup plugin subdirectories
   ansible.builtin.stat:

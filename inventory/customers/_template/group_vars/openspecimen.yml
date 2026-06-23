@@ -2,7 +2,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # Customer-specific variable overrides
 #
-# All variables are commented out — their default values (from
+# All variables are commented out - their default values (from
 # inventory/group_vars/all.yml) are shown in the comment.
 # Uncomment and set only the values that differ for this customer.
 #
@@ -29,7 +29,7 @@
 #
 # openspecimen_release must match the zip filename (without .zip).
 # openspecimen_version is a display label used in the completion message.
-# Both must be set — there is no default.
+# Both must be set - there is no default.
 
 # openspecimen_release: ""    # must match the zip filename exactly
 # openspecimen_port:    8080
@@ -51,7 +51,7 @@
 # Role: openspecimen
 #
 # Required when the app is accessed via a hostname that differs from the
-# server's own address — ALB, reverse proxy, or VPN gateway.
+# server's own address - ALB, reverse proxy, or VPN gateway.
 # Maps to app.url in openspecimen.properties.
 # After deploy, also set: Settings → Common → Allowed Request Origins.
 # Ref: https://openspecimen.atlassian.net/wiki/spaces/CAT/pages/3342041156
@@ -68,7 +68,7 @@
 #
 # When openspecimen_app_url (above) is set, Apache is auto-enabled and fronts
 # Tomcat as a reverse proxy; its VirtualHost ServerName is derived from that URL.
-# On the AWS/ALB path leave these unset — the ALB terminates TLS instead.
+# On the AWS/ALB path leave these unset - the ALB terminates TLS instead.
 #
 # apache_enabled wins from -e on the Jenkins job / playbook invocation (extra-vars
 # precedence) over what is set here or the openspecimen_app_url-derived default.
@@ -92,7 +92,7 @@
 
 # ── JVM heap ─────────────────────────────────────────────────────────────────
 # Role: tomcat
-# Default: auto-sized — max(2048 MB, RAM × 0.5). OpenSpecimen enforces 2 GB min.
+# Default: auto-sized - max(2048 MB, RAM × 0.5). OpenSpecimen enforces 2 GB min.
 # Override by setting the _override variables (integer MB, no unit suffix):
 
 # tomcat_heap_max_override: "4096"   # sets -Xmx4096m  (default: max(2048, RAM×0.5))
@@ -113,7 +113,7 @@
 # tomcat_pool_abandoned_timeout_s:    300
 # tomcat_pool_abandon_pct:            60
 
-# ── MySQL (db_type: mysql, db_managed: true — local install) ─────────────────
+# ── MySQL (db_type: mysql, db_managed: true - local install) ─────────────────
 # Role: mysql
 # Pass mysql_db_password at run time: -e mysql_db_password=<password>
 
@@ -123,7 +123,7 @@
 # mysql_max_allowed_packet: "64M"              # default: 64M
 # mysql_innodb_buffer_pool_size_override: "2048"  # integer MB; default: auto (RAM × 0.25)
 
-# ── MySQL / RDS (db_type: mysql, db_managed: false — external DB) ─────────────
+# ── MySQL / RDS (db_type: mysql, db_managed: false - external DB) ─────────────
 # Role: mysql (skipped), tomcat (JDBC URL)
 # Set mysql_db_host to the RDS endpoint or private DB server IP.
 # Pass mysql_db_password at run time: -e mysql_db_password=<password>
@@ -136,7 +136,7 @@
 # Role: tomcat (JDBC URL and driver), mysql (skipped)
 # Pass oracle_db_password at run time: -e oracle_db_password=<password>
 #
-# Use service name (preferred) OR SID — not both.
+# Use service name (preferred) OR SID - not both.
 #   Service name → jdbc:oracle:thin:@//host:port/service_name
 #   SID (legacy) → jdbc:oracle:thin:@host:port:sid
 #
@@ -151,6 +151,6 @@
 
 # oracle_db_host:    "REPLACE_WITH_ORACLE_HOST"
 # oracle_db_port:    1521
-# oracle_db_service: "REPLACE_WITH_SERVICE_NAME"   # preferred — set this OR oracle_db_sid
+# oracle_db_service: "REPLACE_WITH_SERVICE_NAME"   # preferred - set this OR oracle_db_sid
 # oracle_db_sid:     "REPLACE_WITH_SID"            # legacy Oracle 11g only
 # oracle_db_user:    openspecimen

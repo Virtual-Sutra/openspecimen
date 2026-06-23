@@ -7,7 +7,7 @@ _apache_log_dir:  /var/log/httpd
 _apache_webroot:  /var/www/html
 # RedHat httpd auto-loads mod_proxy / mod_proxy_http / mod_proxy_ajp / mod_headers
 # / mod_expires from conf.modules.d, so there is no per-module enable step (unlike
-# Debian's a2enmod). mod_ssl is the exception — a separate package installed by the
+# Debian's a2enmod). mod_ssl is the exception - a separate package installed by the
 # "Install mod_ssl (RedHat)" task in tasks/main.yml when apache_enable_ssl is set.
 _apache_modules:  []
 _apache_ssl_modules: []

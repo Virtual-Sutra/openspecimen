@@ -55,4 +55,4 @@
 
     - name: Report
       ansible.builtin.debug:
-        msg: "Heap updated — {{ _heap.stdout_lines | join('  ') }}"
+        msg: "Heap updated - {{ _heap.stdout_lines | join('  ') }}"

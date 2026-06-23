@@ -97,7 +97,7 @@
     mode: '0644'
   # No inline `validate: apache2ctl -t -f %s`: the -f flag makes Apache use ONLY
   # the vhost file as the whole config, so the base config (and the MPM module)
-  # is never loaded — `apache2ctl -t -f <vhost>` fails with "No MPM loaded". The
+  # is never loaded - `apache2ctl -t -f <vhost>` fails with "No MPM loaded". The
   # full configtest below validates the real config (base + MPM + this vhost)
   # once the site is enabled.
   notify: reload apache

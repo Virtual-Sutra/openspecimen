@@ -4,7 +4,7 @@
 #
 # Each entry:
 #   src:         path to .jar or .zip file on the Ansible controller
-#   dest_subdir: target subdirectory — one of: default, paid, zustomer
+#   dest_subdir: target subdirectory - one of: default, paid, zustomer
 #
 # Example:
 #   customer_plugins:

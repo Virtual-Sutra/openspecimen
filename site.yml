@@ -1,5 +1,5 @@
 ---
-# Unified deploy playbook — handles both fresh install and upgrade.
+# Unified deploy playbook - handles both fresh install and upgrade.
 #
 # The openspecimen role auto-detects fresh vs upgrade (DB schema check) and
 # direction.yml detects deploy / rollback / no-op from the on-target .release
@@ -29,7 +29,7 @@
   pre_tasks:
     # Detect deploy vs rollback direction by comparing openspecimen_release
     # against the on-target .release marker. On downgrade, the rollback flow
-    # is invoked automatically and the play ends — the roles below do not run.
+    # is invoked automatically and the play ends - the roles below do not run.
     - name: Detect direction (deploy or rollback)
       ansible.builtin.include_role:
         name: openspecimen
@@ -37,7 +37,7 @@
 
     # Verify the release zip and every paid/customer plugin zip exists on the
     # control node before any role runs. Fails fast if anything is missing.
-    # (Only reached on forward / fresh deploys — rollback ended the play.)
+    # (Only reached on forward / fresh deploys - rollback ended the play.)
     - name: Pre-flight artifact check
       ansible.builtin.include_role:
         name: openspecimen
@@ -53,7 +53,7 @@
              or (force_deploy | default(false) | bool) }}
 
   roles:
-    # ── Base roles — fresh install or force_deploy only (skipped on fast upgrades)
+    # ── Base roles - fresh install or force_deploy only (skipped on fast upgrades)
     - role: common
       when: _full_deploy
       tags: [base]
@@ -69,7 +69,7 @@
       when: _full_deploy
       tags: [base]
 
-    # ── App roles — always run (install and upgrade)
+    # ── App roles - always run (install and upgrade)
     - openspecimen
     - role: plugins
       when: customer_plugins | default([]) | length > 0
@@ -78,7 +78,7 @@
 
   post_tasks:
     # The primary readiness check is Phase 1 (Tomcat startup) in the openspecimen
-    # role — always runs, local, no DNS needed. This optional public-URL (app_url)
+    # role - always runs, local, no DNS needed. This optional public-URL (app_url)
     # check runs ONLY when openspecimen_verify_app_url is enabled (default false;
     # turn on once public DNS exists). It runs after ALL roles (notably apache) so
     # the proxy that serves the URL is in place.
