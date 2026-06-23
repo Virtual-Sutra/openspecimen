@@ -22,7 +22,7 @@
   pre_tasks:
     - name: Require customer variable
       ansible.builtin.fail:
-        msg: "customer is required — pass -e customer=<name> matching inventory/customers/<name>/"
+        msg: "customer is required - pass -e customer=<name> matching inventory/customers/<name>/"
       when: customer is not defined or not customer | trim
 
   tasks:
@@ -100,9 +100,9 @@
           - "==========================================="
           - "  VM: {{ inventory_hostname }}"
           - "==========================================="
-          - "  SSH              : {{ 'OK' if _ssh_ping is succeeded else 'FAILED — check ansible_host and SSH key' }}"
-          - "  Disk space       : {{ _disk_space.stdout | default('N/A — SSH failed') }}"
-          - "  Installed version: {{ (_release_marker.content | b64decode | trim) if (_release_marker.content is defined) else 'not installed — fresh deploy' }}"
+          - "  SSH              : {{ 'OK' if _ssh_ping is succeeded else 'FAILED - check ansible_host and SSH key' }}"
+          - "  Disk space       : {{ _disk_space.stdout | default('N/A - SSH failed') }}"
+          - "  Installed version: {{ (_release_marker.content | b64decode | trim) if (_release_marker.content is defined) else 'not installed - fresh deploy' }}"
           - "  Service status   : {{ _service_status.stdout | default('N/A') }}"
 
     - name: Fail if VM is unreachable

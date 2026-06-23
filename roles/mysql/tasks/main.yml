@@ -8,7 +8,7 @@
 
 # ── RHEL 9: add MySQL Community repo ─────────────────────────────────────────
 # RHEL 9 ships MariaDB in its default repos; the community repo provides
-# genuine MySQL 8.4 LTS. The RPM is idempotent — dnf skips it if already present.
+# genuine MySQL 8.4 LTS. The RPM is idempotent - dnf skips it if already present.
 
 - name: Install MySQL Community repository (RHEL)
   ansible.builtin.dnf:
@@ -117,7 +117,7 @@
 
 - name: Reinitialize MySQL data directory (Debian, all auth broken)
   # debian-sys-maint password is stale (debian.cnf out of sync with MySQL grants,
-  # common on re-used instances). Wipe the data directory — MySQL re-initialises
+  # common on re-used instances). Wipe the data directory - MySQL re-initialises
   # on next start with auth_socket for root (Ubuntu package default), and our
   # mysqld.cnf (written before install) is applied from first init.
   when:
@@ -136,7 +136,7 @@
         state: absent
 
     - name: Initialize MySQL data directory
-      # Ubuntu's mysql-systemd-start refuses to start without /var/lib/mysql —
+      # Ubuntu's mysql-systemd-start refuses to start without /var/lib/mysql -
       # it does not auto-init. --initialize-insecure creates the data dir and
       # sets root to empty password (no plugin), which we switch to auth_socket below.
       ansible.builtin.command:

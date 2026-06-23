@@ -3,13 +3,13 @@ apache_http_port:   80
 apache_https_port:  443
 
 # Enable the Apache reverse-proxy front-end. Defaults to "on when
-# openspecimen_app_url is set" — a customer with a public hostname is fronted
+# openspecimen_app_url is set" - a customer with a public hostname is fronted
 # by Apache; a bare Tomcat (AWS/ALB path) is not. Override explicitly here, or
 # via -e apache_enabled=... on the playbook / Jenkins job, which takes
 # precedence over group_vars (native Ansible extra-vars precedence).
 apache_enabled: "{{ (openspecimen_app_url | default('') | trim | length) > 0 }}"
 
-# VirtualHost ServerName — derived from openspecimen_app_url (scheme and path
+# VirtualHost ServerName - derived from openspecimen_app_url (scheme and path
 # stripped) when set, else the host's own FQDN. Same derivation the openspecimen
 # role uses for its external-reachability check.
 apache_server_name: >-
@@ -18,9 +18,9 @@ apache_server_name: >-
      else (ansible_fqdn | default(ansible_hostname)) }}
 
 # Proxy protocol to the local Tomcat backend: 'http' (default) or 'ajp'.
-#   http → http://localhost:<openspecimen_port>/openspecimen/ — no AJP exposure,
+#   http → http://localhost:<openspecimen_port>/openspecimen/ - no AJP exposure,
 #          avoids Ghostcat (CVE-2020-1938). Safe default for upstream.
-#   ajp  → ajp://127.0.0.1:<apache_ajp_port>/openspecimen/ — matches operator
+#   ajp  → ajp://127.0.0.1:<apache_ajp_port>/openspecimen/ - matches operator
 #          sample configs. The Tomcat AJP connector is bound to 127.0.0.1 by the
 #          tomcat role, so it is never reachable off-box (Ghostcat mitigation).
 apache_proxy_protocol: http
@@ -32,11 +32,11 @@ apache_ssl_cert_file: ""
 apache_ssl_key_file:  ""
 
 # Generate a self-signed cert at the paths above when SSL is enabled and the
-# cert is absent — for internal/test environments without a CA-issued cert
+# cert is absent - for internal/test environments without a CA-issued cert
 # (browsers will warn on the untrusted cert). Set the cert/key paths when true.
 apache_ssl_self_signed: false
 
-# Proxy backend URL — derived from apache_proxy_protocol above.
+# Proxy backend URL - derived from apache_proxy_protocol above.
 apache_proxy_backend: >-
   {{ ('ajp://127.0.0.1:' ~ apache_ajp_port ~ '/openspecimen/')
      if apache_proxy_protocol == 'ajp'

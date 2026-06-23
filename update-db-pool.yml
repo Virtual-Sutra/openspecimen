@@ -60,4 +60,4 @@
 
     - name: Report
       ansible.builtin.debug:
-        msg: "Pool updated — maxActive={{ _pool.stdout }}"
+        msg: "Pool updated - maxActive={{ _pool.stdout }}"

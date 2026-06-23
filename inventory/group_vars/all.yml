@@ -1,6 +1,6 @@
 ---
 # ═══════════════════════════════════════════════════════════════════════════════
-# OpenSpecimen Deployment — Default Variables
+# OpenSpecimen Deployment - Default Variables
 # Pass sensitive values at run time: -e mysql_db_password=<password>
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -10,12 +10,12 @@
 db_type:    mysql
 
 # true  = Ansible installs and manages MySQL on this VM (default)
-# false = skip the mysql role; DB is external — RDS, Aurora, Oracle, etc.
+# false = skip the mysql role; DB is external - RDS, Aurora, Oracle, etc.
 db_managed: true
 
 # ── Release ───────────────────────────────────────────────────────────────────
 # openspecimen_release is the zip filename without the .zip extension.
-# It must be set per deployment — no default is provided here.
+# It must be set per deployment - no default is provided here.
 # Override in inventory/customers/<name>/group_vars/openspecimen.yml
 # or pass at run time: -e openspecimen_release=<release-name>
 openspecimen_release: ""    # must be set; matches the zip filename without .zip
@@ -50,7 +50,7 @@ openspecimen_backup_dir:    /usr/local/openspecimen/backup
 openspecimen_release_marker: /usr/local/openspecimen/.release
 
 # Written ONLY at the very last task of a successful deploy. Read by
-# roles/openspecimen/tasks/direction.yml — the skip-if-current shortcut requires
+# roles/openspecimen/tasks/direction.yml - the skip-if-current shortcut requires
 # this file to match the requested release. If the previous deploy failed before
 # reaching the end, the file is stale and the next run will redeploy without
 # needing -e force_deploy=true.
@@ -67,7 +67,7 @@ openspecimen_backup_retention: 3
 # Ref: https://openspecimen.atlassian.net/wiki/spaces/CAT/pages/1193082943
 # openspecimen_node_name: ""
 
-# Public URL for OpenSpecimen — required when the app is accessed via a hostname
+# Public URL for OpenSpecimen - required when the app is accessed via a hostname
 # that differs from the server's own address (reverse proxy, ALB, VPN gateway).
 # Used for: email links (password resets, survey invites), SAML redirects.
 # Maps to app.url in openspecimen.properties.
@@ -78,7 +78,7 @@ openspecimen_backup_retention: 3
 
 # ── Post-deploy health check ──────────────────────────────────────────────────
 # The primary readiness check is Phase 1 (Tomcat startup) in the openspecimen
-# role — it always runs, is local, and needs no DNS.
+# role - it always runs, is local, and needs no DNS.
 #
 # The optional public-URL check below curls openspecimen_app_url from the control
 # node to validate the front-end proxy / ALB / DNS path. It is OFF by default;
@@ -100,7 +100,7 @@ openspecimen_health_delay:   10
 # ── Tomcat ────────────────────────────────────────────────────────────────────
 tomcat_user: openspecimen
 # tomcat_heap_max and tomcat_heap_min are auto-sized from instance RAM in
-# roles/tomcat/defaults/main.yml — see CONFIG-REFERENCE.md for the formula.
+# roles/tomcat/defaults/main.yml - see CONFIG-REFERENCE.md for the formula.
 # Override per customer with tomcat_heap_max_override / tomcat_heap_min_override (MB).
 
 # ── Tomcat JDBC Connection Pool ───────────────────────────────────────────────
@@ -118,7 +118,7 @@ tomcat_pool_abandon_pct:             60
 # ── MySQL ─────────────────────────────────────────────────────────────────────
 mysql_db_name:       openspecimen
 mysql_db_user:       openspecimen
-mysql_db_password:   ~                    # required — pass via -e mysql_db_password=<password>
+mysql_db_password:   ~                    # required - pass via -e mysql_db_password=<password>
 mysql_bind_address:  "127.0.0.1"
 
 # Host seen by Tomcat's JDBC URL. Use 127.0.0.1 when DB is on the same VM;
@@ -133,12 +133,12 @@ mysql_max_allowed_packet: "64M"
 
 # ── Oracle (db_type: oracle) ──────────────────────────────────────────────────
 # Uncomment and populate when db_type: oracle. Set db_managed: false.
-# Use either service name (preferred) OR SID — not both.
+# Use either service name (preferred) OR SID - not both.
 #
 #   Service name → jdbc:oracle:thin:@//host:port/service_name  (modern, preferred)
 #   SID          → jdbc:oracle:thin:@host:port:sid              (legacy, Oracle 11g)
 #
-# Note: The thin JDBC driver (used here) is pure Java — no Oracle client or
+# Note: The thin JDBC driver (used here) is pure Java - no Oracle client or
 #       ORACLE_HOME installation is required on the Tomcat host.
 #
 # Required DB user grants (run as sysdba or DBA before first deploy):
@@ -154,7 +154,7 @@ mysql_max_allowed_packet: "64M"
 #
 # oracle_db_host:     "oracle.yourdomain.com"
 # oracle_db_port:     1521
-# oracle_db_service:  "ORCL"          # service name — set this OR oracle_db_sid, not both
-# oracle_db_sid:      "ORCL"          # SID — legacy Oracle 11g; leave unset if using service name
+# oracle_db_service:  "ORCL"          # service name - set this OR oracle_db_sid, not both
+# oracle_db_sid:      "ORCL"          # SID - legacy Oracle 11g; leave unset if using service name
 # oracle_db_user:     openspecimen
 # oracle_db_password: "changeme"      # pass via -e oracle_db_password=<password>

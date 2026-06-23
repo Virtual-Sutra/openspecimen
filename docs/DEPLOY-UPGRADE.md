@@ -19,15 +19,15 @@ requested `openspecimen_release` using natural version sort (`sort -V`):
   before completing) → deploy re-runs; no operator flag needed.
 - **Marker present, same version** but a plugin in the inventory has no matching JAR
   on disk → deploy continues to install just the missing plugins. WAR redeploys happen
-  too — the upgrade flow doesn't differentiate between WAR-changed and plugin-changed.
+  too - the upgrade flow doesn't differentiate between WAR-changed and plugin-changed.
 - **Marker present, requested > installed** → upgrade (backup → deploy → restart)
-- **Marker present, requested < installed** → automatic rollback (see "Rollback" below) —
+- **Marker present, requested < installed** → automatic rollback (see "Rollback" below) -
   the requested version's backup is restored and the play ends. No separate job needed.
 
 `openspecimen_release` is always supplied at run time via
 `-e openspecimen_release=<name>`. It is **not** stored in inventory `group_vars`.
 
-Direction detection runs as the **first** pre_task in `site.yml` —
+Direction detection runs as the **first** pre_task in `site.yml` -
 `roles/openspecimen/tasks/direction.yml`. When a downgrade is
 detected, the play dispatches to `tasks_from: rollback` (target_version =
 requested release) and ends; the remaining roles never run.
@@ -46,19 +46,19 @@ Before deploying:
 **Host / package prerequisites:**
 - Ansible ≥ 2.15 + collections (`ansible-galaxy collection install -r requirements.yml`)
   and Python 3 ≥ 3.9 on the target
-- **sudo/root** on the target — the roles use `become` to install packages and write system config
+- **sudo/root** on the target - the roles use `become` to install packages and write system config
 - **Outbound internet** (or a local mirror) so the roles can install Java, MySQL and
   Tomcat. On RHEL the `common` role enables **EPEL**; the `mysql` role adds the MySQL
   community repo
 - Connectivity: SSH key from a controller, **or** run on the box itself with a localhost
-  inventory (`ansible_connection=local`, no SSH) — see `inventory/hosts-local.sample`
+  inventory (`ansible_connection=local`, no SSH) - see `inventory/hosts-local.sample`
 
 ---
 
 ## Pre-flight checks
 
-Every play (`site.yml`) runs a pre_task block that fails fast — **before any
-target modification** — if the operator's inputs are wrong. Checks include:
+Every play (`site.yml`) runs a pre_task block that fails fast - **before any
+target modification** - if the operator's inputs are wrong. Checks include:
 
 - `openspecimen_release` is set and matches the expected `openspecimen_<version>` format
 - `openspecimen_builds_dir` is set
@@ -68,7 +68,7 @@ target modification** — if the operator's inputs are wrong. Checks include:
   has a matching `<name>-<version>.zip` file under `openspecimen_builds_dir`
 
 When a check fails, the operator gets a structured message with the exact path/value that
-was wrong, what to check, and how to fix it — for example:
+was wrong, what to check, and how to fix it - for example:
 
 ```
 ✗ Paid plugin zip not found anywhere under /var/lib/jenkins/jobs.
@@ -138,7 +138,7 @@ ansible-playbook ... --check
 
 OpenSpecimen ships with **default plugins** bundled in the release zip
 (`os-distribution-invoicing`, `os-task-manager`, `os-edc`, `os-extras`). These are extracted
-to `plugins/default/` automatically — no inventory configuration is needed.
+to `plugins/default/` automatically - no inventory configuration is needed.
 
 Two additional tiers are supported for plugins delivered as separate zips alongside the release zip:
 
@@ -149,7 +149,7 @@ Two additional tiers are supported for plugins delivered as separate zips alongs
 
 ### Naming convention
 
-Inventory lists **plugin names only** — no version, no extension. The role derives the zip
+Inventory lists **plugin names only** - no version, no extension. The role derives the zip
 filename at runtime:
 
 ```
@@ -160,14 +160,14 @@ filename at runtime:
 Example: with `openspecimen_release=openspecimen_v12.2.RC12` and inventory entry
 `os-automated-freezers`, the role looks for `os-automated-freezers-v12.2.RC12.zip`.
 
-This means **inventory does not need to be updated on every OpenSpecimen upgrade** — only the
+This means **inventory does not need to be updated on every OpenSpecimen upgrade** - only the
 plugin zip on disk needs to be replaced with the new version.
 
 ### Where to place the plugin zip
 
 The plugin zip must live in the same directory as the release zip on the Ansible control node
 (or in any subdirectory of `openspecimen_builds_dir`). Each zip must contain at least one `.jar`
-file — `unzip -jo` extracts JARs from any path inside the zip.
+file - `unzip -jo` extracts JARs from any path inside the zip.
 
 ### Inventory example
 
@@ -218,9 +218,9 @@ Each timestamped directory holds a complete snapshot:
 
 ## Day-2: Rollback
 
-Rollback has two paths — both backed by the same `roles/openspecimen/tasks/rollback.yml`:
+Rollback has two paths - both backed by the same `roles/openspecimen/tasks/rollback.yml`:
 
-### A. Automatic (via deploy job — recommended)
+### A. Automatic (via deploy job - recommended)
 
 Just pick a lower release in `site.yml` (or in the Jenkins
 deploy job). Direction detection notices the requested version is older than
@@ -239,7 +239,7 @@ If no backup of the requested version exists, the play fails with a list of
 available backups and the operator can either pick a version that does have
 one or override with `-e allow_downgrade=true`.
 
-### B. Explicit — direct rollback.yml invocation
+### B. Explicit - direct rollback.yml invocation
 
 Use this when you want to roll back to a specific backup directory (or the
 most recent one) rather than a specific version.
@@ -284,18 +284,18 @@ service or moving any files.
 
 | Item | Restored from backup |
 |------|---------------------|
-| `openspecimen.war` | Yes — required, playbook fails if missing |
+| `openspecimen.war` | Yes - required, playbook fails if missing |
 | `plugins/default/*.jar` | Yes (if present in backup) |
 | `plugins/paid/*.jar` | Yes (if present in backup) |
 | `plugins/zustomer/*.jar` | Yes (if present in backup) |
 | `lib/mysql-connector-*.jar` | Yes (if present in backup) |
-| `conf/openspecimen.properties` | Yes (if present in backup) — restores the exact config the old WAR ran with |
+| `conf/openspecimen.properties` | Yes (if present in backup) - restores the exact config the old WAR ran with |
 | `bin/setenv.sh` (JVM heap) | Yes (if present in backup) |
 | `conf/context.xml` (JDBC pool) | Yes (if present in backup) |
-| `/usr/local/openspecimen/.release` | Yes (if present in backup) — keeps the marker consistent with the live version |
-| Database schema | **No** — Liquibase rollback is not modelled. See "Schema-downgrade safeguard" below. |
+| `/usr/local/openspecimen/.release` | Yes (if present in backup) - keeps the marker consistent with the live version |
+| Database schema | **No** - Liquibase rollback is not modelled. See "Schema-downgrade safeguard" below. |
 
-No separate `site.yml` run is needed for config — `rollback.yml` restores the
+No separate `site.yml` run is needed for config - `rollback.yml` restores the
 exact config snapshot taken at the time of the previous deploy.
 
 ### Schema-downgrade safeguard
@@ -327,7 +327,7 @@ If any new migrations exist, the rollback **halts** with diagnostics:
 ```
 
 This protects against rolling the WAR back to a version that doesn't know
-about columns/tables the newer Liquibase migrations added — a class of failure
+about columns/tables the newer Liquibase migrations added - a class of failure
 that's silent at startup but blows up at first user request.
 
 To override after manual schema fix or a confirmed-safe downgrade:
@@ -342,7 +342,7 @@ ansible-playbook -i inventory/customers/<name>/ rollback.yml \
 
 The playbook fails fast with operator guidance and lists the available
 backups. If all backups have been pruned (`openspecimen_backup_retention`
-reached), use `site.yml` with the older release zip instead — there is
+reached), use `site.yml` with the older release zip instead - there is
 nothing to restore from.
 
 ---
@@ -355,7 +355,7 @@ via `-e mysql_db_password=<password>` (or your CI/CD secrets manager).
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `openspecimen_release` | _(required at run time)_ | Zip filename without `.zip` — e.g. `openspecimen_v12.3` |
+| `openspecimen_release` | _(required at run time)_ | Zip filename without `.zip` - e.g. `openspecimen_v12.3` |
 | `openspecimen_zip_path` | `{{ openspecimen_builds_dir }}/{{ openspecimen_release }}.zip` | Path to the release zip on the controller or target |
 | `openspecimen_builds_dir` | `/opt/openspecimen/builds` | Default location for release zips on the target node |
 | `openspecimen_port` | `8080` | Tomcat HTTP port |
@@ -369,6 +369,6 @@ via `-e mysql_db_password=<password>` (or your CI/CD secrets manager).
 | `tomcat_pool_max_active` | `100` | JDBC connection pool size |
 | `openspecimen_backup_dir` | `/usr/local/openspecimen/backup` | Timestamped backup location on upgrade |
 | `openspecimen_backup_retention` | `3` | Number of timestamped backups to keep; older ones are pruned at end of deploy |
-| `openspecimen_paid_plugins` | `[]` | List of paid plugin names (no version, no extension) — see [Plugin deployment](#plugin-deployment) |
+| `openspecimen_paid_plugins` | `[]` | List of paid plugin names (no version, no extension) - see [Plugin deployment](#plugin-deployment) |
 | `openspecimen_customer_plugins` | `[]` | List of customer plugin names |
 | `openspecimen_release_file` | _(unset)_ | Set by the Jenkins pipeline. When set, plugin search dir = `dirname(openspecimen_release_file)`. Otherwise the role searches recursively under `openspecimen_builds_dir`. |

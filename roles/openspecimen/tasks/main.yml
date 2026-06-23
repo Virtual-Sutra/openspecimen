@@ -17,7 +17,7 @@
 
 # ── Detect install type ───────────────────────────────────────────────────────
 # Checks the database, not the WAR. A WAR on disk with an empty DB (e.g. after
-# DB reset) must be treated as fresh — using upgrade mode on an empty DB skips
+# DB reset) must be treated as fresh - using upgrade mode on an empty DB skips
 # core schema creation and causes Liquibase FK failures.
 # Override with: -e openspecimen_install_type=fresh|upgrade
 
@@ -70,7 +70,7 @@
                If not (fresh install), MySQL role usually creates it. Verify db_managed setting:
                  db_managed = {{ db_managed | default('(not set)') }}
 
-            4. For RDS — is the security group allowing this VM's IP on port 3306?
+            4. For RDS - is the security group allowing this VM's IP on port 3306?
 
           Common fixes:
             - Wrong password    → update secrets/{{ inventory_hostname }}.yml
@@ -86,15 +86,15 @@
   ansible.builtin.debug:
     msg: >-
       {% if openspecimen_install_type == 'fresh' %}
-      Fresh install — deploying {{ openspecimen_release }}
+      Fresh install - deploying {{ openspecimen_release }}
       {% elif _installed_release | default('') %}
-      Upgrade — installed: {{ _installed_release }} → requesting: {{ openspecimen_release }}
+      Upgrade - installed: {{ _installed_release }} → requesting: {{ openspecimen_release }}
       {% else %}
-      Upgrade — no prior release marker found → requesting: {{ openspecimen_release }}
+      Upgrade - no prior release marker found → requesting: {{ openspecimen_release }}
       {% endif %}
 
 # ── Ensure release zip is on target ──────────────────────────────────────────
-# site.yml on an upgrade runs only the app roles (openspecimen/plugins/apache) —
+# site.yml on an upgrade runs only the app roles (openspecimen/plugins/apache) -
 # upload if not already present.
 
 - name: Upload release zip to target (if not already present)
@@ -109,7 +109,7 @@
 # ── Cache zip contents listing ────────────────────────────────────────────────
 # Listed once here; reused for WAR and plugin extraction below.
 # When site.yml runs, tomcat role may have already set _zip_contents.
-# Skipped on plugins-only — no WAR or default-plugin extraction will run.
+# Skipped on plugins-only - no WAR or default-plugin extraction will run.
 
 - name: Cache release zip contents
   ansible.builtin.shell: unzip -l /tmp/{{ openspecimen_release }}.zip
@@ -119,9 +119,9 @@
 
 # ── Create required directories ───────────────────────────────────────────────
 # Plugin subdirectory structure matches install.sh:
-#   default/   — common plugins from release zip
-#   paid/      — paid enterprise plugins
-#   zustomer/  — customer-specific plugins
+#   default/   - common plugins from release zip
+#   paid/      - paid enterprise plugins
+#   zustomer/  - customer-specific plugins
 
 - name: Create data, plugin and backup directories
   ansible.builtin.file:
@@ -152,7 +152,7 @@
 # ── openspecimen.properties ───────────────────────────────────────────────────
 
 # Slurp the pre-template content of openspecimen.properties so the upgrade
-# backup (further below) can write the OLD content — otherwise the template
+# backup (further below) can write the OLD content - otherwise the template
 # task one line down overwrites the live file before backup runs, and the
 # backup ends up snapshotting the NEW content. Without this, a rollback to
 # this timestamp would not restore the prior config.
@@ -187,14 +187,14 @@
   when: openspecimen_install_type == 'upgrade'
 
 # Per-tier backup directories are conditional so that rollback.yml line 274
-# ("Wipe current plugin tier — only when backup has it") doesn't clobber live
+# ("Wipe current plugin tier - only when backup has it") doesn't clobber live
 # state from a fast-path backup that didn't capture that tier:
 #   - plugins-only: skip plugins/default (WAR unchanged → default JARs live and
 #                   correct; an empty default/ in backup would wipe them on
 #                   rollback). Keep paid/zustomer (plugin drift is what's being
 #                   backed up) and config (cheap).
 #   - config-only: skip plugins/default, plugins/paid, plugins/zustomer (all
-#                  unchanged). Keep only config — the openspecimen.properties
+#                  unchanged). Keep only config - the openspecimen.properties
 #                  snapshot for rollback.
 #   - full deploy: all four (default, paid, zustomer, config).
 - name: Create backup directory structure
@@ -224,7 +224,7 @@
     - openspecimen_install_type == 'upgrade'
     - not (_plugins_only_change | default(false) or _config_only_change | default(false))
 
-# Remove orphan plugin JARs BEFORE the backup mv — without this, the backup
+# Remove orphan plugin JARs BEFORE the backup mv - without this, the backup
 # would snapshot the orphan and a rollback to that timestamp would resurrect
 # the plugin the operator just removed from inventory.
 - name: Remove orphan plugin JARs from live dirs (no longer in inventory)
@@ -237,7 +237,7 @@
 # Also purge the orphan from EXISTING backups under paid/ and zustomer/. The
 # rationale is licensing: paid + customer plugins ride on contractual entitlements,
 # so a lapsed license must not survive in a backup that a future rollback could
-# restore. Scoped strictly to plugins/paid/ and plugins/zustomer/ — plugins/default/
+# restore. Scoped strictly to plugins/paid/ and plugins/zustomer/ - plugins/default/
 # (open-source, from the release zip) is left intact, as is the WAR.
 # Matches every version of the orphan plugin (e.g. os-hl7-v12.1.jar,
 # os-hl7-v12.2.RC8.jar) so backups taken under prior releases are also cleaned.
@@ -310,10 +310,10 @@
     - _openspecimen_properties_pre_template.content is defined
 
 # setenv.sh and context.xml are templated only by the tomcat role (which runs
-# on site.yml fresh installs, not on site.yml upgrades — base roles are skipped).
+# on site.yml fresh installs, not on site.yml upgrades - base roles are skipped).
 # On the upgrade path
 # these files are untouched between the prior deploy and this point, so the
-# live file IS the OLD file — remote_src copy captures the right content.
+# live file IS the OLD file - remote_src copy captures the right content.
 - name: Backup config files that exist (setenv.sh, context.xml)
   ansible.builtin.copy:
     src:        "{{ item.item.src }}"
@@ -350,7 +350,7 @@
     - _backup_marker_probe.stat.exists
 
 # ── Deploy WAR ────────────────────────────────────────────────────────────────
-# Skipped entirely on plugins-only — the existing webapps/openspecimen.war is
+# Skipped entirely on plugins-only - the existing webapps/openspecimen.war is
 # already at the requested release.
 
 - name: Deploy openspecimen.war
@@ -441,17 +441,17 @@
                  unzip -l {{ openspecimen_zip_path | expanduser }} | grep -E 'plugin_build/.+\.jar'
 
             2. Confirm with the build/release team this zip is the correct artifact.
-  # Default plugins are tied to the WAR release — on plugins-only deploys the
+  # Default plugins are tied to the WAR release - on plugins-only deploys the
   # WAR is unchanged so the existing default JARs are already correct.
   when: not (_plugins_only_change | default(false) or _config_only_change | default(false))
 
 # ── Deploy additional plugin zips ─────────────────────────────────────────────
 # Pre-flight already searched recursively under openspecimen_builds_dir and
 # stored results in _preflight_paid_find / _preflight_customer_find.
-# Reuse those here — no second find needed.
+# Reuse those here - no second find needed.
 
 # Paid + customer plugin upload/extract: skipped on config-only fast path
-# (no plugin drift — extracting them again would just rewrite identical JARs).
+# (no plugin drift - extracting them again would just rewrite identical JARs).
 # Still runs on plugins-only and full deploy.
 - name: Upload paid plugin zips to target
   ansible.builtin.copy:
@@ -587,7 +587,7 @@
 # ── Prune old backups ────────────────────────────────────────────────────────
 # Keeps the most recent N timestamped backup subdirectories; older ones are
 # deleted. Retention is set by openspecimen_backup_retention (default 3 in
-# inventory/group_vars/all.yml). config-changes/ is excluded — it's a flat
+# inventory/group_vars/all.yml). config-changes/ is excluded - it's a flat
 # log directory for the update-config.sh operator script, not a snapshot.
 # Sort by mtime so retention is robust to timestamp filename format.
 
@@ -617,11 +617,11 @@
     daemon_reload: true
 
 # ── Wait for app to be ready ──────────────────────────────────────────────────
-# Phase 1 — internal readiness: wait until Tomcat logs "Server startup in"
+# Phase 1 - internal readiness: wait until Tomcat logs "Server startup in"
 #   AFTER the most recent service activation timestamp. The timestamp filter
-#   prevents a stale match on upgrade — catalina.out is append-only so a plain
+#   prevents a stale match on upgrade - catalina.out is append-only so a plain
 #   grep would hit the previous run's startup line immediately.
-# Phase 2 — external reachability (optional): if openspecimen_app_url is set,
+# Phase 2 - external reachability (optional): if openspecimen_app_url is set,
 #   curl that URL from the Ansible control node to confirm the ALB / reverse-
 #   proxy path is live. delegate_to: localhost exercises the real network stack
 #   rather than a loopback from the server to itself.
@@ -635,7 +635,7 @@
         result = subprocess.run(
             ['systemctl', 'show', 'openspecimen', '-p', 'ActiveEnterTimestamp', '--value'],
             capture_output=True, text=True)
-        # Normalise: strip microseconds then timezone word — both systemd and
+        # Normalise: strip microseconds then timezone word - both systemd and
         # Tomcat use the same local clock so TZ is irrelevant for comparison,
         # and strptime('%Z') only reliably parses UTC/GMT on most Python builds.
         ts_str = re.sub(r'(\d{2}:\d{2}:\d{2})\.\d+', r'\1', result.stdout.strip())
@@ -725,15 +725,15 @@
 # Phase 2 (external public-URL reachability) is intentionally NOT here. It now
 # runs as a post_task in site.yml (roles/openspecimen/tasks/
 # verify-public-url.yml) so it executes AFTER the apache front-end proxy is
-# configured — otherwise it would check the URL before the proxy that serves it.
+# configured - otherwise it would check the URL before the proxy that serves it.
 
 - name: Deployment complete
   ansible.builtin.debug:
     msg: >-
       {% if openspecimen_install_type == 'fresh' %}
-      Fresh install complete — {{ openspecimen_release }}
+      Fresh install complete - {{ openspecimen_release }}
       {% else %}
-      Upgrade complete — {{ _installed_release | default('unknown') }} → {{ openspecimen_release }}
+      Upgrade complete - {{ _installed_release | default('unknown') }} → {{ openspecimen_release }}
       {% endif %}
       | IP: {{ ansible_facts['default_ipv4']['address'] }}
 
@@ -748,8 +748,8 @@
 # Explicit success flag written ONLY here, as the absolute last step of the
 # deploy. The skip-if-current logic in roles/openspecimen/tasks/direction.yml
 # requires this file to match the requested release before it will short-circuit
-# a re-deploy. If a previous run failed before this point — even partway through
-# WAR/plugin extraction — the file is stale and the next run proceeds with a
+# a re-deploy. If a previous run failed before this point - even partway through
+# WAR/plugin extraction - the file is stale and the next run proceeds with a
 # full deploy without needing -e force_deploy=true.
 - name: Record successful deploy
   ansible.builtin.copy:

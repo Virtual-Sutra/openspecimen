@@ -1,5 +1,5 @@
 ---
-# MySQL Community Server — installed via the official MySQL repo (added by the
+# MySQL Community Server - installed via the official MySQL repo (added by the
 # mysql role before install). RHEL 9 ships MariaDB in its default repos;
 # the community repo provides the genuine MySQL 8.4 LTS build.
 _mysql_package:  "mysql-community-server"

@@ -6,7 +6,7 @@
 - name: Assert openspecimen_release is set
   ansible.builtin.assert:
     that: openspecimen_release | length > 0
-    fail_msg: "openspecimen_release must be set — pass -e openspecimen_release=<name>"
+    fail_msg: "openspecimen_release must be set - pass -e openspecimen_release=<name>"
 
 - name: Stat release zip on control node
   ansible.builtin.stat:
@@ -88,7 +88,7 @@
 
 # ── Copy database connectors ──────────────────────────────────────────────────
 # lib/ is empty in the tomcat-as bundle so unzip does not create it.
-# Connectors are always redeployed from the current release zip — stale JARs
+# Connectors are always redeployed from the current release zip - stale JARs
 # removed first to ensure the correct version is in place after upgrades.
 
 - name: Create tomcat lib directory

@@ -21,9 +21,9 @@
   ansible.builtin.debug:
     msg: >-
       {% if _installed_release %}
-      Prior version: {{ _installed_release }} — Requesting: {{ openspecimen_release }}
+      Prior version: {{ _installed_release }} - Requesting: {{ openspecimen_release }}
       {% else %}
-      No prior version recorded — Requesting: {{ openspecimen_release }}
+      No prior version recorded - Requesting: {{ openspecimen_release }}
       {% endif %}
 
 - name: Detect version direction
@@ -44,7 +44,7 @@
 - name: Downgrade is not supported
   ansible.builtin.debug:
     msg: |
-      Downgrade is not supported — deployment will not proceed.
+      Downgrade is not supported - deployment will not proceed.
         Prior version : {{ _installed_release }}
         Requested     : {{ openspecimen_release }}
       To deploy an older version, provision a fresh VM and run site.yml.
