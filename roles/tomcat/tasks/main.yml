@@ -52,30 +52,41 @@
     group: "{{ tomcat_user }}"
     mode: '0755'
 
+- name: Assert Tomcat major is 9
+  ansible.builtin.assert:
+    that: tomcat_major == '9'
+    fail_msg: >-
+      tomcat_version={{ tomcat_version }} (major {{ tomcat_major }}), but the
+      OpenSpecimen webapp and the bundled conf require Tomcat 9. Set
+      os_versions.tomcat to a 9.0.x release in the component spec.
+
 - name: Check if Tomcat is already installed
   ansible.builtin.stat:
     path: "{{ tomcat_home }}/bin/startup.sh"
   register: tomcat_stat
 
+# Download once on the control node, OUTSIDE the per-host install block.
+# get_url is idempotent (skips when dest matches the checksum). Keeping it out
+# of the `when: not tomcat_stat...` block means a mixed batch - some hosts
+# already installed, some fresh - still has the tarball staged for the fresh
+# ones (run_once gated on a per-host fact would skip the download for them).
+- name: Download pinned Tomcat tarball to control node
+  ansible.builtin.get_url:
+    url: "{{ tomcat_download_url }}"
+    dest: "/tmp/{{ tomcat_tarball }}"
+    checksum: "{{ tomcat_download_checksum }}"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+  run_once: true
+
 - name: Install Tomcat (binaries from download, config overlaid from the zip)
   when: not tomcat_stat.stat.exists
-  vars:
-    _tomcat_tarball: "apache-tomcat-{{ tomcat_version }}.tar.gz"
   block:
-    - name: "Download pinned Tomcat {{ tomcat_version }} tarball to control node"
-      ansible.builtin.get_url:
-        url: "{{ tomcat_download_url }}"
-        dest: "/tmp/{{ _tomcat_tarball }}"
-        checksum: "{{ tomcat_download_checksum }}"
-        mode: '0644'
-      delegate_to: localhost
-      become: false
-      run_once: true
-
     - name: Upload Tomcat tarball to target
       ansible.builtin.copy:
-        src:  "/tmp/{{ _tomcat_tarball }}"
-        dest: "/tmp/{{ _tomcat_tarball }}"
+        src:  "/tmp/{{ tomcat_tarball }}"
+        dest: "/tmp/{{ tomcat_tarball }}"
         mode: '0644'
 
     - name: Create CATALINA_HOME

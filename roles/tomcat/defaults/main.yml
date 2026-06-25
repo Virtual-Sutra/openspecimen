@@ -22,6 +22,7 @@ tomcat_heap_min: >-
 # still come from the release zip. Version is driven by the component spec (#90):
 tomcat_version: "{{ os_versions.tomcat | default('9.0.59') }}"
 tomcat_major: "{{ tomcat_version.split('.')[0] }}"
+tomcat_tarball: "apache-tomcat-{{ tomcat_version }}.tar.gz"
 tomcat_download_url: >-
   https://archive.apache.org/dist/tomcat/tomcat-{{ tomcat_major }}/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz
 # Verify the download against Apache's published checksum alongside the tarball.
