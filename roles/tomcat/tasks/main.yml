@@ -37,7 +37,12 @@
   register: _zip_contents
   changed_when: false
 
-# ── Extract tomcat-as bundle ──────────────────────────────────────────────────
+# ── Install Tomcat: binaries from pinned download, conf from the release zip ──
+# Tomcat 9 is not packaged on Ubuntu 24.04 (ships Tomcat 10) or RHEL 9, so the
+# binaries come from a pinned Apache download (tomcat_version = os_versions.tomcat,
+# component spec #90). The OpenSpecimen-tuned config (conf/, and any non-binary
+# dirs in the bundle) and the DB connectors continue to come from the release
+# zip. conf and binaries must share the same Tomcat major (9).
 
 - name: Create /usr/local/openspecimen base dir
   ansible.builtin.file:
@@ -47,44 +52,86 @@
     group: "{{ tomcat_user }}"
     mode: '0755'
 
-- name: Check if tomcat-as is already extracted
+- name: Check if Tomcat is already installed
   ansible.builtin.stat:
     path: "{{ tomcat_home }}/bin/startup.sh"
   register: tomcat_stat
 
-- name: Extract inner tomcat-as.zip from release package
-  ansible.builtin.shell: |
-    TOMCAT_ZIP=$(echo "{{ _zip_contents.stdout }}" \
-      | awk 'NF==4 && $NF ~ /tomcat-as\.zip$/ {print $NF; exit}')
-    if [ -z "$TOMCAT_ZIP" ]; then
-      echo "ERROR: tomcat-as.zip not found inside /tmp/{{ openspecimen_release }}.zip"
-      echo "Release zip contents:"
-      echo "{{ _zip_contents.stdout }}"
-      exit 1
-    fi
-    unzip -p /tmp/{{ openspecimen_release }}.zip "$TOMCAT_ZIP" > /tmp/tomcat-as.zip
-    test -s /tmp/tomcat-as.zip || { echo "ERROR: extracted tomcat-as.zip is empty"; exit 1; }
+- name: Install Tomcat (binaries from download, config overlaid from the zip)
   when: not tomcat_stat.stat.exists
+  vars:
+    _tomcat_tarball: "apache-tomcat-{{ tomcat_version }}.tar.gz"
+  block:
+    - name: "Download pinned Tomcat {{ tomcat_version }} tarball to control node"
+      ansible.builtin.get_url:
+        url: "{{ tomcat_download_url }}"
+        dest: "/tmp/{{ _tomcat_tarball }}"
+        checksum: "{{ tomcat_download_checksum }}"
+        mode: '0644'
+      delegate_to: localhost
+      become: false
+      run_once: true
 
-- name: Extract tomcat-as bundle
-  ansible.builtin.unarchive:
-    src:  /tmp/tomcat-as.zip
-    dest: /usr/local/openspecimen/
-    remote_src: true
-  when: not tomcat_stat.stat.exists
+    - name: Upload Tomcat tarball to target
+      ansible.builtin.copy:
+        src:  "/tmp/{{ _tomcat_tarball }}"
+        dest: "/tmp/{{ _tomcat_tarball }}"
+        mode: '0644'
 
-- name: Remove inner tomcat-as.zip
-  ansible.builtin.file:
-    path: /tmp/tomcat-as.zip
-    state: absent
+    - name: Create CATALINA_HOME
+      ansible.builtin.file:
+        path: "{{ tomcat_home }}"
+        state: directory
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_user }}"
+        mode: '0755'
 
-- name: Set ownership of tomcat-as
-  ansible.builtin.file:
-    path: /usr/local/openspecimen/tomcat-as
-    state: directory
-    owner: "{{ tomcat_user }}"
-    group: "{{ tomcat_user }}"
-    recurse: true
+    - name: Unpack Tomcat into CATALINA_HOME (strip top-level dir)
+      ansible.builtin.unarchive:
+        src: "/tmp/{{ _tomcat_tarball }}"
+        dest: "{{ tomcat_home }}"
+        remote_src: true
+        extra_opts: ['--strip-components=1']
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_user }}"
+
+    - name: Extract inner tomcat-as.zip from release package
+      ansible.builtin.shell: |
+        TOMCAT_ZIP=$(echo "{{ _zip_contents.stdout }}" \
+          | awk 'NF==4 && $NF ~ /tomcat-as\.zip$/ {print $NF; exit}')
+        if [ -z "$TOMCAT_ZIP" ]; then
+          echo "ERROR: tomcat-as.zip not found inside /tmp/{{ openspecimen_release }}.zip"
+          exit 1
+        fi
+        unzip -p /tmp/{{ openspecimen_release }}.zip "$TOMCAT_ZIP" > /tmp/tomcat-as.zip
+        test -s /tmp/tomcat-as.zip || { echo "ERROR: extracted tomcat-as.zip is empty"; exit 1; }
+
+    # Overlay everything from the bundle EXCEPT the binaries (bin/, lib/) - keeps
+    # the OpenSpecimen-tuned conf/ (server.xml etc.) and any other bundle dirs on
+    # top of the pinned Tomcat. The bundle's lib/ is empty; connectors are copied
+    # from the release zip below.
+    - name: Overlay OpenSpecimen config from the bundle over the pinned Tomcat
+      ansible.builtin.shell: |
+        set -o pipefail
+        unzip -o /tmp/tomcat-as.zip -d /usr/local/openspecimen/ \
+          -x 'tomcat-as/bin/*' 'tomcat-as/lib/*'
+        test -f {{ tomcat_home }}/conf/server.xml \
+          || { echo "ERROR: tomcat-as/conf/server.xml not found in bundle"; exit 1; }
+      args:
+        executable: /bin/bash
+
+    - name: Remove inner tomcat-as.zip
+      ansible.builtin.file:
+        path: /tmp/tomcat-as.zip
+        state: absent
+
+    - name: Set ownership of CATALINA_HOME
+      ansible.builtin.file:
+        path: "{{ tomcat_home }}"
+        state: directory
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_user }}"
+        recurse: true
 
 # ── Copy database connectors ──────────────────────────────────────────────────
 # lib/ is empty in the tomcat-as bundle so unzip does not create it.
@@ -140,32 +187,44 @@
         mode:       '0640'
       loop: "{{ _mysql_connectors.files }}"
 
-- name: Extract MySQL connector from release zip
+- name: Extract MySQL connector(s) from release zip
+  # Copy every mysql-connector*.jar the zip ships (a release may bundle more
+  # than one, e.g. 5.1.x and 8.0.x) - "whatever's in the zip".
   ansible.builtin.shell: |
+    set -o pipefail
     rm -f {{ tomcat_home }}/lib/mysql-connector*.jar
-    CONNECTOR=$(echo "{{ _zip_contents.stdout }}" \
-      | awk 'NF==4 && $NF ~ /mysql-connector.*\.jar$/ {print $NF; exit}')
-    if [ -z "$CONNECTOR" ]; then
-      echo "ERROR: MySQL connector JAR not found in release zip"
+    CONNECTORS=$(echo "{{ _zip_contents.stdout }}" \
+      | awk 'NF==4 && $NF ~ /mysql-connector.*\.jar$/ {print $NF}')
+    if [ -z "$CONNECTORS" ]; then
+      echo "ERROR: no MySQL connector JAR found in release zip"
       exit 1
     fi
-    unzip -j /tmp/{{ openspecimen_release }}.zip "$CONNECTOR" -d {{ tomcat_home }}/lib/
+    echo "$CONNECTORS" | while read -r c; do
+      unzip -j /tmp/{{ openspecimen_release }}.zip "$c" -d {{ tomcat_home }}/lib/
+    done
     chown {{ tomcat_user }}:{{ tomcat_user }} {{ tomcat_home }}/lib/mysql-connector*.jar
     chmod 644 {{ tomcat_home }}/lib/mysql-connector*.jar
+  args:
+    executable: /bin/bash
   when: db_type == 'mysql'
 
-- name: Extract Oracle JDBC driver from release zip
+- name: Extract Oracle JDBC driver(s) from release zip
   ansible.builtin.shell: |
+    set -o pipefail
     rm -f {{ tomcat_home }}/lib/ojdbc*.jar
-    DRIVER=$(echo "{{ _zip_contents.stdout }}" \
-      | awk 'NF==4 && $NF ~ /ojdbc.*\.jar$/ {print $NF; exit}')
-    if [ -z "$DRIVER" ]; then
-      echo "ERROR: Oracle JDBC driver not found in release zip"
+    DRIVERS=$(echo "{{ _zip_contents.stdout }}" \
+      | awk 'NF==4 && $NF ~ /ojdbc.*\.jar$/ {print $NF}')
+    if [ -z "$DRIVERS" ]; then
+      echo "ERROR: no Oracle JDBC driver found in release zip"
       exit 1
     fi
-    unzip -j /tmp/{{ openspecimen_release }}.zip "$DRIVER" -d {{ tomcat_home }}/lib/
+    echo "$DRIVERS" | while read -r d; do
+      unzip -j /tmp/{{ openspecimen_release }}.zip "$d" -d {{ tomcat_home }}/lib/
+    done
     chown {{ tomcat_user }}:{{ tomcat_user }} {{ tomcat_home }}/lib/ojdbc*.jar
     chmod 644 {{ tomcat_home }}/lib/ojdbc*.jar
+  args:
+    executable: /bin/bash
   when: db_type == 'oracle'
 
 # ── Templated configs ─────────────────────────────────────────────────────────
