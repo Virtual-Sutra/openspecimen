@@ -1,4 +1,7 @@
 ---
-_java_package: "java-17-openjdk-devel"
+# JDK major version comes from the component spec (os_versions.java.track),
+# falling back to 17 when no spec is loaded. See component-specs/.
+_java_track: "{{ os_versions.java.track | default('17') }}"
+_java_package: "java-{{ _java_track }}-openjdk-devel"
 # RHEL JDK path has no architecture suffix.
-_java_home: "/usr/lib/jvm/java-17-openjdk"
+_java_home: "/usr/lib/jvm/java-{{ _java_track }}-openjdk"

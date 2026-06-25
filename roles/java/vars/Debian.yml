@@ -1,4 +1,7 @@
 ---
-_java_package: "openjdk-17-jdk"
+# JDK major version comes from the component spec (os_versions.java.track),
+# falling back to 17 when no spec is loaded. See component-specs/.
+_java_track: "{{ os_versions.java.track | default('17') }}"
+_java_package: "openjdk-{{ _java_track }}-jdk"
 # Ubuntu places JDK under an arch-suffixed directory.
-_java_home: "/usr/lib/jvm/java-17-openjdk-{{ (ansible_facts['architecture'] == 'aarch64') | ternary('arm64', 'amd64') }}"
+_java_home: "/usr/lib/jvm/java-{{ _java_track }}-openjdk-{{ (ansible_facts['architecture'] == 'aarch64') | ternary('arm64', 'amd64') }}"
