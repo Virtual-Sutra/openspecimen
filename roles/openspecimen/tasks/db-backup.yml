@@ -65,6 +65,6 @@
     msg:
       - "Database backup written:"
       - "  {{ _db_backup_file }}  ({{ (_db_backup_stat.stat.size / 1024 / 1024) | round(1) }} MB gzipped)"
-      - "Restore (stop the service first):"
+      - "Restore later with db-restore.yml (-e db_restore_confirm=true), or manually:"
       - "  gunzip -c {{ _db_backup_file }} | mysql -u {{ mysql_db_user }} -p -h {{ mysql_db_host }}"
       - "Then re-run the upgrade with -e db_backup_confirmed=true."
