@@ -212,8 +212,11 @@
       Database {{ mysql_db_name }} is {{ _db_size_mb_val }} MB
         (> db_backup_auto_max_mb = {{ db_backup_auto_max_mb | default(2048) }} MB).
 
-      An inline mysqldump would risk the deploy SLA. Take a DB backup manually
-      (mysqldump / RDS snapshot) BEFORE upgrading, then re-run with:
+      An inline mysqldump would risk the deploy SLA. Take a DB backup first
+      (consistent, no outage):
+        ansible-playbook -i inventory/customers/<name>/ db-backup.yml \
+          -e @secrets/<name>.yml --vault-password-file .vault-pass
+      (RDS: take an AWS snapshot instead.) Then re-run with:
         -e db_backup_confirmed=true     (Jenkins: tick DB_BACKUP_CONFIRMED)
 
       Or skip DB backup entirely:

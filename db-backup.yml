@@ -1,0 +1,30 @@
+---
+# Standalone on-demand database backup (local MySQL). Thin wrapper around
+# roles/openspecimen/tasks/db-backup.yml so the same tasks are usable both
+# here (operator CLI) and elsewhere if needed.
+#
+# Use before a large-database upgrade - when the size gate in the deploy halts
+# (auto-dump skipped to protect the SLA) - then re-run the upgrade with
+# -e db_backup_confirmed=true. Also a general day-2 DB safety backup.
+#
+# Consistent (mysqldump --single-transaction), no service outage required.
+#
+# Usage:
+#   ansible-playbook -i inventory/customers/<name>/ db-backup.yml \
+#     -e @secrets/<name>.yml --vault-password-file .vault-pass
+#
+#   # Custom output directory:
+#   ... -e db_backup_dir=/data/os-db-backups
+#
+# Output: <db_backup_dir>/<timestamp>_<db>.sql.gz
+#         (default db_backup_dir: /usr/local/openspecimen/db-backups)
+
+- name: Back up OpenSpecimen database
+  hosts: openspecimen
+  become: true
+
+  tasks:
+    - name: Include db-backup tasks from openspecimen role
+      ansible.builtin.include_role:
+        name:       openspecimen
+        tasks_from: db-backup
