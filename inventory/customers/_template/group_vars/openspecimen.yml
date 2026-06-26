@@ -34,6 +34,34 @@
 # openspecimen_release: ""    # must match the zip filename exactly
 # openspecimen_port:    8080
 
+# ── Instances (ADR-006) ───────────────────────────────────────────────────────
+# A single instance is the default - the flat vars in this file configure it, so
+# leave openspecimen_instances UNSET for the normal case.
+#
+# Running MULTIPLE OpenSpecimen instances on one host (e.g. prod + test) is an
+# INFREQUENT requirement. When you need it, declare openspecimen_instances with
+# one entry per instance (this overrides the single default). Each needs a unique
+# name + DB + app_url; ports, dirs, CATALINA_BASE, service_name and markers derive
+# from name + index. Deploy/upgrade just one with -e instance=<name>.
+# See docs/MULTI-INSTANCE.md.
+#
+# openspecimen_instances:
+#   - name: prod
+#     db_name: os_prod
+#     db_user: os_prod
+#     db_password: "{{ vault_os_prod_db_password }}"   # Vault; never plaintext
+#     app_url: https://host.example.org/prod
+#     heap_max: 6144            # MB, per instance (set explicitly for multi)
+#     heap_min: 1024
+#     release: openspecimen_v12.3   # optional; defaults to openspecimen_release
+#   - name: test
+#     db_name: os_test
+#     db_user: os_test
+#     db_password: "{{ vault_os_test_db_password }}"
+#     app_url: https://host.example.org/test
+#     heap_max: 2048
+#     heap_min: 512
+
 # ── Builds directory ──────────────────────────────────────────────────────────
 # Override if this customer's builds are stored in a different path.
 # openspecimen_builds_dir: /opt/openspecimen/builds

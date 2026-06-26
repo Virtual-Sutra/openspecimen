@@ -1,0 +1,95 @@
+---
+# Tear down OpenSpecimen so a (test) VM can be reused for daily deploy/test runs
+# (ADR-006, #72). DESTRUCTIVE - requires -e cleanup_confirm=true.
+#
+# Default: per-instance teardown (service, webapp, data/plugins/backups/markers,
+# and local-MySQL DB+user), leaving the shared Tomcat binary / MySQL server /
+# Java in place for a fast re-deploy. Targets all instances; -e instance=<name>
+# limits to one.
+#
+# -e full_wipe=true ALSO removes the shared bits for a from-scratch host reset:
+# the whole /usr/local/openspecimen tree (Tomcat binary + all instances), the
+# MySQL server + its data, and OpenJDK.
+#
+# Usage:
+#   ansible-playbook -i inventory/customers/<name>/ cleanup.yml \
+#     -e cleanup_confirm=true -e @secrets/<name>.yml --vault-password-file .vault-pass
+#   # one instance:           ... -e instance=test
+#   # full host reset:        ... -e full_wipe=true
+
+- name: Clean up OpenSpecimen
+  hosts: openspecimen
+  become: true
+
+  pre_tasks:
+    - name: Resolve instances
+      ansible.builtin.import_tasks: tasks/resolve-instances.yml
+
+    - name: Require explicit confirmation (destructive)
+      ansible.builtin.fail:
+        msg: |
+          Refusing to clean up without confirmation. This REMOVES OpenSpecimen
+          {{ 'and WIPES the host (Tomcat, MySQL + data, Java)' if (full_wipe | default(false) | bool) else 'instance(s): ' ~ (_instances | map(attribute='name') | list) }}.
+          Re-run with -e cleanup_confirm=true.
+      when: not (cleanup_confirm | default(false) | bool)
+
+  tasks:
+    - name: Tear down each instance
+      ansible.builtin.include_role:
+        name: openspecimen
+        tasks_from: cleanup
+      loop: "{{ _instances }}"
+      loop_control:
+        loop_var: instance
+        label: "{{ instance.name }}"
+
+    - name: Reload systemd after removing units
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    # ── Full host wipe (opt-in) ──────────────────────────────────────────────
+    - name: Full host wipe (shared Tomcat, MySQL + data, Java)
+      when: full_wipe | default(false) | bool
+      block:
+        - name: Stop and disable MySQL
+          ansible.builtin.systemd:
+            name: "{{ (ansible_facts['os_family'] == 'RedHat') | ternary('mysqld', 'mysql') }}"
+            state: stopped
+            enabled: false
+          failed_when: false
+
+        - name: Remove the OpenSpecimen tree (Tomcat binary + all instances)
+          ansible.builtin.file:
+            path: /usr/local/openspecimen
+            state: absent
+
+        - name: Purge MySQL + Java packages (Debian)
+          ansible.builtin.apt:
+            name:
+              - mysql-server
+              - mysql-community-server
+              - openjdk-17-jdk
+            state: absent
+            purge: true
+            autoremove: true
+          failed_when: false
+          when: ansible_facts['os_family'] == 'Debian'
+
+        - name: Remove MySQL + Java packages (RHEL)
+          ansible.builtin.dnf:
+            name:
+              - mysql-community-server
+              - java-17-openjdk-devel
+            state: absent
+            autoremove: true
+          failed_when: false
+          when: ansible_facts['os_family'] == 'RedHat'
+
+        - name: Remove the MySQL data directory
+          ansible.builtin.file:
+            path: /var/lib/mysql
+            state: absent
+
+        - name: Full wipe complete
+          ansible.builtin.debug:
+            msg: "Host wiped - Tomcat, MySQL (incl. /var/lib/mysql) and Java removed. A fresh site.yml run will reinstall everything."

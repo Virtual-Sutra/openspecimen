@@ -27,6 +27,10 @@
   become: true
 
   pre_tasks:
+    # Resolve `_instances` from openspecimen_instances (ADR-006, #72).
+    - name: Resolve instances
+      ansible.builtin.import_tasks: tasks/resolve-instances.yml
+
     # Resolve the component version spec for this release (ADR-002). Loads
     # component-specs/<release>.yml, merges any per-customer
     # component_versions_override, and exposes the result as `os_versions` to

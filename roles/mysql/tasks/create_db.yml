@@ -1,0 +1,18 @@
+---
+# Create one OpenSpecimen database + dedicated user (ADR-006: one DB + one
+# user, scoped to that DB only, per instance on the shared MySQL server).
+# Called once per instance from main.yml. `instance` is the loop var.
+- name: "Create OpenSpecimen database ({{ instance.db_name }})"
+  community.mysql.mysql_db:
+    name: "{{ instance.db_name }}"
+    state: present
+    login_unix_socket: "{{ _mysql_socket }}"
+
+- name: "Create OpenSpecimen database user ({{ instance.db_user }})"
+  community.mysql.mysql_user:
+    name: "{{ instance.db_user }}"
+    password: "{{ instance.db_password }}"
+    priv: "{{ instance.db_name }}.*:ALL"
+    host: localhost
+    state: present
+    login_unix_socket: "{{ _mysql_socket }}"
