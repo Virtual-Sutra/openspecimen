@@ -27,6 +27,99 @@
   become: true
 
   pre_tasks:
+    # ── Resolve the instance list (ADR-006, #72) ─────────────────────────────
+    # Single source of truth for the deploy. When openspecimen_instances is not
+    # declared, synthesise ONE default instance from the flat vars, pinned to
+    # today's exact values so a single-instance host deploys byte-identically
+    # (same paths, ports, unit name 'openspecimen', context /openspecimen).
+    # When it IS declared, normalise each entry, deriving per-instance fields
+    # from name + index. Roles consume `_instances`, never the flat vars.
+    - name: Synthesise the default instance (single-instance / backward compat)
+      ansible.builtin.set_fact:
+        _instances:
+          - name: openspecimen
+            context_path: "/openspecimen"
+            service_name: openspecimen
+            catalina_home: "{{ catalina_home | default(tomcat_home) }}"
+            catalina_base: "{{ tomcat_home }}"
+            http_port: "{{ openspecimen_port }}"
+            ajp_port: "{{ apache_ajp_port | default(openspecimen_ajp_port_base | default(8009)) }}"
+            shutdown_port: "{{ openspecimen_shutdown_port_base | default(8005) }}"
+            data_dir: "{{ openspecimen_data_dir }}"
+            plugin_dir: "{{ openspecimen_plugin_dir }}"
+            backup_dir: "{{ openspecimen_backup_dir }}"
+            release_marker: "{{ openspecimen_release_marker }}"
+            deploy_success_marker: "{{ openspecimen_deploy_success_marker | default('/usr/local/openspecimen/.deploy_success') }}"
+            release: "{{ openspecimen_release | default('') }}"
+            db_name: "{{ mysql_db_name }}"
+            db_user: "{{ mysql_db_user }}"
+            db_password: "{{ mysql_db_password | default('') }}"
+            db_host: "{{ mysql_db_host }}"
+            heap_max: "{{ tomcat_heap_max_override | default('') }}"
+            heap_min: "{{ tomcat_heap_min_override | default('') }}"
+            app_url: "{{ openspecimen_app_url | default('') }}"
+            node_name: "{{ openspecimen_node_name | default('openspecimen') }}"
+            paid_plugins: "{{ openspecimen_paid_plugins | default([]) }}"
+            customer_plugins: "{{ openspecimen_customer_plugins | default([]) }}"
+      when: openspecimen_instances is not defined
+
+    - name: Normalise declared instances (derive per-instance fields)
+      ansible.builtin.set_fact:
+        _instances: "{{ _instances | default([]) + [_derived] }}"
+      loop: "{{ openspecimen_instances | default([]) }}"
+      loop_control:
+        index_var: idx
+        label: "{{ item.name }}"
+      vars:
+        _derived:
+          name: "{{ item.name }}"
+          context_path: "{{ item.context_path | default('/openspecimen') }}"
+          service_name: "{{ item.service_name | default('openspecimen-' ~ item.name) }}"
+          catalina_home: "{{ catalina_home | default(tomcat_home) }}"
+          catalina_base: "{{ item.catalina_base | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/base') }}"
+          http_port: "{{ item.http_port | default((openspecimen_port_base | default(8080) | int) + idx * 10) }}"
+          ajp_port: "{{ item.ajp_port | default((openspecimen_ajp_port_base | default(8009) | int) + idx * 10) }}"
+          shutdown_port: "{{ item.shutdown_port | default((openspecimen_shutdown_port_base | default(8005) | int) + idx * 10) }}"
+          data_dir: "{{ item.data_dir | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/data') }}"
+          plugin_dir: "{{ item.plugin_dir | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/plugins') }}"
+          backup_dir: "{{ item.backup_dir | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/backup') }}"
+          release_marker: "{{ item.release_marker | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/.release') }}"
+          deploy_success_marker: "{{ item.deploy_success_marker | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/.deploy_success') }}"
+          release: "{{ item.release | default(openspecimen_release | default('')) }}"
+          db_name: "{{ item.db_name }}"
+          db_user: "{{ item.db_user }}"
+          db_password: "{{ item.db_password | default('') }}"
+          db_host: "{{ item.db_host | default(mysql_db_host) }}"
+          heap_max: "{{ item.heap_max | default('') }}"
+          heap_min: "{{ item.heap_min | default('') }}"
+          app_url: "{{ item.app_url | default('') }}"
+          node_name: "{{ item.node_name | default(item.name) }}"
+          paid_plugins: "{{ item.paid_plugins | default([]) }}"
+          customer_plugins: "{{ item.customer_plugins | default([]) }}"
+      when: openspecimen_instances is defined
+
+    - name: Assert instance ports are unique across the host
+      ansible.builtin.assert:
+        that:
+          - (_instances | map(attribute='http_port') | list | unique | length) == (_instances | length)
+          - (_instances | map(attribute='ajp_port') | list | unique | length) == (_instances | length)
+          - (_instances | map(attribute='shutdown_port') | list | unique | length) == (_instances | length)
+        fail_msg: >-
+          http/ajp/shutdown ports must be unique across openspecimen_instances -
+          set explicit *_port values or space the instances out.
+
+    - name: Limit to a single instance when -e instance=<name>
+      ansible.builtin.set_fact:
+        _instances: "{{ _instances | selectattr('name', 'equalto', instance) | list }}"
+      when: instance is defined and instance | trim
+
+    - name: Fail when -e instance matches no declared instance
+      ansible.builtin.fail:
+        msg: "instance='{{ instance }}' matches none of: {{ openspecimen_instances | default([{'name': 'openspecimen'}]) | map(attribute='name') | list }}"
+      when:
+        - instance is defined and instance | trim
+        - (_instances | length) == 0
+
     # Detect deploy vs rollback direction by comparing openspecimen_release
     # against the on-target .release marker. On downgrade, the rollback flow
     # is invoked automatically and the play ends - the roles below do not run.

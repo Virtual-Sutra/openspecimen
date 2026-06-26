@@ -49,6 +49,37 @@ openspecimen_plugin_dir:    /usr/local/openspecimen/plugins
 openspecimen_backup_dir:    /usr/local/openspecimen/backup
 openspecimen_release_marker: /usr/local/openspecimen/.release
 
+# ── Multi-instance (ADR-006) ──────────────────────────────────────────────────
+# Run N independent OpenSpecimen instances on one host (e.g. prod + test), each
+# its own Tomcat (CATALINA_BASE off a shared CATALINA_HOME), ports, DB+user,
+# data/plugin/backup dirs, heap and systemd unit. OMIT openspecimen_instances
+# for a single-instance host - the deploy then synthesises one default instance
+# from the flat vars above and behaves exactly as before (see docs/MULTI-INSTANCE.md).
+catalina_home:                  "{{ tomcat_home }}"   # shared Tomcat binary
+openspecimen_instances_base:    /usr/local/openspecimen/instances
+openspecimen_port_base:         8080                  # http base; instance N gets base + N*10
+openspecimen_ajp_port_base:     8009
+openspecimen_shutdown_port_base: 8005
+#
+# openspecimen_instances:
+#   - name: prod                       # required; ^[a-z0-9][a-z0-9_-]*$
+#     db_name: os_prod                 # required (one DB + user per instance)
+#     db_user: os_prod                 # required
+#     db_password: "{{ vault_os_prod_db_password }}"   # required (Vault)
+#     app_url: https://host.example.org/prod           # required for the proxy/links
+#     heap_max: 6144                   # MB, per instance
+#     heap_min: 1024
+#     release: openspecimen_v12.3       # optional; defaults to openspecimen_release
+#   - name: test
+#     db_name: os_test
+#     db_user: os_test
+#     db_password: "{{ vault_os_test_db_password }}"
+#     app_url: https://host.example.org/test
+#     heap_max: 2048
+#     heap_min: 512
+# Ports/dirs/catalina_base/service_name/markers derive from name + index;
+# override any explicitly. Deploy/upgrade one with -e instance=test.
+
 # Written ONLY at the very last task of a successful deploy. Read by
 # roles/openspecimen/tasks/direction.yml - the skip-if-current shortcut requires
 # this file to match the requested release. If the previous deploy failed before
