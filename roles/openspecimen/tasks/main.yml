@@ -194,6 +194,9 @@
   no_log: true
   when: &db_backup_when
     - openspecimen_install_type == 'upgrade'
+    # Only on the WAR-changing path - plugins-only/config-only upgrades skip the
+    # WAR backup, so a DB dump there would be unrestorable (no WAR) and wasteful.
+    - not (_plugins_only_change | default(false) or _config_only_change | default(false))
     - db_managed | default(true) | bool
     - db_type | default('mysql') == 'mysql'
     - db_backup_enabled | default(true) | bool
@@ -218,6 +221,7 @@
                                          schema-drift halt remains the safety net)
   when:
     - openspecimen_install_type == 'upgrade'
+    - not (_plugins_only_change | default(false) or _config_only_change | default(false))
     - db_managed | default(true) | bool
     - db_type | default('mysql') == 'mysql'
     - db_backup_enabled | default(true) | bool
@@ -253,7 +257,7 @@
       ['config']
       + (['plugins/paid', 'plugins/zustomer'] if not (_config_only_change | default(false)) else [])
       + (['plugins/default'] if not (_plugins_only_change | default(false) or _config_only_change | default(false)) else [])
-      + (['db'] if (db_managed | default(true) | bool and (db_type | default('mysql') == 'mysql') and db_backup_enabled | default(true) | bool) else [])
+      + (['db'] if (db_managed | default(true) | bool and (db_type | default('mysql') == 'mysql') and db_backup_enabled | default(true) | bool and not (_plugins_only_change | default(false) or _config_only_change | default(false))) else [])
     }}
   when: openspecimen_install_type == 'upgrade'
 
@@ -287,6 +291,7 @@
   no_log: true
   when:
     - openspecimen_install_type == 'upgrade'
+    - not (_plugins_only_change | default(false) or _config_only_change | default(false))
     - db_managed | default(true) | bool
     - db_type | default('mysql') == 'mysql'
     - db_backup_enabled | default(true) | bool
