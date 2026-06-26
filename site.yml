@@ -42,9 +42,9 @@
             service_name: openspecimen
             catalina_home: "{{ catalina_home | default(tomcat_home) }}"
             catalina_base: "{{ tomcat_home }}"
-            http_port: "{{ openspecimen_port }}"
-            ajp_port: "{{ apache_ajp_port | default(openspecimen_ajp_port_base | default(8009)) }}"
-            shutdown_port: "{{ openspecimen_shutdown_port_base | default(8005) }}"
+            http_port: "{{ openspecimen_port | int }}"
+            ajp_port: "{{ (apache_ajp_port | default(openspecimen_ajp_port_base | default(8009))) | int }}"
+            shutdown_port: "{{ (openspecimen_shutdown_port_base | default(8005)) | int }}"
             data_dir: "{{ openspecimen_data_dir }}"
             plugin_dir: "{{ openspecimen_plugin_dir }}"
             backup_dir: "{{ openspecimen_backup_dir }}"
@@ -53,15 +53,18 @@
             release: "{{ openspecimen_release | default('') }}"
             db_name: "{{ mysql_db_name }}"
             db_user: "{{ mysql_db_user }}"
-            db_password: "{{ mysql_db_password | default('') }}"
+            db_password: "{{ mysql_db_password }}"
             db_host: "{{ mysql_db_host }}"
+            # Empty heap = "auto-size from RAM" - the tomcat role (#73) must treat
+            # an empty heap_max/min as the existing memtotal-based default, NOT as
+            # a literal empty -Xmx, to keep single-instance heap byte-identical.
             heap_max: "{{ tomcat_heap_max_override | default('') }}"
             heap_min: "{{ tomcat_heap_min_override | default('') }}"
             app_url: "{{ openspecimen_app_url | default('') }}"
             node_name: "{{ openspecimen_node_name | default('openspecimen') }}"
             paid_plugins: "{{ openspecimen_paid_plugins | default([]) }}"
             customer_plugins: "{{ openspecimen_customer_plugins | default([]) }}"
-      when: openspecimen_instances is not defined
+      when: (openspecimen_instances | default([]) | length) == 0
 
     - name: Normalise declared instances (derive per-instance fields)
       ansible.builtin.set_fact:
@@ -96,7 +99,7 @@
           node_name: "{{ item.node_name | default(item.name) }}"
           paid_plugins: "{{ item.paid_plugins | default([]) }}"
           customer_plugins: "{{ item.customer_plugins | default([]) }}"
-      when: openspecimen_instances is defined
+      when: (openspecimen_instances | default([]) | length) > 0
 
     - name: Assert instance ports are unique across the host
       ansible.builtin.assert:
