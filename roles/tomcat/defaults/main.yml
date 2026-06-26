@@ -15,3 +15,17 @@ tomcat_heap_max: >-
 
 tomcat_heap_min: >-
   {{ (tomcat_heap_min_override | default(512) | int) | string }}m
+
+# ── Tomcat install source (#91) ───────────────────────────────────────────────
+# Binaries come from a pinned Apache download (Tomcat 9 is not packaged on
+# Ubuntu 24.04 / RHEL 9). The OpenSpecimen-tuned conf/ and the DB connectors
+# still come from the release zip. Version is driven by the component spec (#90):
+tomcat_version: "{{ os_versions.tomcat | default('9.0.59') }}"
+tomcat_major: "{{ tomcat_version.split('.')[0] }}"
+tomcat_tarball: "apache-tomcat-{{ tomcat_version }}.tar.gz"
+tomcat_download_url: >-
+  https://archive.apache.org/dist/tomcat/tomcat-{{ tomcat_major }}/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz
+# Verify the download against Apache's published checksum alongside the tarball.
+# For an air-gapped mirror, override tomcat_download_url and set a literal
+# "sha512:<hash>" (or "sha256:<hash>") here.
+tomcat_download_checksum: "sha512:{{ tomcat_download_url }}.sha512"

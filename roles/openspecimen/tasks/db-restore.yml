@@ -1,0 +1,110 @@
+---
+# Standalone database restore (#98) - local MySQL. Companion to db-backup.yml.
+#
+# Restores a gzipped mysqldump produced by db-backup.yml (which used
+# --add-drop-database, so the dump drops+recreates the schema). DESTRUCTIVE:
+# overwrites the live database; all data written since the dump is lost.
+# Requires -e db_restore_confirm=true.
+#
+# Stops the service and leaves it STOPPED: the on-disk WAR may be NEWER than the
+# restored schema, and starting it would let Liquibase migrate the restored DB
+# forward again. Deploy the matching release first (site.yml -e
+# openspecimen_release=<that version>), or start manually only if the on-disk WAR
+# already matches the dump.
+#
+# Dump selection (precedence):
+#   1. db_backup_file : restore this exact .sql.gz (any path)
+#   2. (none)         : newest *.sql.gz under db_backup_dir
+#
+# RDS -> restore the AWS snapshot (#99). Oracle -> DBA tooling.
+
+- name: Assert this is a managed local MySQL database
+  ansible.builtin.assert:
+    that:
+      - db_managed | default(true) | bool
+      - db_type | default('mysql') == 'mysql'
+    fail_msg: >-
+      db-restore.yml supports local MySQL (db_managed=true, db_type=mysql) only.
+      For RDS restore the AWS snapshot (#99); for Oracle use the DBA's tools.
+
+- name: Require explicit confirmation (destructive)
+  ansible.builtin.fail:
+    msg: |
+      Refusing to restore without confirmation - this OVERWRITES the live
+      database {{ mysql_db_name }} and DISCARDS all data written since the dump.
+
+      Re-run with: -e db_restore_confirm=true
+      Pick a dump with -e db_backup_file=<path/to/dump.sql.gz>, or omit it to
+      restore the newest dump under
+      {{ db_backup_dir | default('/usr/local/openspecimen/db-backups') }}.
+  when: not (db_restore_confirm | default(false) | bool)
+
+- name: Find newest dump in db_backup_dir (when db_backup_file not given)
+  ansible.builtin.find:
+    paths:    "{{ db_backup_dir | default('/usr/local/openspecimen/db-backups') }}"
+    patterns: "*.sql.gz"
+  register: _db_dumps
+  when: not (db_backup_file is defined and db_backup_file | trim)
+
+- name: Resolve dump file to restore
+  ansible.builtin.set_fact:
+    _restore_dump: >-
+      {%- if db_backup_file is defined and db_backup_file | trim -%}
+        {{ db_backup_file | trim }}
+      {%- elif (_db_dumps.files | default([]) | length) > 0 -%}
+        {{ (_db_dumps.files | sort(attribute='mtime', reverse=true) | first).path }}
+      {%- else -%}
+        NONE
+      {%- endif -%}
+
+- name: Fail when no dump is available
+  ansible.builtin.fail:
+    msg: |
+      No database dump found.
+      Pass -e db_backup_file=<path/to/dump.sql.gz>, or create one first:
+        ansible-playbook -i inventory/customers/<name>/ db-backup.yml ...
+      (searched {{ db_backup_dir | default('/usr/local/openspecimen/db-backups') }} for *.sql.gz)
+  when: _restore_dump == 'NONE'
+
+- name: Verify the dump exists
+  ansible.builtin.stat:
+    path: "{{ _restore_dump }}"
+  register: _restore_dump_stat
+
+- name: Fail if the dump file is missing
+  ansible.builtin.fail:
+    msg: "Dump not found: {{ _restore_dump }}"
+  when: not _restore_dump_stat.stat.exists
+
+- name: Show planned restore
+  ansible.builtin.debug:
+    msg:
+      - "Restoring database {{ mysql_db_name }} from:"
+      - "  {{ _restore_dump }}  ({{ (_restore_dump_stat.stat.size / 1024 / 1024) | round(1) }} MB gzipped)"
+      - "This OVERWRITES the live database and discards data written since the dump."
+
+- name: Stop openspecimen service before restore
+  ansible.builtin.systemd:
+    name: openspecimen
+    state: stopped
+  failed_when: false
+
+- name: Restore database from dump
+  ansible.builtin.shell: |
+    set -o pipefail
+    gunzip -c "{{ _restore_dump }}" \
+      | mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' -h {{ mysql_db_host }}
+  args:
+    executable: /bin/bash
+  no_log: true
+
+- name: Restore complete - service left stopped
+  ansible.builtin.debug:
+    msg:
+      - "Database {{ mysql_db_name }} restored from {{ _restore_dump | basename }}."
+      - "The service is STOPPED on purpose. Before starting:"
+      - "  - if the on-disk WAR already matches this dump's version:"
+      - "      systemctl start openspecimen"
+      - "  - otherwise deploy the matching release FIRST:"
+      - "      ansible-playbook -i inventory/customers/<name>/ site.yml -e openspecimen_release=<that-version> ..."
+      - "  Starting a NEWER WAR against this restored schema re-runs Liquibase and migrates it forward again."
