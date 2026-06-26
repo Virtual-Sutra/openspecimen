@@ -49,36 +49,47 @@ openspecimen_plugin_dir:    /usr/local/openspecimen/plugins
 openspecimen_backup_dir:    /usr/local/openspecimen/backup
 openspecimen_release_marker: /usr/local/openspecimen/.release
 
-# ── Multi-instance (ADR-006) ──────────────────────────────────────────────────
-# Run N independent OpenSpecimen instances on one host (e.g. prod + test), each
-# its own Tomcat (CATALINA_BASE off a shared CATALINA_HOME), ports, DB+user,
-# data/plugin/backup dirs, heap and systemd unit. OMIT openspecimen_instances
-# for a single-instance host - the deploy then synthesises one default instance
-# from the flat vars above and behaves exactly as before (see docs/MULTI-INSTANCE.md).
-catalina_home:                  "{{ tomcat_home }}"   # shared Tomcat binary
-openspecimen_instances_base:    /usr/local/openspecimen/instances
-openspecimen_port_base:         8080                  # http base; instance N gets base + N*10
-openspecimen_ajp_port_base:     8009
-openspecimen_shutdown_port_base: 8005
+# ── Instances (ADR-006) ───────────────────────────────────────────────────────
+# openspecimen_instances is the deployment model: a list of OpenSpecimen
+# instances on this host. The default below is ONE instance using the standard
+# single-host layout (service 'openspecimen', CATALINA_BASE == the shared Tomcat,
+# ports 8080/8009/8005, context /openspecimen). It reads the flat vars above, so
+# a single-instance host needs no extra config.
 #
-# openspecimen_instances:
-#   - name: prod                       # required; ^[a-z0-9][a-z0-9_-]*$
-#     db_name: os_prod                 # required (one DB + user per instance)
-#     db_user: os_prod                 # required
-#     db_password: "{{ vault_os_prod_db_password }}"   # required (Vault)
-#     app_url: https://host.example.org/prod           # required for the proxy/links
-#     heap_max: 6144                   # MB, per instance
-#     heap_min: 1024
-#     release: openspecimen_v12.3       # optional; defaults to openspecimen_release
-#   - name: test
-#     db_name: os_test
-#     db_user: os_test
-#     db_password: "{{ vault_os_test_db_password }}"
-#     app_url: https://host.example.org/test
-#     heap_max: 2048
-#     heap_min: 512
-# Ports/dirs/catalina_base/service_name/markers derive from name + index;
-# override any explicitly. Deploy/upgrade one with -e instance=test.
+# Running MULTIPLE instances on one host (e.g. prod + test) is an INFREQUENT
+# requirement. To do it, override openspecimen_instances in the customer
+# inventory with N entries: give each a unique name + DB + app_url; ports, dirs,
+# CATALINA_BASE, service_name and markers then derive from name + index (each
+# isolated under openspecimen_instances_base). Deploy/upgrade one with
+# -e instance=<name>. See docs/MULTI-INSTANCE.md.
+catalina_home:                   "{{ tomcat_home }}"   # shared Tomcat binary (all instances)
+openspecimen_instances_base:     /usr/local/openspecimen/instances  # per-instance roots (multi)
+openspecimen_port_base:          8080                  # multi: instance N gets base + N*10
+openspecimen_ajp_port_base:      8009
+openspecimen_shutdown_port_base: 8005
+
+openspecimen_instances:
+  - name:          openspecimen
+    service_name:  openspecimen                 # bare unit name for the single host
+    context_path:  /openspecimen
+    catalina_base: "{{ tomcat_home }}"          # single host: BASE == HOME
+    http_port:     "{{ openspecimen_port | int }}"
+    ajp_port:      "{{ (apache_ajp_port | default(openspecimen_ajp_port_base)) | int }}"
+    shutdown_port: "{{ openspecimen_shutdown_port_base | int }}"
+    data_dir:      "{{ openspecimen_data_dir }}"
+    plugin_dir:    "{{ openspecimen_plugin_dir }}"
+    backup_dir:    "{{ openspecimen_backup_dir }}"
+    release_marker:        "{{ openspecimen_release_marker }}"
+    deploy_success_marker: "{{ openspecimen_deploy_success_marker }}"
+    release:       "{{ openspecimen_release }}"
+    db_name:       "{{ mysql_db_name }}"
+    db_user:       "{{ mysql_db_user }}"
+    db_password:   "{{ mysql_db_password }}"
+    db_host:       "{{ mysql_db_host }}"
+    app_url:       "{{ openspecimen_app_url | default('') }}"
+    node_name:     "{{ openspecimen_node_name | default('openspecimen') }}"
+    paid_plugins:      "{{ openspecimen_paid_plugins | default([]) }}"
+    customer_plugins:  "{{ openspecimen_customer_plugins | default([]) }}"
 
 # Written ONLY at the very last task of a successful deploy. Read by
 # roles/openspecimen/tasks/direction.yml - the skip-if-current shortcut requires

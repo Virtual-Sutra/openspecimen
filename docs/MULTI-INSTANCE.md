@@ -9,17 +9,18 @@ This is the **1:1 Tomcat-per-deployment** model (ADR-003 / ADR-006).
 > (this change). Per-instance Tomcat/ports (#73) and the Apache per-instance
 > vhost (#74) follow. A single-instance host is unaffected today.
 
-## Single instance (default — nothing to do)
+## Single instance (the default — nothing to do)
 
-Leave `openspecimen_instances` **unset**. The deploy synthesises one default
-instance from the existing flat vars, pinned to today's exact values (unit name
-`openspecimen`, `CATALINA_BASE == CATALINA_HOME == {{ tomcat_home }}`, ports
-8080/8009/8005, context `/openspecimen`, the existing data/plugin/backup dirs).
-Behaviour is byte-identical to before.
+`openspecimen_instances` ships in `group_vars/all.yml` with **one** entry using
+the standard single-host layout (service `openspecimen`, `CATALINA_BASE` = the
+shared Tomcat, ports 8080/8009/8005, context `/openspecimen`). That entry reads
+the flat vars (`mysql_db_name`, `openspecimen_port`, the data/plugin/backup
+dirs, …), so a single-instance host needs no extra configuration.
 
-## Multiple instances
+## Multiple instances (infrequent)
 
-Declare them in the customer inventory:
+Running more than one instance on a host is uncommon. When you need it, **override
+`openspecimen_instances`** in the customer inventory with N entries:
 
 ```yaml
 openspecimen_instances:
