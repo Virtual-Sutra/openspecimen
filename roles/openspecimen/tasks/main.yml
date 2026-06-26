@@ -180,6 +180,50 @@
   changed_when: false
   when: openspecimen_install_type == 'upgrade'
 
+# ── Pre-upgrade DB backup gate (#98) ─────────────────────────────────────────
+# Small DBs are dumped inline below; large DBs would risk the deploy SLA, so we
+# halt and ask the operator to back up manually + re-run with
+# -e db_backup_confirmed=true. Runs BEFORE the service is stopped (fail fast,
+# no outage). Local MySQL only (db_managed); RDS snapshot is a follow-up (#99).
+- name: Measure database size for the DB-backup gate
+  ansible.builtin.shell: |
+    mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' -h {{ mysql_db_host }} -sN \
+      -e "SELECT COALESCE(ROUND(SUM(data_length+index_length)/1024/1024),0) FROM information_schema.tables WHERE table_schema='{{ mysql_db_name }}';"
+  register: _db_size_mb
+  changed_when: false
+  no_log: true
+  when: &db_backup_when
+    - openspecimen_install_type == 'upgrade'
+    - db_managed | default(true) | bool
+    - db_type | default('mysql') == 'mysql'
+    - db_backup_enabled | default(true) | bool
+
+- name: Set database size fact (MB)
+  ansible.builtin.set_fact:
+    _db_size_mb_val: "{{ _db_size_mb.stdout | default('0') | trim | int }}"
+  when: *db_backup_when
+
+- name: Halt for manual DB backup on large databases
+  ansible.builtin.fail:
+    msg: |
+      Database {{ mysql_db_name }} is {{ _db_size_mb_val }} MB
+        (> db_backup_auto_max_mb = {{ db_backup_auto_max_mb | default(2048) }} MB).
+
+      An inline mysqldump would risk the deploy SLA. Take a DB backup manually
+      (mysqldump / RDS snapshot) BEFORE upgrading, then re-run with:
+        -e db_backup_confirmed=true     (Jenkins: tick DB_BACKUP_CONFIRMED)
+
+      Or skip DB backup entirely:
+        -e db_backup_enabled=false      (rollback will be artifact-only; the
+                                         schema-drift halt remains the safety net)
+  when:
+    - openspecimen_install_type == 'upgrade'
+    - db_managed | default(true) | bool
+    - db_type | default('mysql') == 'mysql'
+    - db_backup_enabled | default(true) | bool
+    - (_db_size_mb_val | int) > (db_backup_auto_max_mb | default(2048) | int)
+    - not (db_backup_confirmed | default(false) | bool)
+
 - name: Stop service for upgrade backup
   ansible.builtin.systemd:
     name: openspecimen
@@ -209,6 +253,7 @@
       ['config']
       + (['plugins/paid', 'plugins/zustomer'] if not (_config_only_change | default(false)) else [])
       + (['plugins/default'] if not (_plugins_only_change | default(false) or _config_only_change | default(false)) else [])
+      + (['db'] if (db_managed | default(true) | bool and (db_type | default('mysql') == 'mysql') and db_backup_enabled | default(true) | bool) else [])
     }}
   when: openspecimen_install_type == 'upgrade'
 
@@ -223,6 +268,29 @@
   when:
     - openspecimen_install_type == 'upgrade'
     - not (_plugins_only_change | default(false) or _config_only_change | default(false))
+
+# Snapshot the database into the same timestamped backup (#98), so a rollback
+# can restore WAR + schema + data together (opt-in -e restore_db=true) and
+# schema-drift stops being a concern. Auto-dumps only when the DB is at/under
+# db_backup_auto_max_mb; larger DBs were gated above (manual backup + confirm),
+# so they fall through here without an SLA-busting inline dump.
+# --add-drop-database --databases makes the restore drop+recreate the schema
+# cleanly (removes tables added by migrations after the backup).
+- name: Back up database (mysqldump) on upgrade
+  ansible.builtin.shell: |
+    set -o pipefail
+    mysqldump --single-transaction --routines --triggers --add-drop-database --databases {{ mysql_db_name }} \
+      -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' -h {{ mysql_db_host }} \
+      | gzip > {{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/db/{{ mysql_db_name }}.sql.gz
+  args:
+    executable: /bin/bash
+  no_log: true
+  when:
+    - openspecimen_install_type == 'upgrade'
+    - db_managed | default(true) | bool
+    - db_type | default('mysql') == 'mysql'
+    - db_backup_enabled | default(true) | bool
+    - (_db_size_mb_val | default(0) | int) <= (db_backup_auto_max_mb | default(2048) | int)
 
 # Remove orphan plugin JARs BEFORE the backup mv - without this, the backup
 # would snapshot the orphan and a rollback to that timestamp would resurrect

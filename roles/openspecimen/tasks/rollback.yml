@@ -222,6 +222,9 @@
            - in Jenkins: tick the ALLOW_DOWNGRADE checkbox on the deploy job.
   when:
     - not (allow_downgrade | default(false) | bool)
+    # When restoring the DB from the backup, drift is irrelevant - the schema is
+    # brought back to match the rolled-back WAR (#98).
+    - not (restore_db | default(false) | bool)
     - _changelog_count is defined
     - _changelog_count.stdout is defined
     - (_changelog_count.stdout | trim | int) > 0
@@ -243,6 +246,50 @@
   ansible.builtin.systemd:
     name:  openspecimen
     state: stopped
+
+# ── 3b. Restore database (opt-in: -e restore_db=true) ────────────────────────
+# Brings WAR + schema + data back to the backup point together so the rolled-
+# back app runs against its matching schema (the drift halt above is skipped
+# when restore_db is set). NOTE: discards data written after the backup - a
+# deliberate operator choice. Local MySQL only; the dump used
+# --add-drop-database so it drops+recreates the schema cleanly. RDS snapshot
+# restore is a heavier, documented manual step (#99).
+- name: Probe database dump in backup
+  ansible.builtin.find:
+    paths:    "{{ _restore_path }}/db"
+    patterns: "*.sql.gz"
+  register: _db_dump
+  when:
+    - restore_db | default(false) | bool
+    - db_managed | default(true) | bool
+    - db_type | default('mysql') == 'mysql'
+
+- name: Restore database from backup dump
+  ansible.builtin.shell: |
+    set -o pipefail
+    gunzip -c "{{ (_db_dump.files | first).path }}" \
+      | mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' -h {{ mysql_db_host }}
+  args:
+    executable: /bin/bash
+  no_log: true
+  when:
+    - restore_db | default(false) | bool
+    - db_managed | default(true) | bool
+    - db_type | default('mysql') == 'mysql'
+    - (_db_dump.matched | default(0)) > 0
+
+- name: Warn when restore_db set but no DB dump in backup
+  ansible.builtin.debug:
+    msg: >-
+      restore_db=true but no db/*.sql.gz in {{ _restore_path | basename }} - the
+      database was NOT restored (this backup predates DB snapshots, or was a
+      large-DB manual-backup upgrade). The WAR/files were rolled back; verify
+      schema compatibility manually or restore your manual/RDS backup.
+  when:
+    - restore_db | default(false) | bool
+    - db_managed | default(true) | bool
+    - db_type | default('mysql') == 'mysql'
+    - (_db_dump.matched | default(0)) == 0
 
 # ── 4. Restore WAR (replace the live one) ────────────────────────────────────
 
