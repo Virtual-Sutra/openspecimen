@@ -1,0 +1,45 @@
+---
+# Component version spec — TEMPLATE (copy to <release>.yml, e.g. v12.3.yml).
+#
+# One file per OpenSpecimen release, selected at deploy time from
+# openspecimen_release (the "openspecimen_" prefix is stripped, so
+# openspecimen_v12.3 → component-specs/v12.3.yml). site.yml loads the matching
+# file and exposes the merged result as `os_versions` to the roles.
+#
+# Generate a draft from a running host with the ops discovery playbook:
+#   ansible-playbook -i inventory/ discover-versions.yml -e customer=<name>
+#
+# Pinning model (ADR-002):
+#   pinned exact  : tomcat                       (we ship / pin this artifact)
+#   track + build : java, mysql, apache          (OS packages — patch drifts)
+#   from zip      : connectors                   (bundled in the release zip,
+#                   like the WAR/plugins — commented placeholders below)
+#
+# Per-customer override (no need to edit this file): set
+# component_versions_override in the customer inventory, e.g.
+#   component_versions_override:
+#     tomcat: "9.0.71"
+#     java: { track: "21" }
+
+component_spec:
+  release: "openspecimen_vX.Y"
+
+  # Pinned exact — the Tomcat version installed by the tomcat role (#91).
+  tomcat: "9.0.x"
+
+  # OS packages — declare the supported track; record the build validated in
+  # testing. The roles install the track; "validated" is informational.
+  java:
+    track: "17"
+    validated: "17.0.x"
+  mysql:
+    track: "8.0"            # 8.4 on RHEL (Community repo)
+    validated: "8.0.x"
+  apache:
+    track: "2.4"
+    validated: "2.4.x"
+
+# Connectors ship in the OpenSpecimen release zip (not pinned here). Uncomment
+# and set only if you want to record/override the bundled driver versions:
+# mysql_connector: "x.y.z"
+# oracle_jdbc: "x.y.z"
