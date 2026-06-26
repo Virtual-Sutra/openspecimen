@@ -26,34 +26,12 @@
       No prior version recorded - Requesting: {{ openspecimen_release }}
       {% endif %}
 
-- name: Detect version direction
-  ansible.builtin.shell: |
-    INSTALLED="{{ _installed_release }}"
-    REQUESTED="{{ openspecimen_release }}"
-    if [ "$INSTALLED" = "$REQUESTED" ]; then
-      echo ok
-    elif [ "$(printf '%s\n%s\n' "$INSTALLED" "$REQUESTED" | sort -V | head -1)" = "$REQUESTED" ]; then
-      echo downgrade
-    else
-      echo ok
-    fi
-  register: _version_direction
-  changed_when: false
-  when: _installed_release | length > 0
-
-- name: Downgrade is not supported
-  ansible.builtin.debug:
-    msg: |
-      Downgrade is not supported - deployment will not proceed.
-        Prior version : {{ _installed_release }}
-        Requested     : {{ openspecimen_release }}
-      To deploy an older version, provision a fresh VM and run site.yml.
-  when:
-    - _installed_release | length > 0
-    - _version_direction.stdout | default('ok') == 'downgrade'
-
-- name: Stop play on downgrade
-  ansible.builtin.meta: end_play
-  when:
-    - _installed_release | length > 0
-    - _version_direction.stdout | default('ok') == 'downgrade'
+# Downgrade is NOT blocked here. Direction is detected once, earlier, by
+# roles/openspecimen/tasks/direction.yml (the first pre_task in site.yml): a
+# requested release older than the installed one triggers the backup-restore
+# rollback flow (roles/openspecimen/tasks/rollback.yml) and ends the play
+# before this base role runs. Schema-incompatible downgrades are caught there
+# (Liquibase changeset check) and overridable with -e allow_downgrade=true.
+# A second, contradictory "downgrade not supported" hard-stop used to live here
+# (dead code, since direction.yml already ended the play) and has been removed.
+# See ADR-004.
