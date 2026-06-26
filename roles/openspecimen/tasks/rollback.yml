@@ -157,6 +157,20 @@
       - "Backup mtime  : {{ '%Y-%m-%d %H:%M:%S' | strftime(_restore_stat.stat.mtime) }}"
       - "WAR size      : {{ (_war_stat.stat.size / 1024 / 1024) | round(1) }} MB"
 
+# Probe the DB dump up-front (#98) so the schema-drift halt below can be skipped
+# ONLY when a restore will actually happen (restore_db AND a dump present).
+# Without the dump, restore_db cannot bring the schema back, so drift must still
+# halt - otherwise we'd silently land an old WAR on a forward-migrated schema.
+- name: Probe database dump in backup
+  ansible.builtin.find:
+    paths:    "{{ _restore_path }}/db"
+    patterns: "*.sql.gz"
+  register: _db_dump
+  when:
+    - restore_db | default(false) | bool
+    - db_managed | default(true) | bool
+    - db_type | default('mysql') == 'mysql'
+
 # ── 2b. Schema-incompatible downgrade detection ──────────────────────────────
 
 - name: Read live release marker (for diagnostics)
@@ -222,6 +236,10 @@
            - in Jenkins: tick the ALLOW_DOWNGRADE checkbox on the deploy job.
   when:
     - not (allow_downgrade | default(false) | bool)
+    # Skip drift halt only when a DB restore will ACTUALLY happen (restore_db AND
+    # a dump is present) - then the schema is brought back to match the WAR (#98).
+    # If restore_db is set but no dump exists, drift must still halt.
+    - not ((restore_db | default(false) | bool) and ((_db_dump.matched | default(0)) > 0))
     - _changelog_count is defined
     - _changelog_count.stdout is defined
     - (_changelog_count.stdout | trim | int) > 0
@@ -243,6 +261,42 @@
   ansible.builtin.systemd:
     name:  openspecimen
     state: stopped
+
+# ── 3b. Restore database (opt-in: -e restore_db=true) ────────────────────────
+# Brings WAR + schema + data back to the backup point together so the rolled-
+# back app runs against its matching schema (the drift halt above is skipped
+# when restore_db is set). NOTE: discards data written after the backup - a
+# deliberate operator choice. Local MySQL only; the dump used
+# --add-drop-database so it drops+recreates the schema cleanly (the DB user
+# needs CREATE/DROP on its own schema - true for the local :ALL grant). RDS
+# snapshot restore is a heavier, documented manual step (#99). _db_dump was
+# registered up-front (before the drift check).
+- name: Restore database from backup dump
+  ansible.builtin.shell: |
+    set -o pipefail
+    gunzip -c "{{ (_db_dump.files | first).path }}" \
+      | mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' -h {{ mysql_db_host }}
+  args:
+    executable: /bin/bash
+  no_log: true
+  when:
+    - restore_db | default(false) | bool
+    - db_managed | default(true) | bool
+    - db_type | default('mysql') == 'mysql'
+    - (_db_dump.matched | default(0)) > 0
+
+- name: Warn when restore_db set but no DB dump in backup
+  ansible.builtin.debug:
+    msg: >-
+      restore_db=true but no db/*.sql.gz in {{ _restore_path | basename }} - the
+      database was NOT restored (this backup predates DB snapshots, or was a
+      large-DB manual-backup upgrade). The WAR/files were rolled back; verify
+      schema compatibility manually or restore your manual/RDS backup.
+  when:
+    - restore_db | default(false) | bool
+    - db_managed | default(true) | bool
+    - db_type | default('mysql') == 'mysql'
+    - (_db_dump.matched | default(0)) == 0
 
 # ── 4. Restore WAR (replace the live one) ────────────────────────────────────
 
