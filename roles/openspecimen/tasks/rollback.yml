@@ -259,7 +259,7 @@
 
 - name: Stop openspecimen service
   ansible.builtin.systemd:
-    name:  openspecimen
+    name: "{{ openspecimen_service_name | default('openspecimen') }}"
     state: stopped
 
 # ── 3b. Restore database (opt-in: -e restore_db=true) ────────────────────────
@@ -440,7 +440,7 @@
 
 - name: Start openspecimen service
   ansible.builtin.systemd:
-    name:  openspecimen
+    name: "{{ openspecimen_service_name | default('openspecimen') }}"
     state: started
     daemon_reload: true
 

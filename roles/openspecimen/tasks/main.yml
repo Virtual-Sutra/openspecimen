@@ -78,9 +78,12 @@
             - Missing DB        → check db_managed is true so MySQL role creates the schema
 
 - name: Set install type
+  # Recompute every time (no 'is not defined' guard): main.yml runs once per
+  # instance under the #72-p2 loop, and set_fact persists across iterations, so a
+  # guard would leak instance A's value to B (and skip B's upgrade backup/dump).
+  # An operator '-e openspecimen_install_type=...' still wins by var precedence.
   ansible.builtin.set_fact:
     openspecimen_install_type: "{{ 'upgrade' if (_schema_check.stdout | trim) == '1' else 'fresh' }}"
-  when: openspecimen_install_type is not defined
 
 - name: Log deployment plan
   ansible.builtin.debug:
@@ -233,7 +236,7 @@
 
 - name: Stop service for upgrade backup
   ansible.builtin.systemd:
-    name: openspecimen
+    name: "{{ openspecimen_service_name | default('openspecimen') }}"
     state: stopped
   when: openspecimen_install_type == 'upgrade'
 
@@ -708,7 +711,7 @@
 
 - name: Start and enable openspecimen service
   ansible.builtin.systemd:
-    name: openspecimen
+    name: "{{ openspecimen_service_name | default('openspecimen') }}"
     state: started
     enabled: true
     daemon_reload: true

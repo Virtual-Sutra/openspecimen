@@ -24,6 +24,10 @@
         From Jenkins:      select RELEASE_FILE in the deploy job.
   when: not (openspecimen_release | default('') | trim)
 
+- name: Default instance direction to deploy (overridden below on rollback/noop)
+  ansible.builtin.set_fact:
+    _instance_direction: deploy
+
 - name: Read installed version marker on target
   ansible.builtin.slurp:
     src: "{{ openspecimen_release_marker }}"
@@ -70,8 +74,9 @@
     target_version: "{{ openspecimen_release }}"
   when: _direction.stdout == 'rollback'
 
-- name: End play after rollback (skip deploy roles)
-  ansible.builtin.meta: end_play
+- name: Mark instance direction = rollback (skip this instance's deploy, continue loop)
+  ansible.builtin.set_fact:
+    _instance_direction: rollback
   when: _direction.stdout == 'rollback'
 
 # ── Skip-if-current - same-version re-deploy with matching plugin JARs ───────
@@ -314,8 +319,9 @@
     - _no_orphans | default(false)
     - not (_config_changed | default(false))
 
-- name: End play when nothing to deploy
-  ansible.builtin.meta: end_play
+- name: Mark instance direction = noop (nothing to deploy for this instance)
+  ansible.builtin.set_fact:
+    _instance_direction: noop
   when:
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release

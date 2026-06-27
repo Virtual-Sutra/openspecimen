@@ -85,7 +85,7 @@
 
 - name: Stop openspecimen service before restore
   ansible.builtin.systemd:
-    name: openspecimen
+    name: "{{ openspecimen_service_name | default('openspecimen') }}"
     state: stopped
   failed_when: false
 
