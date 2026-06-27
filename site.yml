@@ -73,30 +73,32 @@
                  | combine(component_spec | default({}), recursive=true)
                  | combine(component_versions_override | default({}), recursive=true) }}
 
-    # Detect deploy vs rollback direction by comparing openspecimen_release
-    # against the on-target .release marker. On downgrade, the rollback flow
-    # is invoked automatically and the play ends - the roles below do not run.
-    - name: Detect direction (deploy or rollback)
-      ansible.builtin.include_role:
-        name: openspecimen
-        tasks_from: direction
+    # Host-level deploy scope. Direction (deploy / rollback / no-op) and the
+    # artifact pre-flight are now detected PER INSTANCE in tasks/deploy-instance.yml.
+    # Here we only decide whether the host-level base roles (common/java/mysql/
+    # tomcat) need to run: when ANY instance is fresh (missing/empty .release
+    # marker) or when force_deploy is set.
+    - name: Probe each instance .release marker (host-level base gate)
+      ansible.builtin.slurp:
+        src: "{{ item.release_marker }}"
+      loop: "{{ _instances }}"
+      loop_control:
+        loop_var: item
+        label: "{{ item.name }}"
+      register: _marker_probe
+      failed_when: false
+      changed_when: false
 
-    # Verify the release zip and every paid/customer plugin zip exists on the
-    # control node before any role runs. Fails fast if anything is missing.
-    # (Only reached on forward / fresh deploys - rollback ended the play.)
-    - name: Pre-flight artifact check
-      ansible.builtin.include_role:
-        name: openspecimen
-        tasks_from: preflight
-
-    # Choose deploy scope: FULL (base + app) on a fresh install (no .release
-    # marker, set by direction.yml above) or when force_deploy is set; otherwise
-    # FAST app-only (base roles skipped) on an upgrade.
     - name: Determine deploy scope (full base+app vs app-only)
       ansible.builtin.set_fact:
         _full_deploy: >-
-          {{ ((_installed_release | default('') | trim) | length == 0)
-             or (force_deploy | default(false) | bool) }}
+          {{ (force_deploy | default(false) | bool)
+             or (_marker_probe.results
+                 | selectattr('content', 'undefined') | list | length > 0)
+             or (_marker_probe.results
+                 | selectattr('content', 'defined')
+                 | map(attribute='content') | map('b64decode') | map('trim')
+                 | select('equalto', '') | list | length > 0) }}
 
   roles:
     # ── Base roles - fresh install or force_deploy only (skipped on fast upgrades)
@@ -115,20 +117,14 @@
       when: _full_deploy
       tags: [base]
 
-    # ── App roles - always run (install and upgrade)
-    - openspecimen
-    - role: plugins
-      when: customer_plugins | default([]) | length > 0
-    - role: apache
-      when: apache_enabled | default(false)
-
-  post_tasks:
-    # The primary readiness check is Phase 1 (Tomcat startup) in the openspecimen
-    # role - always runs, local, no DNS needed. This optional public-URL (app_url)
-    # check runs ONLY when openspecimen_verify_app_url is enabled (default false;
-    # turn on once public DNS exists). It runs after ALL roles (notably apache) so
-    # the proxy that serves the URL is in place.
-    - name: Verify app reachable via public URL (opt-in)
-      ansible.builtin.include_role:
-        name: openspecimen
-        tasks_from: verify-public-url
+  # ── App roles run PER INSTANCE (#72 part 2) ──────────────────────────────────
+  # Each entry in _instances gets its own direction detection, WAR/config/plugin
+  # deploy, apache vhost, and opt-in public-URL verify. The base roles above stay
+  # host-level (run once). See tasks/deploy-instance.yml.
+  tasks:
+    - name: Deploy each OpenSpecimen instance
+      ansible.builtin.include_tasks: tasks/deploy-instance.yml
+      loop: "{{ _instances }}"
+      loop_control:
+        loop_var: _instance
+        label: "{{ _instance.name }}"

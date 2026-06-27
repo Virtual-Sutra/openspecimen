@@ -1,0 +1,86 @@
+---
+# Per-instance app deploy wrapper (#72 part 2).
+#
+# Looped from site.yml over `_instances` with loop_var=_instance. For each
+# instance we set_fact the flat global vars the app roles already read (a "shim"
+# off the _instance dict), then include_role direction -> preflight -> openspecimen
+# (main) -> plugins -> apache -> verify-public-url. This keeps the 877-line role
+# internals untouched while running them once per instance.
+#
+# direction.yml sets `_instance_direction` (deploy | rollback | noop) instead of
+# ending the whole play, so a rolled-back or already-current instance skips its
+# own deploy steps WITHOUT stopping the other instances.
+#
+# IMPORTANT: set_fact is host-scoped and persists across loop iterations, so we
+# explicitly reset the direction/probe facts each iteration - otherwise an
+# instance whose direction.yml skips a conditional set_fact would inherit the
+# previous instance's value (e.g. _plugins_only_change). Instances run serially,
+# so overwriting the flat vars each iteration is safe.
+
+- name: "[{{ _instance.name }}] Shim flat vars from instance"
+  ansible.builtin.set_fact:
+    openspecimen_release:               "{{ _instance.release }}"
+    openspecimen_release_marker:        "{{ _instance.release_marker }}"
+    openspecimen_deploy_success_marker: "{{ _instance.deploy_success_marker }}"
+    openspecimen_data_dir:              "{{ _instance.data_dir }}"
+    openspecimen_plugin_dir:            "{{ _instance.plugin_dir }}"
+    openspecimen_backup_dir:            "{{ _instance.backup_dir }}"
+    openspecimen_paid_plugins:          "{{ _instance.paid_plugins }}"
+    openspecimen_customer_plugins:      "{{ _instance.customer_plugins }}"
+    openspecimen_port:                  "{{ _instance.http_port | int }}"
+    openspecimen_ajp_port:              "{{ _instance.ajp_port | int }}"
+    openspecimen_shutdown_port:         "{{ _instance.shutdown_port | int }}"
+    openspecimen_app_url:               "{{ _instance.app_url }}"
+    openspecimen_node_name:             "{{ _instance.node_name }}"
+    openspecimen_service_name:          "{{ _instance.service_name }}"
+    openspecimen_context_path:          "{{ _instance.context_path }}"
+    catalina_base:                      "{{ _instance.catalina_base }}"
+    mysql_db_name:                      "{{ _instance.db_name }}"
+    mysql_db_user:                      "{{ _instance.db_user }}"
+    mysql_db_password:                  "{{ _instance.db_password }}"
+    mysql_db_host:                      "{{ _instance.db_host }}"
+    # Reset per-instance facts so nothing leaks from a prior iteration.
+    _instance_direction:   ""
+    _installed_release:    ""
+    _version_check_done:   false
+    _plugins_only_change:  false
+    _config_only_change:   false
+    _config_changed:       false
+
+- name: "[{{ _instance.name }}] Detect direction (deploy / rollback / noop)"
+  ansible.builtin.include_role:
+    name: openspecimen
+    tasks_from: direction
+
+- name: "[{{ _instance.name }}] Deploy (skipped when rollback/noop)"
+  when: _instance_direction == 'deploy'
+  block:
+    - name: "[{{ _instance.name }}] Pre-flight artifact check"
+      ansible.builtin.include_role:
+        name: openspecimen
+        tasks_from: preflight
+
+    - name: "[{{ _instance.name }}] OpenSpecimen role (WAR + config + default plugins)"
+      ansible.builtin.include_role:
+        name: openspecimen
+
+    - name: "[{{ _instance.name }}] Plugins role"
+      ansible.builtin.include_role:
+        name: plugins
+      when: customer_plugins | default([]) | length > 0
+
+    - name: "[{{ _instance.name }}] Apache reverse proxy"
+      ansible.builtin.include_role:
+        name: apache
+      when: apache_enabled | default(false)
+
+    - name: "[{{ _instance.name }}] Verify app reachable via public URL (opt-in)"
+      ansible.builtin.include_role:
+        name: openspecimen
+        tasks_from: verify-public-url
+
+# Flush handlers now, while the shim still holds THIS instance's values, so the
+# "restart openspecimen" handler restarts this instance's service - not the last
+# instance's (handlers otherwise run at play end after the shim has moved on).
+- name: "[{{ _instance.name }}] Flush handlers (restart this instance now)"
+  ansible.builtin.meta: flush_handlers

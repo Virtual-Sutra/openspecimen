@@ -1,5 +1,5 @@
 ---
 - name: restart openspecimen
   ansible.builtin.systemd:
-    name: openspecimen
+    name: "{{ openspecimen_service_name | default('openspecimen') }}"
     state: restarted
