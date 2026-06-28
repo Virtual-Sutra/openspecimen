@@ -1,63 +1,23 @@
 ---
-# Day-2: Update JDBC connection pool size and restart OpenSpecimen.
-# Backs up the current context.xml before applying changes.
-#
+# Day-2: Update JDBC pool and restart. Per instance (#102).
 # Usage:
-#   ansible-playbook -i inventory/customers/<name>/ update-db-pool.yml \
-#     -e pool_max_active=150
-#
-# Other pool parameters (min_idle, initial_size, etc.) retain their current
-# values from group_vars. To change multiple parameters at once, pass each:
-#   -e pool_max_active=150 -e pool_min_idle=20
-
+#   ansible-playbook -i inventory/customers/<name>/ update-db-pool.yml -e pool_max_active=150
+#   #   optionally -e pool_min_idle=20 ; one instance:  -e instance=<name>
 - name: Update JDBC connection pool settings
   hosts: openspecimen
   become: true
   gather_facts: false
-
   pre_tasks:
     - name: Require pool_max_active
       ansible.builtin.fail:
         msg: "Pass -e pool_max_active=<int> (e.g. pool_max_active=150)"
       when: pool_max_active is not defined
-
-    - name: Backup current context.xml
-      ansible.builtin.include_tasks: tasks/backup_config.yml
-      vars:
-        backup_src:   "{{ tomcat_home }}/conf/context.xml"
-        backup_label: context.xml
-
-  vars:
-    tomcat_pool_max_active: "{{ pool_max_active }}"
-
+    - name: Resolve instances
+      ansible.builtin.import_tasks: tasks/resolve-instances.yml
   tasks:
-    - name: Override pool min idle when provided
-      ansible.builtin.set_fact:
-        tomcat_pool_min_idle: "{{ pool_min_idle }}"
-      when: pool_min_idle is defined
-
-    - name: Apply new pool settings to context.xml
-      ansible.builtin.template:
-        src:   "{{ playbook_dir }}/roles/tomcat/templates/context.xml.j2"
-        dest:  "{{ tomcat_home }}/conf/context.xml"
-        owner: "{{ tomcat_user }}"
-        group: "{{ tomcat_user }}"
-        mode:  '0640'
-
-    - name: Restart OpenSpecimen
-      ansible.builtin.systemd:
-        name:  openspecimen
-        state: restarted
-
-    - name: Wait for OpenSpecimen to be ready
-      ansible.builtin.include_tasks: tasks/wait_for_app.yml
-
-    - name: Confirm new pool settings
-      ansible.builtin.command:
-        cmd: grep -oP 'maxActive="\K[^"]+' {{ tomcat_home }}/conf/context.xml
-      register: _pool
-      changed_when: false
-
-    - name: Report
-      ansible.builtin.debug:
-        msg: "Pool updated - maxActive={{ _pool.stdout }}"
+    - name: Update pool per instance
+      ansible.builtin.include_tasks: tasks/day2-db-pool.yml
+      loop: "{{ _instances }}"
+      loop_control:
+        loop_var: _instance
+        label: "{{ _instance.name }}"

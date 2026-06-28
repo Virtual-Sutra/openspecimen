@@ -2,7 +2,7 @@
 - name: Wait for OpenSpecimen to be ready
   ansible.builtin.shell: >
     curl -sf -o /dev/null -w "%{http_code}"
-    http://localhost:{{ openspecimen_port }}/openspecimen/rest/ng/config-settings/app-props
+    http://localhost:{{ openspecimen_port }}{{ openspecimen_context_path | default('/openspecimen') }}/rest/ng/config-settings/app-props
     | grep -qE '^(200|401)$'
   register: _health
   until:    _health.rc == 0
