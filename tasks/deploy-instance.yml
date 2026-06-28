@@ -20,6 +20,10 @@
 - name: "[{{ _instance.name }}] Shim flat vars from instance"
   ansible.builtin.set_fact:
     openspecimen_release:               "{{ _instance.release }}"
+    # Reset the zip path to the per-instance default each iteration (no leak from a
+    # prior instance). A global -e openspecimen_zip_path shadows this; otherwise the
+    # find below resolves the real location under builds_dir by release.
+    openspecimen_zip_path:              "{{ openspecimen_builds_dir }}/{{ _instance.release }}.zip"
     openspecimen_release_marker:        "{{ _instance.release_marker }}"
     openspecimen_deploy_success_marker: "{{ _instance.deploy_success_marker }}"
     openspecimen_data_dir:              "{{ _instance.data_dir }}"
@@ -34,6 +38,7 @@
     openspecimen_node_name:             "{{ _instance.node_name }}"
     openspecimen_service_name:          "{{ _instance.service_name }}"
     openspecimen_context_path:          "{{ _instance.context_path }}"
+    catalina_home:                      "{{ _instance.catalina_home }}"
     catalina_base:                      "{{ _instance.catalina_base }}"
     mysql_db_name:                      "{{ _instance.db_name }}"
     mysql_db_user:                      "{{ _instance.db_user }}"
@@ -46,6 +51,27 @@
     _plugins_only_change:  false
     _config_only_change:   false
     _config_changed:       false
+    _inst_zip_find:        {files: []}
+
+- name: "[{{ _instance.name }}] Guard: no global release/zip override on a multi-instance host"
+  # Extra-vars (-e openspecimen_release / -e openspecimen_zip_path) outrank the
+  # per-instance shim above, so on a host with >1 instance a global override would
+  # force EVERY instance to the same version. Fail loudly instead of silently
+  # deploying the wrong artifact. Single-instance and -e instance=<name> (which
+  # filters _instances to one) are unaffected.
+  ansible.builtin.assert:
+    that:
+      - openspecimen_release == _instance.release
+      - openspecimen_zip_path == (openspecimen_builds_dir ~ '/' ~ _instance.release ~ '.zip')
+    fail_msg: >-
+      A global -e openspecimen_release / -e openspecimen_zip_path was passed, but
+      this host runs multiple instances ({{ _instances | map(attribute='name') | list }}).
+      An extra-var overrides the per-instance value for every instance, so they would
+      all deploy the same version. Declare each instance's 'release' in
+      openspecimen_instances and drop those -e flags (config-driven), or target one
+      instance with -e instance=<name>.
+    quiet: true
+  when: (_instances | length) > 1
 
 - name: "[{{ _instance.name }}] Detect direction (deploy / rollback / noop)"
   ansible.builtin.include_role:
@@ -55,10 +81,75 @@
 - name: "[{{ _instance.name }}] Deploy (skipped when rollback/noop)"
   when: _instance_direction == 'deploy'
   block:
+    # Per-instance component spec: THIS instance's release drives its own Tomcat /
+    # connector versions (os_versions), independent of the other instances.
+    - name: "[{{ _instance.name }}] Resolve component spec for {{ openspecimen_release }}"
+      ansible.builtin.include_tasks: tasks/resolve-spec.yml
+      vars:
+        _spec_release: "{{ openspecimen_release }}"
+
+    # Resolve THIS instance's release zip. If the configured openspecimen_zip_path
+    # exists (a global -e override, or a flat builds_dir layout) use it as-is;
+    # otherwise search builds_dir recursively for <release>.zip (Jenkins nests zips
+    # under <job>/workspace/). This is what lets each instance pull its own version.
+    - name: "[{{ _instance.name }}] Stat configured zip path"
+      ansible.builtin.stat:
+        path: "{{ openspecimen_zip_path | expanduser }}"
+      delegate_to: localhost
+      become: false
+      register: _inst_zip_stat
+      changed_when: false
+
+    - name: "[{{ _instance.name }}] Find {{ openspecimen_release }}.zip under builds_dir"
+      ansible.builtin.find:
+        paths: "{{ openspecimen_builds_dir }}"
+        patterns: "{{ openspecimen_release }}.zip"
+        recurse: true
+      delegate_to: localhost
+      become: false
+      register: _inst_zip_find
+      changed_when: false
+      when: not _inst_zip_stat.stat.exists
+
+    - name: "[{{ _instance.name }}] Use the found zip for this instance"
+      ansible.builtin.set_fact:
+        openspecimen_zip_path: "{{ (_inst_zip_find.files | sort(attribute='mtime') | last).path }}"
+      when:
+        - not _inst_zip_stat.stat.exists
+        - _inst_zip_find.files | default([]) | length > 0
+
+    - name: "[{{ _instance.name }}] Fail when no zip found for {{ openspecimen_release }}"
+      ansible.builtin.fail:
+        msg: >-
+          No {{ openspecimen_release }}.zip found at {{ openspecimen_zip_path }} or
+          anywhere under {{ openspecimen_builds_dir }} for instance '{{ _instance.name }}'.
+          Upload that release zip, or set the instance's release to one present in builds_dir.
+      when:
+        - not _inst_zip_stat.stat.exists
+        - _inst_zip_find.files | default([]) | length == 0
+
     - name: "[{{ _instance.name }}] Pre-flight artifact check"
       ansible.builtin.include_role:
         name: openspecimen
         tasks_from: preflight
+
+    # Per-instance Tomcat INSTALL: own CATALINA_HOME (binary at os_versions.tomcat)
+    # + golden conf + DB connectors, all from THIS instance's zip. The binary is
+    # laid down only when CATALINA_HOME is absent (the role's own guard); a fresh
+    # instance installs its pinned Tomcat. force_deploy re-runs the role to refresh
+    # connectors/conf but does NOT replace an existing binary - to change an
+    # instance's Tomcat version, full_wipe that instance first. App-only upgrades
+    # skip this include entirely (the openspecimen role uploads its own zip).
+    - name: "[{{ _instance.name }}] Check this instance's Tomcat install"
+      ansible.builtin.stat:
+        path: "{{ catalina_home }}/bin/startup.sh"
+      register: _inst_tomcat_stat
+
+    - name: "[{{ _instance.name }}] Install this instance's Tomcat (binary + conf + connectors)"
+      ansible.builtin.include_role:
+        name: tomcat
+        tasks_from: main
+      when: (not _inst_tomcat_stat.stat.exists) or (force_deploy | default(false) | bool)
 
     - name: "[{{ _instance.name }}] Per-instance Tomcat runtime (CATALINA_BASE, ports, unit)"
       ansible.builtin.include_role:

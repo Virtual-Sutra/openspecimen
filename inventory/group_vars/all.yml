@@ -72,6 +72,7 @@ openspecimen_instances:
   - name:          openspecimen
     service_name:  openspecimen                 # bare unit name for the single host
     context_path:  /openspecimen
+    catalina_home: "{{ tomcat_home }}"          # single host: own Tomcat == legacy shared path
     catalina_base: "{{ tomcat_home }}"          # single host: BASE == HOME
     http_port:     "{{ openspecimen_port | int }}"
     ajp_port:      "{{ (apache_ajp_port | default(openspecimen_ajp_port_base)) | int }}"

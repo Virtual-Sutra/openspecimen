@@ -1,0 +1,46 @@
+---
+# Resolve the component version spec for a single release into `os_versions`
+# (ADR-002 / #90). Caller sets `_spec_release` (e.g. openspecimen_v12.2 or an
+# openspecimen_master-DD-MM-YYYY snapshot). Loaded once host-level (shared Java)
+# and once per instance in tasks/deploy-instance.yml (per-instance Tomcat), so it
+# is self-contained and resets state to avoid leaking a spec across releases.
+#
+# master-* snapshots roll continuously and share ONE spec, so any master-* key
+# normalises to 'master' -> component-specs/master.yml.
+
+- name: "Spec: normalise release key ({{ _spec_release | default('') }})"
+  ansible.builtin.set_fact:
+    _release_key: "{{ _spec_release | default('') | regex_replace('^openspecimen_', '') | regex_replace('^master-.*$', 'master') }}"
+
+- name: "Spec: locate component-specs/{{ _release_key }}.yml"
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/component-specs/{{ _release_key }}.yml"
+  register: _spec_stat
+  delegate_to: localhost
+  become: false
+
+# Reset first so a release WITHOUT a spec file doesn't inherit the previous
+# include_vars (host-level run, or a prior instance in the loop).
+- name: "Spec: reset component_spec before load"
+  ansible.builtin.set_fact:
+    component_spec: {}
+
+- name: "Spec: load component-specs/{{ _release_key }}.yml"
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/component-specs/{{ _release_key }}.yml"
+  when: _spec_stat.stat.exists
+
+- name: "Spec: warn when no component spec exists for {{ _release_key }}"
+  ansible.builtin.debug:
+    msg: >-
+      No component-specs/{{ _release_key }}.yml found - using built-in defaults
+      (Java 17). Generate one with discover-versions.yml (ops) and add it under
+      component-specs/.
+  when: not _spec_stat.stat.exists
+
+- name: "Spec: compute os_versions (spec + customer override)"
+  ansible.builtin.set_fact:
+    os_versions: >-
+      {{ {'java': {'track': '17'}, 'tomcat': '', 'mysql': {'track': ''}, 'apache': {'track': ''}}
+         | combine(component_spec | default({}), recursive=true)
+         | combine(component_versions_override | default({}), recursive=true) }}

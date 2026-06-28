@@ -62,7 +62,7 @@
 
 - name: Check if Tomcat is already installed
   ansible.builtin.stat:
-    path: "{{ tomcat_home }}/bin/startup.sh"
+    path: "{{ catalina_home }}/bin/startup.sh"
   register: tomcat_stat
 
 - name: Install Tomcat (binaries from download, config overlaid from the zip)
@@ -80,7 +80,7 @@
 
     - name: Create CATALINA_HOME
       ansible.builtin.file:
-        path: "{{ tomcat_home }}"
+        path: "{{ catalina_home }}"
         state: directory
         owner: "{{ tomcat_user }}"
         group: "{{ tomcat_user }}"
@@ -89,7 +89,7 @@
     - name: Unpack Tomcat into CATALINA_HOME (strip top-level dir)
       ansible.builtin.unarchive:
         src: "/tmp/{{ tomcat_tarball }}"
-        dest: "{{ tomcat_home }}"
+        dest: "{{ catalina_home }}"
         remote_src: true
         extra_opts: ['--strip-components=1']
         owner: "{{ tomcat_user }}"
@@ -120,7 +120,7 @@
         set -o pipefail
         unzip -o /tmp/tomcat-as.zip -d /usr/local/openspecimen/ \
           -x 'tomcat-as/bin/*' 'tomcat-as/lib/*'
-        test -f {{ tomcat_home }}/conf/server.xml \
+        test -f {{ catalina_home }}/conf/server.xml \
           || { echo "ERROR: tomcat-as/conf/server.xml not found in bundle"; exit 1; }
       args:
         executable: /bin/bash
@@ -132,7 +132,7 @@
 
     - name: Set ownership of CATALINA_HOME
       ansible.builtin.file:
-        path: "{{ tomcat_home }}"
+        path: "{{ catalina_home }}"
         state: directory
         owner: "{{ tomcat_user }}"
         group: "{{ tomcat_user }}"
@@ -145,7 +145,7 @@
 
 - name: Create tomcat lib directory
   ansible.builtin.file:
-    path: "{{ tomcat_home }}/lib"
+    path: "{{ catalina_home }}/lib"
     state: directory
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
@@ -153,7 +153,7 @@
 
 - name: Find existing MySQL connector
   ansible.builtin.find:
-    paths:    "{{ tomcat_home }}/lib"
+    paths:    "{{ catalina_home }}/lib"
     patterns: "mysql-connector*.jar"
   register: _mysql_connectors
   when: db_type == 'mysql'
@@ -197,7 +197,7 @@
   # than one, e.g. 5.1.x and 8.0.x) - "whatever's in the zip".
   ansible.builtin.shell: |
     set -o pipefail
-    rm -f {{ tomcat_home }}/lib/mysql-connector*.jar
+    rm -f {{ catalina_home }}/lib/mysql-connector*.jar
     CONNECTORS=$(echo "{{ _zip_contents.stdout }}" \
       | awk 'NF==4 && $NF ~ /mysql-connector.*\.jar$/ {print $NF}')
     if [ -z "$CONNECTORS" ]; then
@@ -205,10 +205,10 @@
       exit 1
     fi
     echo "$CONNECTORS" | while read -r c; do
-      unzip -j /tmp/{{ openspecimen_release }}.zip "$c" -d {{ tomcat_home }}/lib/
+      unzip -j /tmp/{{ openspecimen_release }}.zip "$c" -d {{ catalina_home }}/lib/
     done
-    chown {{ tomcat_user }}:{{ tomcat_user }} {{ tomcat_home }}/lib/mysql-connector*.jar
-    chmod 644 {{ tomcat_home }}/lib/mysql-connector*.jar
+    chown {{ tomcat_user }}:{{ tomcat_user }} {{ catalina_home }}/lib/mysql-connector*.jar
+    chmod 644 {{ catalina_home }}/lib/mysql-connector*.jar
   args:
     executable: /bin/bash
   when: db_type == 'mysql'
@@ -216,7 +216,7 @@
 - name: Extract Oracle JDBC driver(s) from release zip
   ansible.builtin.shell: |
     set -o pipefail
-    rm -f {{ tomcat_home }}/lib/ojdbc*.jar
+    rm -f {{ catalina_home }}/lib/ojdbc*.jar
     DRIVERS=$(echo "{{ _zip_contents.stdout }}" \
       | awk 'NF==4 && $NF ~ /ojdbc.*\.jar$/ {print $NF}')
     if [ -z "$DRIVERS" ]; then
@@ -224,10 +224,10 @@
       exit 1
     fi
     echo "$DRIVERS" | while read -r d; do
-      unzip -j /tmp/{{ openspecimen_release }}.zip "$d" -d {{ tomcat_home }}/lib/
+      unzip -j /tmp/{{ openspecimen_release }}.zip "$d" -d {{ catalina_home }}/lib/
     done
-    chown {{ tomcat_user }}:{{ tomcat_user }} {{ tomcat_home }}/lib/ojdbc*.jar
-    chmod 644 {{ tomcat_home }}/lib/ojdbc*.jar
+    chown {{ tomcat_user }}:{{ tomcat_user }} {{ catalina_home }}/lib/ojdbc*.jar
+    chmod 644 {{ catalina_home }}/lib/ojdbc*.jar
   args:
     executable: /bin/bash
   when: db_type == 'oracle'
