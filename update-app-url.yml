@@ -1,54 +1,24 @@
 ---
-# Day-2: Update app.url in openspecimen.properties and restart OpenSpecimen.
-# Required when the public hostname changes (reverse proxy, ALB, new DNS).
-#
+# Day-2: Update app.url in openspecimen.properties and restart. Per instance (#102).
 # Usage:
-#   ansible-playbook -i inventory/customers/<name>/ update-app-url.yml \
-#     -e app_url=https://openspecimen.yourdomain.com
-#
-# After running this playbook also update in the app UI:
-#   Settings → Common → Allowed Request Origins → add the new URL
-# to avoid HTTP 405 errors when the browser Origin header carries this hostname.
-
+#   ansible-playbook -i inventory/customers/<name>/ update-app-url.yml -e app_url=https://os.example.com
+#   # app.url is per-instance - on multi-instance hosts target one:  ... -e instance=<name>
+# After running, also update in the app UI: Settings -> Common -> Allowed Request Origins.
 - name: Update app.url in openspecimen.properties
   hosts: openspecimen
   become: true
   gather_facts: false
-
   pre_tasks:
     - name: Require app_url
       ansible.builtin.fail:
         msg: "Pass -e app_url=https://... (must start with http:// or https://)"
       when: app_url is not defined or not (app_url | regex_search('^https?://'))
-
-    - name: Backup current openspecimen.properties
-      ansible.builtin.include_tasks: tasks/backup_config.yml
-      vars:
-        backup_src:   "{{ tomcat_home }}/conf/openspecimen.properties"
-        backup_label: openspecimen.properties
-
-  vars:
-    openspecimen_app_url: "{{ app_url }}"
-
+    - name: Resolve instances
+      ansible.builtin.import_tasks: tasks/resolve-instances.yml
   tasks:
-    - name: Apply new app.url to openspecimen.properties
-      ansible.builtin.template:
-        src:   "{{ playbook_dir }}/roles/openspecimen/templates/openspecimen.properties.j2"
-        dest:  "{{ tomcat_home }}/conf/openspecimen.properties"
-        owner: "{{ tomcat_user }}"
-        group: "{{ tomcat_user }}"
-        mode:  '0640'
-
-    - name: Restart OpenSpecimen
-      ansible.builtin.systemd:
-        name:  openspecimen
-        state: restarted
-
-    - name: Wait for OpenSpecimen to be ready
-      ansible.builtin.include_tasks: tasks/wait_for_app.yml
-
-    - name: Report
-      ansible.builtin.debug:
-        msg:
-          - "app.url set to {{ app_url }}"
-          - "REMINDER: also update Settings → Common → Allowed Request Origins in the app UI"
+    - name: Update app.url per instance
+      ansible.builtin.include_tasks: tasks/day2-app-url.yml
+      loop: "{{ _instances }}"
+      loop_control:
+        loop_var: _instance
+        label: "{{ _instance.name }}"

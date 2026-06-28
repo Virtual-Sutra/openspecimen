@@ -1,58 +1,23 @@
 ---
-# Day-2: Update JVM heap settings and restart OpenSpecimen.
-# Backs up the current setenv.sh before applying changes.
-#
+# Day-2: Update JVM heap and restart. Per instance (#102).
 # Usage:
-#   ansible-playbook -i inventory/customers/<name>/ update-heap.yml \
-#     -e heap_min_mb=512 -e heap_max_mb=4096
-#
-# Values are integers in MB (no suffix). Current settings:
-#   sudo update-config.sh status
-
+#   ansible-playbook -i inventory/customers/<name>/ update-heap.yml -e heap_min_mb=512 -e heap_max_mb=4096
+#   # one instance on a multi-instance host:  ... -e instance=<name>
 - name: Update JVM heap settings
   hosts: openspecimen
   become: true
   gather_facts: false
-
   pre_tasks:
     - name: Require heap_min_mb and heap_max_mb
       ansible.builtin.fail:
-        msg: "Pass -e heap_min_mb=<int> -e heap_max_mb=<int> (integer MB, e.g. heap_min_mb=512 heap_max_mb=4096)"
+        msg: "Pass -e heap_min_mb=<int> -e heap_max_mb=<int> (integer MB, e.g. 512 / 4096)"
       when: heap_min_mb is not defined or heap_max_mb is not defined
-
-    - name: Backup current setenv.sh
-      ansible.builtin.include_tasks: tasks/backup_config.yml
-      vars:
-        backup_src:   "{{ tomcat_home }}/bin/setenv.sh"
-        backup_label: setenv.sh
-
-  vars:
-    tomcat_heap_min: "{{ heap_min_mb }}m"
-    tomcat_heap_max: "{{ heap_max_mb }}m"
-
+    - name: Resolve instances
+      ansible.builtin.import_tasks: tasks/resolve-instances.yml
   tasks:
-    - name: Apply new heap to setenv.sh
-      ansible.builtin.template:
-        src:   "{{ playbook_dir }}/roles/tomcat/templates/setenv.sh.j2"
-        dest:  "{{ tomcat_home }}/bin/setenv.sh"
-        owner: "{{ tomcat_user }}"
-        group: "{{ tomcat_user }}"
-        mode:  '0750'
-
-    - name: Restart OpenSpecimen
-      ansible.builtin.systemd:
-        name:  openspecimen
-        state: restarted
-
-    - name: Wait for OpenSpecimen to be ready
-      ansible.builtin.include_tasks: tasks/wait_for_app.yml
-
-    - name: Confirm new heap settings
-      ansible.builtin.command:
-        cmd: grep -oP '\-Xm[sx][0-9]+[mMgG]' {{ tomcat_home }}/bin/setenv.sh
-      register: _heap
-      changed_when: false
-
-    - name: Report
-      ansible.builtin.debug:
-        msg: "Heap updated - {{ _heap.stdout_lines | join('  ') }}"
+    - name: Update heap per instance
+      ansible.builtin.include_tasks: tasks/day2-heap.yml
+      loop: "{{ _instances }}"
+      loop_control:
+        loop_var: _instance
+        label: "{{ _instance.name }}"

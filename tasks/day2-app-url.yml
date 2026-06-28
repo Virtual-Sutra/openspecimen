@@ -1,0 +1,32 @@
+---
+# Per-instance app.url update (#102). Looped from update-app-url.yml.
+# app.url is per-instance: target one with -e instance=<name> on multi-instance hosts.
+- name: "[{{ _instance.name }}] Backup openspecimen.properties"
+  ansible.builtin.include_tasks: tasks/backup_config.yml
+  vars:
+    openspecimen_backup_dir: "{{ _instance.backup_dir }}"
+    backup_src: "{{ _instance.catalina_base }}/conf/openspecimen.properties"
+    backup_label: "openspecimen.properties-{{ _instance.name }}"
+
+- name: "[{{ _instance.name }}] Set app.url"
+  ansible.builtin.lineinfile:
+    path: "{{ _instance.catalina_base }}/conf/openspecimen.properties"
+    regexp: '^app\.url='
+    line: "app.url={{ app_url }}"
+
+- name: "[{{ _instance.name }}] Restart {{ _instance.service_name }}"
+  ansible.builtin.systemd:
+    name: "{{ _instance.service_name }}"
+    state: restarted
+
+- name: "[{{ _instance.name }}] Wait for app"
+  ansible.builtin.include_tasks: tasks/wait_for_app.yml
+  vars:
+    openspecimen_port: "{{ _instance.http_port }}"
+    openspecimen_context_path: "{{ _instance.context_path }}"
+
+- name: "[{{ _instance.name }}] Report"
+  ansible.builtin.debug:
+    msg:
+      - "[{{ _instance.name }}] app.url set to {{ app_url }}"
+      - "REMINDER: also update Settings -> Common -> Allowed Request Origins in the app UI"

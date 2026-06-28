@@ -1,0 +1,40 @@
+---
+# Per-instance heap update (#102). Looped from update-heap.yml over _instances.
+- name: "[{{ _instance.name }}] Backup setenv.sh"
+  ansible.builtin.include_tasks: tasks/backup_config.yml
+  vars:
+    openspecimen_backup_dir: "{{ _instance.backup_dir }}"
+    backup_src: "{{ _instance.catalina_base }}/bin/setenv.sh"
+    backup_label: "setenv.sh-{{ _instance.name }}"
+
+- name: "[{{ _instance.name }}] Apply -Xms/-Xmx to setenv.sh"
+  ansible.builtin.replace:
+    path: "{{ _instance.catalina_base }}/bin/setenv.sh"
+    regexp: "{{ item.re }}"
+    replace: "{{ item.to }}"
+  loop:
+    - { re: '-Xms[0-9]+[mMgG]', to: '-Xms{{ heap_min_mb }}m' }
+    - { re: '-Xmx[0-9]+[mMgG]', to: '-Xmx{{ heap_max_mb }}m' }
+  loop_control:
+    label: "{{ item.to }}"
+
+- name: "[{{ _instance.name }}] Restart {{ _instance.service_name }}"
+  ansible.builtin.systemd:
+    name: "{{ _instance.service_name }}"
+    state: restarted
+
+- name: "[{{ _instance.name }}] Wait for app"
+  ansible.builtin.include_tasks: tasks/wait_for_app.yml
+  vars:
+    openspecimen_port: "{{ _instance.http_port }}"
+    openspecimen_context_path: "{{ _instance.context_path }}"
+
+- name: "[{{ _instance.name }}] Confirm heap"
+  ansible.builtin.command:
+    cmd: "grep -oP '\\-Xm[sx][0-9]+[mMgG]' {{ _instance.catalina_base }}/bin/setenv.sh"
+  register: _heap
+  changed_when: false
+
+- name: "[{{ _instance.name }}] Report"
+  ansible.builtin.debug:
+    msg: "[{{ _instance.name }}] heap: {{ _heap.stdout_lines | join('  ') }}"

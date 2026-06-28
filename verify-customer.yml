@@ -68,6 +68,10 @@
   hosts: "{{ customer }}"
   gather_facts: false
 
+  pre_tasks:
+    - name: Resolve instances
+      ansible.builtin.import_tasks: tasks/resolve-instances.yml
+
   tasks:
     - name: Test SSH connectivity
       ansible.builtin.ping:
@@ -87,11 +91,15 @@
       failed_when: false
       when: _ssh_ping is succeeded
 
-    - name: Check OpenSpecimen service status
-      ansible.builtin.command: systemctl is-active openspecimen
+    - name: Check OpenSpecimen service status (per instance)
+      ansible.builtin.command: "systemctl is-active {{ item.service_name }}"
       register: _service_status
       changed_when: false
       failed_when: false
+      loop: "{{ _instances | default([]) }}"
+      loop_control:
+        loop_var: item
+        label: "{{ item.name }}"
       when: _ssh_ping is succeeded
 
     - name: VM readiness report
@@ -103,7 +111,7 @@
           - "  SSH              : {{ 'OK' if _ssh_ping is succeeded else 'FAILED - check ansible_host and SSH key' }}"
           - "  Disk space       : {{ _disk_space.stdout | default('N/A - SSH failed') }}"
           - "  Installed version: {{ (_release_marker.content | b64decode | trim) if (_release_marker.content is defined) else 'not installed - fresh deploy' }}"
-          - "  Service status   : {{ _service_status.stdout | default('N/A') }}"
+          - "  Service status   : {{ (_instances | map(attribute='name') | zip(_service_status.results | map(attribute='stdout')) | map('join', '=') | list | join(', ')) if (_service_status.results is defined) else 'N/A (SSH failed)' }}"
 
     - name: Fail if VM is unreachable
       ansible.builtin.fail:

@@ -1,0 +1,42 @@
+---
+# Per-instance JDBC pool update (#102). Looped from update-db-pool.yml.
+- name: "[{{ _instance.name }}] Backup context.xml"
+  ansible.builtin.include_tasks: tasks/backup_config.yml
+  vars:
+    openspecimen_backup_dir: "{{ _instance.backup_dir }}"
+    backup_src: "{{ _instance.catalina_base }}/conf/context.xml"
+    backup_label: "context.xml-{{ _instance.name }}"
+
+- name: "[{{ _instance.name }}] Set pool maxActive"
+  ansible.builtin.replace:
+    path: "{{ _instance.catalina_base }}/conf/context.xml"
+    regexp: 'maxActive="[^"]*"'
+    replace: 'maxActive="{{ pool_max_active }}"'
+
+- name: "[{{ _instance.name }}] Set pool minIdle (when provided)"
+  ansible.builtin.replace:
+    path: "{{ _instance.catalina_base }}/conf/context.xml"
+    regexp: 'minIdle="[^"]*"'
+    replace: 'minIdle="{{ pool_min_idle }}"'
+  when: pool_min_idle is defined
+
+- name: "[{{ _instance.name }}] Restart {{ _instance.service_name }}"
+  ansible.builtin.systemd:
+    name: "{{ _instance.service_name }}"
+    state: restarted
+
+- name: "[{{ _instance.name }}] Wait for app"
+  ansible.builtin.include_tasks: tasks/wait_for_app.yml
+  vars:
+    openspecimen_port: "{{ _instance.http_port }}"
+    openspecimen_context_path: "{{ _instance.context_path }}"
+
+- name: "[{{ _instance.name }}] Confirm pool"
+  ansible.builtin.command:
+    cmd: "grep -oP 'maxActive=\"\\K[^\"]+' {{ _instance.catalina_base }}/conf/context.xml"
+  register: _pool
+  changed_when: false
+
+- name: "[{{ _instance.name }}] Report"
+  ansible.builtin.debug:
+    msg: "[{{ _instance.name }}] pool maxActive={{ _pool.stdout }}"
