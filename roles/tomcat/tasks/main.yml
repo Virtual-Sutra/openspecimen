@@ -65,28 +65,17 @@
     path: "{{ tomcat_home }}/bin/startup.sh"
   register: tomcat_stat
 
-# Download once on the control node, OUTSIDE the per-host install block.
-# get_url is idempotent (skips when dest matches the checksum). Keeping it out
-# of the `when: not tomcat_stat...` block means a mixed batch - some hosts
-# already installed, some fresh - still has the tarball staged for the fresh
-# ones (run_once gated on a per-host fact would skip the download for them).
-- name: Download pinned Tomcat tarball to control node
-  ansible.builtin.get_url:
-    url: "{{ tomcat_download_url }}"
-    dest: "/tmp/{{ tomcat_tarball }}"
-    checksum: "{{ tomcat_download_checksum }}"
-    mode: '0644'
-  delegate_to: localhost
-  become: false
-  run_once: true
-
 - name: Install Tomcat (binaries from download, config overlaid from the zip)
   when: not tomcat_stat.stat.exists
   block:
-    - name: Upload Tomcat tarball to target
-      ansible.builtin.copy:
-        src:  "/tmp/{{ tomcat_tarball }}"
+    # Download straight onto the target VM (it already has outbound internet for
+    # the apt/dnf package installs). get_url is idempotent and verifies the
+    # tarball against Apache's published .sha512 - no control-node staging/upload.
+    - name: Download pinned Tomcat tarball on the target
+      ansible.builtin.get_url:
+        url: "{{ tomcat_download_url }}"
         dest: "/tmp/{{ tomcat_tarball }}"
+        checksum: "{{ tomcat_download_checksum }}"
         mode: '0644'
 
     - name: Create CATALINA_HOME
@@ -99,12 +88,17 @@
 
     - name: Unpack Tomcat into CATALINA_HOME (strip top-level dir)
       ansible.builtin.unarchive:
-        src: "/tmp/{{ _tomcat_tarball }}"
+        src: "/tmp/{{ tomcat_tarball }}"
         dest: "{{ tomcat_home }}"
         remote_src: true
         extra_opts: ['--strip-components=1']
         owner: "{{ tomcat_user }}"
         group: "{{ tomcat_user }}"
+
+    - name: Remove the downloaded Tomcat tarball
+      ansible.builtin.file:
+        path: "/tmp/{{ tomcat_tarball }}"
+        state: absent
 
     - name: Extract inner tomcat-as.zip from release package
       ansible.builtin.shell: |
