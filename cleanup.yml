@@ -9,7 +9,7 @@
 #
 # -e full_wipe=true ALSO removes the shared bits for a from-scratch host reset:
 # the whole /usr/local/openspecimen tree (Tomcat binary + all instances), the
-# MySQL server + its data, and OpenJDK.
+# MySQL server + its data, OpenJDK, and Apache (httpd) + its OpenSpecimen vhost.
 #
 # Usage:
 #   ansible-playbook -i inventory/customers/<name>/ cleanup.yml \
@@ -58,6 +58,22 @@
             enabled: false
           failed_when: false
 
+        - name: Stop and disable Apache
+          ansible.builtin.systemd:
+            name: "{{ (ansible_facts['os_family'] == 'RedHat') | ternary('httpd', 'apache2') }}"
+            state: stopped
+            enabled: false
+          failed_when: false
+
+        - name: Remove the OpenSpecimen Apache vhost
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /etc/apache2/sites-available/openspecimen.conf
+            - /etc/apache2/sites-enabled/openspecimen.conf
+            - /etc/httpd/conf.d/openspecimen.conf
+
         - name: Remove the OpenSpecimen tree (Tomcat binary + all instances)
           ansible.builtin.file:
             path: /usr/local/openspecimen
@@ -69,6 +85,7 @@
               - mysql-server
               - mysql-community-server
               - openjdk-17-jdk
+              - apache2
             state: absent
             purge: true
             autoremove: true
@@ -80,6 +97,8 @@
             name:
               - mysql-community-server
               - java-17-openjdk-devel
+              - httpd
+              - mod_ssl
             state: absent
             autoremove: true
           failed_when: false
