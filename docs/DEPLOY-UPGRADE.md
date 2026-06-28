@@ -4,33 +4,64 @@ Day-1 fresh install, Day-2 upgrade, and rollback procedures for OpenSpecimen.
 
 ---
 
+## How a deploy is structured (host base + per-instance app)
+
+`site.yml` deploys in two layers (ADR-006):
+
+1. **Host-level base roles** (`common`, `java`, `mysql`, `tomcat`) install the
+   shared OS prerequisites + the shared Tomcat binary. They run **once per host**,
+   and only when at least one instance is a fresh install (missing/empty `.release`
+   marker) or when `-e force_deploy=true`. On a normal upgrade they are skipped.
+2. **Per-instance app roles** then loop over `openspecimen_instances`
+   (`tasks/deploy-instance.yml`). Each instance gets its own direction detection,
+   per-instance Tomcat runtime (`CATALINA_BASE`, ports, systemd unit), WAR + config
+   + plugin deploy, Apache vhost, and public-URL verify.
+
+A single-instance host (the default) has exactly one instance, so the loop runs
+once and everything collapses onto the shared Tomcat (service `openspecimen`,
+`CATALINA_BASE` == `CATALINA_HOME`). To run more than one instance per host see
+[`MULTI-INSTANCE.md`](MULTI-INSTANCE.md). Target one instance with
+`-e instance=<name>`.
+
 ## How version detection works
 
-The playbooks use the marker file `/usr/local/openspecimen/.release` on the
-target node to determine what is currently installed, then compare against the
-requested `openspecimen_release` using natural version sort (`sort -V`):
+Direction is detected **per instance** (not once for the whole host). For each
+instance the playbook reads its `.release` marker on the target node to determine
+what is currently installed, then compares against the requested release (the
+instance's `release`, defaulting to `openspecimen_release`) using natural version
+sort (`sort -V`):
 
-- **Marker absent** → fresh install (all five roles run in order)
+- **Marker absent** → fresh install for that instance.
 - **Marker present, same version** AND `.deploy_success` shows the prior deploy
   reached its last task AND every paid + customer plugin JAR matches the requested
-  version → **no-op** (play ends without touching the target). Override with
-  `-e force_deploy=true` (or the `FORCE_DEPLOY` checkbox in the Jenkins deploy job).
+  version AND `openspecimen.properties` is unchanged → **no-op** (that instance is
+  skipped). Override with `-e force_deploy=true` (or the `FORCE_DEPLOY` checkbox in
+  the Jenkins deploy job).
 - **Marker present, same version** but `.deploy_success` is stale (last deploy failed
   before completing) → deploy re-runs; no operator flag needed.
-- **Marker present, same version** but a plugin in the inventory has no matching JAR
-  on disk → deploy continues to install just the missing plugins. WAR redeploys happen
-  too - the upgrade flow doesn't differentiate between WAR-changed and plugin-changed.
-- **Marker present, requested > installed** → upgrade (backup → deploy → restart)
-- **Marker present, requested < installed** → automatic rollback (see "Rollback" below) -
-  the requested version's backup is restored and the play ends. No separate job needed.
+- **Marker present, same version, only plugins drifted** (a plugin in inventory has
+  no matching JAR, or an orphan JAR is on disk) → **plugins-only fast path**: skips
+  the zip upload, WAR backup/extraction, and default-plugin extraction; runs only
+  the plugin backup + orphan cleanup + paid/customer plugin install + restart.
+- **Marker present, same version, only `openspecimen.properties` drifted** →
+  **config-only fast path**: re-templates `openspecimen.properties` and restarts;
+  skips all WAR and plugin steps.
+- **Marker present, requested > installed** → upgrade (pre-upgrade backup → deploy
+  → restart).
+- **Marker present, requested < installed** → automatic rollback for that instance
+  (see "Rollback" below) - the requested version's backup is restored.
+
+Because direction is per instance, one instance rolling back or being already-current
+does **not** stop the others - each instance's outcome is independent.
 
 `openspecimen_release` is always supplied at run time via
 `-e openspecimen_release=<name>`. It is **not** stored in inventory `group_vars`.
 
-Direction detection runs as the **first** pre_task in `site.yml` -
-`roles/openspecimen/tasks/direction.yml`. When a downgrade is
-detected, the play dispatches to `tasks_from: rollback` (target_version =
-requested release) and ends; the remaining roles never run.
+Direction detection runs first inside the per-instance loop
+(`roles/openspecimen/tasks/direction.yml`, included from
+`tasks/deploy-instance.yml`). When a downgrade is detected for an instance, that
+instance dispatches to `tasks_from: rollback` (target_version = requested release)
+and its own deploy steps are skipped - the loop continues with the next instance.
 
 ---
 
@@ -117,19 +148,134 @@ ansible-playbook -i inventory/customers/<name>/ site.yml \
   -e mysql_db_password=<password>
 ```
 
-The playbook:
+Per upgraded instance the playbook:
 1. Runs the pre-flight check (release zip + every plugin zip present on the controller)
-2. Reads the marker file on the target node to detect the current version
-3. Stops the service
-4. Backs up WAR and plugins to `openspecimen_backup_dir/<timestamp>/`
-5. Deploys the new WAR and plugins (default from release zip; paid + customer from separate zips)
-6. Prunes old backups beyond `openspecimen_backup_retention` (default 3)
-7. Starts the service and polls the health check
+2. Reads the instance's marker file on the target node to detect the current version
+3. Gates on database size, then (small DBs) backs up the database with `mysqldump`
+   - see [Pre-upgrade database backup](#pre-upgrade-database-backup) below
+4. Stops the service
+5. Backs up WAR, plugins, config (`openspecimen.properties`, `setenv.sh`,
+   `context.xml`) and the `.release` marker to
+   `<instance backup_dir>/<timestamp>/`
+6. Deploys the new WAR and plugins (default from release zip; paid + customer from separate zips)
+7. Prunes old backups beyond `openspecimen_backup_retention` (default 3)
+8. Starts the service and polls the health check
 
 ### Dry-run
 
 ```bash
 ansible-playbook ... --check
+```
+
+---
+
+## Pre-upgrade database backup
+
+On a WAR-changing upgrade of a local MySQL database (`db_managed: true`,
+`db_type: mysql`), the openspecimen role takes a `mysqldump` into the same
+timestamped backup directory **before stopping the service**, so a later rollback
+can restore WAR + schema + data together (`-e restore_db=true`). It runs while the
+app is still serving (`--single-transaction`, no outage), and is skipped on the
+plugins-only / config-only fast paths.
+
+To protect the deploy SLA, large databases are **gated**: when the database
+exceeds `db_backup_auto_max_mb` (default 2048 MB), the deploy halts and asks you to
+back up manually first, then re-run with confirmation:
+
+```bash
+# 1. Take a consistent backup (no outage)
+ansible-playbook -i inventory/customers/<name>/ db-backup.yml \
+  -e @secrets/<name>.yml --vault-password-file .vault-pass
+#    (RDS: take an AWS snapshot instead)
+
+# 2. Re-run the upgrade, confirming the backup is taken
+ansible-playbook -i inventory/customers/<name>/ site.yml \
+  -e openspecimen_release=openspecimen_v12.3 \
+  -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
+  -e db_backup_confirmed=true \
+  -e @secrets/<name>.yml --vault-password-file .vault-pass
+```
+
+In Jenkins, tick `DB_BACKUP_CONFIRMED` instead of `-e db_backup_confirmed=true`.
+To skip the auto-dump entirely (rollback will be artifact-only; the schema-drift
+halt remains the safety net), pass `-e db_backup_enabled=false`.
+
+### Standalone DB backup / restore
+
+| Playbook | Purpose | Key `-e` flags |
+|----------|---------|----------------|
+| `db-backup.yml` | On-demand consistent dump (local MySQL). Output: `<db_backup_dir>/<timestamp>_<db>.sql.gz` (default `db_backup_dir`: `/usr/local/openspecimen/db-backups`). | `-e db_backup_dir=<path>` (optional) |
+| `db-restore.yml` | Restore a dump produced by `db-backup.yml`. **DESTRUCTIVE** - overwrites the live DB. Stops the service and leaves it stopped (deploy the matching WAR before starting). | `-e db_restore_confirm=true` (required); `-e db_backup_file=<path>` (else newest dump) |
+
+```bash
+# restore the newest dump under db_backup_dir
+ansible-playbook -i inventory/customers/<name>/ db-restore.yml \
+  -e db_restore_confirm=true \
+  -e @secrets/<name>.yml --vault-password-file .vault-pass
+```
+
+Both are local-MySQL only. For RDS take/restore an AWS snapshot; for Oracle use
+the DBA's tools.
+
+---
+
+## Day-2 config-change playbooks
+
+Three small playbooks change one setting and restart, without a full `site.yml`
+run. Each loops over `openspecimen_instances` (acting on every instance's
+`catalina_base` / `service_name` / `http_port`); target one with
+`-e instance=<name>`. Each backs up the file it edits before changing it.
+
+| Playbook | What it changes | Required `-e` args |
+|----------|-----------------|--------------------|
+| `update-heap.yml` | `-Xms` / `-Xmx` in `setenv.sh` | `-e heap_min_mb=<int> -e heap_max_mb=<int>` |
+| `update-app-url.yml` | `app.url` in `openspecimen.properties` | `-e app_url=https://...` |
+| `update-db-pool.yml` | JDBC pool `maxActive` (and `minIdle`) in `context.xml` | `-e pool_max_active=<int>` (optional `-e pool_min_idle=<int>`) |
+| `status.yml` | Read-only: shows release, service state, HTTP health, heap, pool, app.url per instance | _(none)_ |
+
+```bash
+ansible-playbook -i inventory/customers/<name>/ update-heap.yml \
+  -e heap_min_mb=512 -e heap_max_mb=4096
+
+ansible-playbook -i inventory/customers/<name>/ update-app-url.yml \
+  -e app_url=https://openspecimen.example.com
+#   then also set Settings → Common → Allowed Request Origins in the app UI
+
+ansible-playbook -i inventory/customers/<name>/ update-db-pool.yml \
+  -e pool_max_active=150
+
+ansible-playbook -i inventory/customers/<name>/ status.yml
+```
+
+> The on-box `update-config.sh` script (see CONFIG-REFERENCE.md) does the same
+> three changes for the single default instance. The playbooks above are the
+> instance-aware, inventory-driven equivalents.
+
+---
+
+## Tear down a host or instance
+
+`cleanup.yml` removes OpenSpecimen so a (test) VM can be reused. **DESTRUCTIVE** -
+requires `-e cleanup_confirm=true`.
+
+- **Default:** per-instance teardown (service, webapp, data/plugins/backups/markers,
+  and local-MySQL DB + user). Leaves the shared Tomcat binary / MySQL server / Java
+  in place for a fast re-deploy.
+- `-e instance=<name>` limits the teardown to one instance.
+- `-e full_wipe=true` **also** removes the shared bits: the whole
+  `/usr/local/openspecimen` tree (Tomcat binary + all instances), the MySQL server
+  + its data, and OpenJDK.
+
+```bash
+# per-instance teardown (all instances)
+ansible-playbook -i inventory/customers/<name>/ cleanup.yml \
+  -e cleanup_confirm=true -e @secrets/<name>.yml --vault-password-file .vault-pass
+
+# one instance
+ansible-playbook ... cleanup.yml -e cleanup_confirm=true -e instance=test ...
+
+# full host reset
+ansible-playbook ... cleanup.yml -e cleanup_confirm=true -e full_wipe=true ...
 ```
 
 ---
@@ -223,10 +369,10 @@ Rollback has two paths - both backed by the same `roles/openspecimen/tasks/rollb
 ### A. Automatic (via deploy job - recommended)
 
 Just pick a lower release in `site.yml` (or in the Jenkins
-deploy job). Direction detection notices the requested version is older than
-what's installed, finds the backup whose `.release` matches the request,
-runs the rollback, and ends the play. **No separate rollback job or playbook
-invocation required.**
+deploy job). Per-instance direction detection notices the requested version is
+older than what's installed, finds the backup whose `.release` matches the request,
+and runs the rollback for that instance (the other instances continue normally).
+**No separate rollback job or playbook invocation required.**
 
 ```bash
 # Installed: openspecimen_v12.2.RC12, want to go back to RC8
@@ -293,10 +439,29 @@ service or moving any files.
 | `bin/setenv.sh` (JVM heap) | Yes (if present in backup) |
 | `conf/context.xml` (JDBC pool) | Yes (if present in backup) |
 | `/usr/local/openspecimen/.release` | Yes (if present in backup) - keeps the marker consistent with the live version |
-| Database schema | **No** - Liquibase rollback is not modelled. See "Schema-downgrade safeguard" below. |
+| Database schema + data | **Opt-in** with `-e restore_db=true` - restores the `db/<db>.sql.gz` dump taken at the matching upgrade (local MySQL only). Off by default; see below. |
 
 No separate `site.yml` run is needed for config - `rollback.yml` restores the
 exact config snapshot taken at the time of the previous deploy.
+
+### Rolling the database back too (`-e restore_db=true`)
+
+By default rollback restores the **artifacts only** (WAR/plugins/config) and the
+schema-downgrade safeguard halts if the schema has moved forward. Pass
+`-e restore_db=true` to also restore the matching `mysqldump` captured during the
+pre-upgrade backup - this brings WAR + schema + data back to the backup point as a
+unit, so the safeguard is skipped (a restore makes the schema match the older WAR).
+
+```bash
+ansible-playbook -i inventory/customers/<name>/ rollback.yml \
+  -e restore_db=true \
+  -e @secrets/<name>.yml --vault-password-file .vault-pass
+```
+
+**This discards all data written since the backup** - a deliberate operator choice.
+Local MySQL only; if the backup has no `db/*.sql.gz` (it predates DB snapshots, or
+was a large-DB manual-backup upgrade), the artifacts are still rolled back and a
+warning is printed. For RDS, restore the AWS snapshot instead.
 
 ### Schema-downgrade safeguard
 

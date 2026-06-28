@@ -55,15 +55,28 @@ Key settings in `mysqld.cnf`:
 
 ## tomcat role
 
+The tomcat role installs one **shared Tomcat binary** at `$CATALINA_HOME`
+(`tomcat_home`) host-level, then writes a **per-instance** runtime under each
+instance's `$CATALINA_BASE` (`tasks/instance.yml`). For the single default
+instance `$CATALINA_BASE == $CATALINA_HOME`, so the paths below collapse onto the
+shared Tomcat; with multiple instances each has its own copy.
+
 | File | Ansible variable(s) | What it sets | Requires restart? |
 |------|---------------------|--------------|-------------------|
-| `$TOMCAT_HOME/bin/setenv.sh` | `tomcat_heap_min`, `tomcat_heap_max` | JVM `-Xms` / `-Xmx` | Yes |
-| `$TOMCAT_HOME/conf/context.xml` | `db_type`, `mysql_db_*`, `oracle_db_*`, `tomcat_pool_*` | JDBC connection pool | Yes |
-| `$TOMCAT_HOME/lib/mysql-connector*.jar` | _(from release zip)_ | MySQL JDBC driver | Yes (redeploy) |
-| `$TOMCAT_HOME/lib/ojdbc*.jar` | _(from release zip)_ | Oracle JDBC driver | Yes (redeploy) |
-| `/etc/systemd/system/openspecimen.service` | `tomcat_user`, `tomcat_home`, `db_managed` | systemd service unit | Yes - `systemctl daemon-reload` |
+| `$CATALINA_BASE/bin/setenv.sh` | `tomcat_heap_min`, `tomcat_heap_max` (or per-instance `heap_min`/`heap_max`) | JVM `-Xms` / `-Xmx` | Yes |
+| `$CATALINA_BASE/conf/context.xml` | `db_type`, `mysql_db_*`, `oracle_db_*`, `tomcat_pool_*` | JDBC connection pool (JNDI datasource) | Yes |
+| `$CATALINA_BASE/conf/server.xml` | `openspecimen_port`, `openspecimen_ajp_port`, `openspecimen_shutdown_port` (per instance) | HTTP / AJP / shutdown ports; AJP `secretRequired=false`, bound to `127.0.0.1`. **Patched in place** (seeded from the golden conf), not templated. | Yes |
+| `$CATALINA_HOME/lib/mysql-connector*.jar` | _(from release zip)_ | MySQL JDBC driver (shared, host-level) | Yes (redeploy) |
+| `$CATALINA_HOME/lib/ojdbc*.jar` | _(from release zip)_ | Oracle JDBC driver (shared, host-level) | Yes (redeploy) |
+| `/etc/systemd/system/<service_name>.service` | `tomcat_user`, `catalina_home`, `catalina_base`, `db_managed`, `openspecimen_service_name` | systemd unit (one per instance; `openspecimen` for the default) | Yes - `systemctl daemon-reload` |
 
-`$TOMCAT_HOME` = `tomcat_home` = `/usr/local/openspecimen/tomcat-as`
+`$CATALINA_HOME` = `tomcat_home` = `/usr/local/openspecimen/tomcat-as`.
+For extra instances, `$CATALINA_BASE` = `<openspecimen_instances_base>/<name>/base`.
+
+**Tomcat install source** (#90/#91): the binary comes from a pinned Apache download
+(`tomcat_version` from the component spec, default `9.0.59`), not an OS package;
+the OpenSpecimen-tuned `conf/` and the DB connectors come from the release zip. The
+role asserts the major version is 9.
 
 **Heap sizing** (`setenv.sh`):
 
@@ -92,14 +105,19 @@ Key settings in `mysqld.cnf`:
 
 ## openspecimen role
 
+Paths below are shown for the single default instance; with multiple instances
+each resolves under that instance's `$CATALINA_BASE` and per-instance dirs.
+
 | File | Ansible variable(s) | What it sets | Requires restart? |
 |------|---------------------|--------------|-------------------|
-| `$TOMCAT_HOME/conf/openspecimen.properties` | `db_type`, `openspecimen_data_dir`, `openspecimen_plugin_dir`, `openspecimen_backup_dir`, `openspecimen_app_url`, `openspecimen_node_name` | Application behaviour, paths, public URL | Yes |
-| `$TOMCAT_HOME/webapps/openspecimen.war` | _(from release zip)_ | The application WAR | Yes (via Tomcat hot-deploy) |
+| `$CATALINA_BASE/conf/openspecimen.properties` | `db_type`, `openspecimen_data_dir`, `openspecimen_plugin_dir`, `openspecimen_backup_dir`, `openspecimen_app_url`, `openspecimen_node_name` | Application behaviour, paths, public URL | Yes |
+| `$CATALINA_BASE/webapps/openspecimen.war` | _(from release zip)_ | The application WAR | Yes (via Tomcat hot-deploy) |
 | `$PLUGIN_DIR/default/*.jar` | _(from release zip)_ | Common plugin JARs | Yes (Tomcat re-scans on startup) |
 | `$PLUGIN_DIR/paid/*.jar` | `openspecimen_paid_plugins` | Licensed enterprise plugin JARs | Yes (Tomcat re-scans on startup) |
 | `$PLUGIN_DIR/zustomer/*.jar` | `openspecimen_customer_plugins` | Customer-specific plugin JARs | Yes (Tomcat re-scans on startup) |
-| `/usr/local/openspecimen/.release` | `openspecimen_release` | Deployed version marker for downgrade guard | No |
+| `/usr/local/openspecimen/.release` | `openspecimen_release` | Deployed version marker (per instance) - drives downgrade/no-op detection | No |
+| `/usr/local/openspecimen/.deploy_success` | _(written by the role)_ | Records the last fully-successful deploy (release + plugins). The no-op fast path requires this to match the requested release. | No |
+| `/usr/local/openspecimen/scripts/update-config.sh` | _(from the repo)_ | On-box helper for heap / db-pool / app-url changes | No |
 
 `$PLUGIN_DIR` = `openspecimen_plugin_dir` = `/usr/local/openspecimen/plugins`
 
@@ -134,22 +152,42 @@ on every upgrade.
 |----------|---------|-------|
 | `openspecimen_backup_retention` | `3` | Number of timestamped backup directories under `openspecimen_backup_dir` to keep. Older ones are pruned at the end of every deploy. Override per customer in `inventory/host_vars/<customer>.yml`. |
 
-The pre-deploy backup pattern is consistent across the WAR, default plugins (openspecimen role),
-and the MySQL connector JAR (tomcat role):
+The pre-upgrade backup snapshots the WAR, all three plugin tiers, the config files
+the old WAR ran with, the `.release` marker, the MySQL connector JAR (tomcat role),
+and - on a WAR-changing upgrade of a small local MySQL DB - a `mysqldump`:
 
 ```
 {{ openspecimen_backup_dir }}/<DDMMYYYY_HHMMSS>/
   ├─ openspecimen.war
+  ├─ .release
+  ├─ config/
+  │    ├─ openspecimen.properties
+  │    ├─ setenv.sh
+  │    └─ context.xml
   ├─ plugins/
   │    ├─ default/
   │    ├─ paid/
   │    └─ zustomer/
+  ├─ db/
+  │    └─ <db>.sql.gz        (small local MySQL only; gated by db_backup_auto_max_mb)
   └─ lib/
        └─ mysql-connector-*.jar
 ```
 
+On the plugins-only / config-only fast paths only the relevant subset is captured
+(config always; plugin tiers and `db/` only when the WAR changes). `rollback.yml`
+restores the config + artifacts; `-e restore_db=true` also restores `db/<db>.sql.gz`.
+
 The `config-changes/` subdirectory at the backup root is excluded from pruning - it's a flat log
 directory written by the `update-config.sh` operator script, not a snapshot.
+
+**Pre-upgrade DB backup gate:**
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `db_backup_enabled` | `true` | Auto-dump the DB into the upgrade backup (local MySQL, WAR-changing upgrades). `false` → artifact-only rollback. |
+| `db_backup_auto_max_mb` | `2048` | DBs larger than this halt the deploy; back up manually (`db-backup.yml` / RDS snapshot) then re-run with `-e db_backup_confirmed=true`. |
+| `db_backup_dir` | `/usr/local/openspecimen/db-backups` | Output dir for the standalone `db-backup.yml` / source for `db-restore.yml`. |
 
 ---
 
@@ -180,9 +218,44 @@ leave it disabled - the ALB terminates TLS instead.
 
 ---
 
+## Instances (`openspecimen_instances`)
+
+`openspecimen_instances` (a list in `inventory/group_vars/all.yml`) is the
+deployment model. The shipped default is **one** entry mapping onto the flat vars
+(service `openspecimen`, `CATALINA_BASE == CATALINA_HOME`, ports 8080/8009/8005,
+context `/openspecimen`), so a single-instance host needs no extra config.
+
+To run **multiple** instances, override `openspecimen_instances` (in
+`inventory/host_vars/<customer>.yml` - see the loading caveat in
+[`docs/MULTI-INSTANCE.md`](docs/MULTI-INSTANCE.md)) with N entries. Per-instance
+fields and their derivations (ports = base + index×10, etc.) are documented there.
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `openspecimen_instances` | one default instance | List of instances on the host |
+| `openspecimen_instances_base` | `/usr/local/openspecimen/instances` | Root for each extra instance's `base`/`data`/`plugins`/`backup` |
+| `openspecimen_port_base` / `openspecimen_ajp_port_base` / `openspecimen_shutdown_port_base` | `8080` / `8009` / `8005` | Instance N gets base + N×10 |
+| `catalina_home` | `{{ tomcat_home }}` | Shared Tomcat binary for all instances |
+
+---
+
+## Component version specs (`os_versions`)
+
+`site.yml` loads `component-specs/<release>.yml` (release with the
+`openspecimen_` prefix stripped), merges any per-customer
+`component_versions_override`, and exposes the result as `os_versions` to the
+roles (used for `tomcat_version`, Java track, etc.). No spec file → built-in
+defaults (Java 17) + a warning. See [`component-specs/README.md`](component-specs/README.md).
+
+---
+
 ## Quick change guide
 
-For the three most common post-deploy changes without a full Ansible re-run, use:
+For the three most common post-deploy changes on the **single default instance**
+without a full Ansible re-run, use the on-box helper script. (For multi-instance
+hosts, or to keep the change inventory-driven, use the `update-heap.yml` /
+`update-app-url.yml` / `update-db-pool.yml` playbooks instead - see
+[`docs/DEPLOY-UPGRADE.md`](docs/DEPLOY-UPGRADE.md#day-2-config-change-playbooks).)
 
 ```bash
 sudo /usr/local/openspecimen/scripts/update-config.sh <command>

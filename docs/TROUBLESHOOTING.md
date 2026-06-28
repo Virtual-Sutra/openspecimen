@@ -61,10 +61,10 @@ Most failures here mean inventory + on-disk state are out of sync.
 
 ---
 
-## `openspecimen_release` is empty - "downgrade" or "version required" error
+## `openspecimen_release` is empty - "version required" error
 
-**Symptom:** Version check reports `Requesting:  ` (empty string) and blocks
-with "Downgrade is not supported" or "openspecimen_release is required".
+**Symptom:** The run fails with `✗ openspecimen_release is not set` (direction
+detection) or `openspecimen_release is not set for <host>` (version check).
 
 **Cause:** `openspecimen_release` was not passed at run time.
 
@@ -106,30 +106,44 @@ out with "Condition check failed".
 | Database connection failure | Check `catalina.out` on the target; verify the DB password passed via `-e mysql_db_password` |
 | Tomcat startup too slow | Increase `openspecimen_health_retries` or `openspecimen_health_delay` in `group_vars` |
 
-To check Tomcat logs on the target:
+To check Tomcat logs on the target (single default instance):
 
 ```bash
 sudo tail -f /usr/local/openspecimen/tomcat-as/logs/catalina.out
 ```
 
----
-
-## Upgrade blocked: "Downgrade is not supported"
-
-**Symptom:** The version check task fails because the requested release is older
-than what is installed.
-
-**Cause:** The marker file `/usr/local/openspecimen/.release` on the target
-contains a higher version than `openspecimen_release`.
-
-**Fix:** Either specify the correct (newer) release, or - for a deliberate
-downgrade - clear the marker file manually and restore from backup:
+On a **multi-instance** host each instance has its own `CATALINA_BASE`, so the log
+is `<openspecimen_instances_base>/<name>/base/logs/catalina.out`. Use `status.yml`
+to see every instance's service state, HTTP health, port, heap and pool at a glance:
 
 ```bash
-sudo systemctl stop openspecimen
-sudo rm /usr/local/openspecimen/.release
-# restore WAR from backup - see DEPLOY-UPGRADE.md rollback section
+ansible-playbook -i inventory/customers/<name>/ status.yml
+#   one instance:  ... -e instance=<name>
 ```
+
+---
+
+## Requested an older release - what happens
+
+A requested release **lower** than what's installed is **no longer blocked**.
+Per-instance direction detection treats it as a downgrade and automatically runs
+the rollback flow for that instance: it restores the backup whose `.release`
+matches the requested version. There is no "Downgrade is not supported" hard-stop
+(it was removed - see ADR-004).
+
+Two things can still halt a downgrade, both with operator guidance:
+
+- **No matching backup** for the requested version (e.g. it was pruned by
+  `openspecimen_backup_retention`). The play lists the available backups. Pick a
+  version that has a backup, or deploy from the older release zip with
+  `-e allow_downgrade=true`.
+- **Schema moved forward** - Liquibase applied migrations after the backup was
+  taken (see [Schema-downgrade safeguard](DEPLOY-UPGRADE.md#schema-downgrade-safeguard)).
+  Use a more recent backup, restore the DB too (`-e restore_db=true`), or override
+  with `-e allow_downgrade=true` once the schema is known safe.
+
+To force a fresh (re)deploy of the same version regardless of the markers, pass
+`-e force_deploy=true`.
 
 ---
 
