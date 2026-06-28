@@ -1,5 +1,5 @@
 [Unit]
-Description=OpenSpecimen (Tomcat)
+Description=OpenSpecimen ({{ openspecimen_service_name | default('openspecimen') }})
 {% if db_managed | default(true) %}
 After=network.target {{ (ansible_facts['os_family'] == 'RedHat') | ternary('mysqld', 'mysql') }}.service
 Requires={{ (ansible_facts['os_family'] == 'RedHat') | ternary('mysqld', 'mysql') }}.service
@@ -14,12 +14,12 @@ Group={{ tomcat_user }}
 
 # JAVA_HOME is written to /etc/environment by the java role (OS-aware path).
 EnvironmentFile=/etc/environment
-Environment=CATALINA_HOME={{ tomcat_home }}
-Environment=CATALINA_BASE={{ tomcat_home }}
-Environment=CATALINA_PID={{ tomcat_home }}/bin/pid.txt
+Environment=CATALINA_HOME={{ catalina_home | default(tomcat_home) }}
+Environment=CATALINA_BASE={{ catalina_base }}
+Environment=CATALINA_PID={{ catalina_base }}/bin/pid.txt
 
-ExecStart={{ tomcat_home }}/bin/startup.sh
-ExecStop={{ tomcat_home }}/bin/shutdown.sh -force
+ExecStart={{ catalina_home | default(tomcat_home) }}/bin/startup.sh
+ExecStop={{ catalina_home | default(tomcat_home) }}/bin/shutdown.sh -force
 
 SuccessExitStatus=143
 TimeoutStartSec=120

@@ -305,13 +305,13 @@
     path:  "{{ item }}"
     state: absent
   loop:
-    - "{{ tomcat_home }}/webapps/openspecimen.war"
-    - "{{ tomcat_home }}/webapps/openspecimen"
+    - "{{ catalina_base }}/webapps/openspecimen.war"
+    - "{{ catalina_base }}/webapps/openspecimen"
 
 - name: Restore openspecimen.war from backup
   ansible.builtin.copy:
     src:        "{{ _restore_path }}/openspecimen.war"
-    dest:       "{{ tomcat_home }}/webapps/openspecimen.war"
+    dest:       "{{ catalina_base }}/webapps/openspecimen.war"
     remote_src: true
     owner:      "{{ tomcat_user }}"
     group:      "{{ tomcat_user }}"
@@ -379,9 +379,9 @@
   ansible.builtin.stat:
     path: "{{ _restore_path }}/config/{{ item.name }}"
   loop:
-    - { name: openspecimen.properties, dest: "{{ tomcat_home }}/conf/openspecimen.properties", mode: '0640' }
-    - { name: setenv.sh,               dest: "{{ tomcat_home }}/bin/setenv.sh",                mode: '0755' }
-    - { name: context.xml,             dest: "{{ tomcat_home }}/conf/context.xml",             mode: '0640' }
+    - { name: openspecimen.properties, dest: "{{ catalina_base }}/conf/openspecimen.properties", mode: '0640' }
+    - { name: setenv.sh,               dest: "{{ catalina_base }}/bin/setenv.sh",                mode: '0755' }
+    - { name: context.xml,             dest: "{{ catalina_base }}/conf/context.xml",             mode: '0640' }
   loop_control:
     label: "{{ item.name }}"
   register: _backup_config_stat

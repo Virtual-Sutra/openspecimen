@@ -60,6 +60,11 @@
         name: openspecimen
         tasks_from: preflight
 
+    - name: "[{{ _instance.name }}] Per-instance Tomcat runtime (CATALINA_BASE, ports, unit)"
+      ansible.builtin.include_role:
+        name: tomcat
+        tasks_from: instance
+
     - name: "[{{ _instance.name }}] OpenSpecimen role (WAR + config + default plugins)"
       ansible.builtin.include_role:
         name: openspecimen

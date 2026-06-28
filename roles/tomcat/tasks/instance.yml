@@ -1,0 +1,164 @@
+---
+# Per-instance Tomcat runtime (#73). One shared Tomcat binary (CATALINA_HOME =
+# tomcat_home, installed host-level by this role's main.yml) serves every
+# instance; each instance gets its own CATALINA_BASE with its own conf/ (ports,
+# datasource), logs/, temp/, work/, webapps/, and bin/setenv.sh, plus its own
+# systemd unit. Included PER INSTANCE from tasks/deploy-instance.yml, after the
+# host-level tomcat role and before the openspecimen role (the WAR extracts into
+# CATALINA_BASE/webapps). _instance + the shimmed flat vars (catalina_base,
+# openspecimen_service_name, openspecimen_port/_ajp_port/_shutdown_port,
+# openspecimen_data_dir, mysql_db_*) are in scope from the loop.
+#
+# For the single default instance catalina_base == catalina_home == tomcat_home,
+# so the conf-seed is skipped and every templated dest resolves to the shared
+# Tomcat - behaviour is identical to the pre-#73 host-level setup.
+
+- name: "[tomcat:{{ openspecimen_service_name }}] Create CATALINA_BASE tree"
+  ansible.builtin.file:
+    path: "{{ catalina_base }}/{{ item }}"
+    state: directory
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0755'
+  loop: [conf, logs, temp, work, webapps, bin]
+
+# Seed conf/ from the golden CATALINA_HOME/conf (the #91 zip overlay) for extra
+# instances. `cp -an` (archive, no-clobber) never overwrites an already
+# port-patched server.xml on re-runs. `creates:` makes it idempotent. Skipped for
+# the default instance (base == home: its conf IS the golden conf).
+- name: "[tomcat:{{ openspecimen_service_name }}] Seed conf from CATALINA_HOME"
+  ansible.builtin.command:
+    cmd: "cp -an {{ catalina_home }}/conf/. {{ catalina_base }}/conf/"
+    creates: "{{ catalina_base }}/conf/catalina.properties"
+  when: catalina_base != catalina_home
+
+- name: "[tomcat:{{ openspecimen_service_name }}] Own seeded conf (cp ran as root)"
+  ansible.builtin.file:
+    path: "{{ catalina_base }}/conf"
+    state: directory
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    recurse: true
+  when: catalina_base != catalina_home
+
+# Set this instance's HTTP / AJP / shutdown ports in its own server.xml. The
+# golden conf ships stock 8080/8009/8005; for the default instance these match
+# (changed=0), for extra instances they are spaced out (base + idx*10).
+- name: "[tomcat:{{ openspecimen_service_name }}] Set HTTP/AJP/shutdown ports in server.xml"
+  # Match each connector block by protocol (any attribute order) then set its own
+  # port - stock Tomcat 9 ships the AJP connector as protocol-before-port, so an
+  # order-dependent regex would leave AJP at 8009 and collide across instances.
+  ansible.builtin.shell: |
+    python3 -c "
+    import re, sys
+    path = '{{ catalina_base }}/conf/server.xml'
+    c = open(path).read(); orig = c
+    def setport(block, port):
+        return re.sub(r'(\bport=\")\d+(\")', r'\g<1>%s\g<2>' % port, block, count=1)
+    c = re.sub(r'(<Server\b[^>]*?\bport=\")\d+(\")', r'\g<1>{{ openspecimen_shutdown_port }}\g<2>', c, count=1)
+    c = re.sub(r'<Connector\b[^>]*?protocol=\"HTTP/1\.1\"[^>]*?/>',
+               lambda m: setport(m.group(0), '{{ openspecimen_port }}'), c, flags=re.DOTALL)
+    c = re.sub(r'<Connector\b[^>]*?protocol=\"AJP/1\.3\"[^>]*?/>',
+               lambda m: setport(m.group(0), '{{ openspecimen_ajp_port }}'), c, flags=re.DOTALL)
+    if c == orig: sys.exit(0)
+    open(path, 'w').write(c); print('changed')
+    "
+  args:
+    executable: /bin/bash
+  register: _port_patch
+  changed_when: "'changed' in _port_patch.stdout"
+  notify: restart openspecimen
+
+# ── Patch AJP connector (per CATALINA_BASE) ──────────────────────────────────
+# Tomcat 9.0.31+ sets secretRequired="true" by default; without a secret the AJP
+# connector refuses to start and aborts the service. Disable it and bind AJP to
+# IPv4 loopback (Ghostcat / CVE-2020-1938). Idempotent.
+- name: "[tomcat:{{ openspecimen_service_name }}] Set secretRequired=false on AJP connector"
+  ansible.builtin.shell: |
+    python3 -c "
+    import re, sys
+    path = '{{ catalina_base }}/conf/server.xml'
+    content = open(path).read()
+    if 'secretRequired' in content:
+        sys.exit(0)
+    patched = re.sub(
+        r'(<Connector[^>]*protocol=\"AJP/1\.3\"[^>]*?)(\s*/>)',
+        r'\1 secretRequired=\"false\"\2',
+        content, flags=re.DOTALL)
+    if patched == content:
+        sys.exit(0)
+    open(path, 'w').write(patched)
+    print('changed')
+    "
+  register: _ajp_patch
+  changed_when: "'changed' in _ajp_patch.stdout"
+  notify: restart openspecimen
+
+- name: "[tomcat:{{ openspecimen_service_name }}] Bind AJP connector to 127.0.0.1"
+  ansible.builtin.shell: |
+    python3 -c "
+    import re, sys
+    path = '{{ catalina_base }}/conf/server.xml'
+    content = open(path).read()
+    def patch(m):
+        tag, close = m.group(1), m.group(2)
+        if 'address=\"127.0.0.1\"' in tag:
+            return m.group(0)
+        if 'address=' in tag:
+            tag = re.sub(r'address=\"[^\"]*\"', 'address=\"127.0.0.1\"', tag)
+            return tag + close
+        return tag + ' address=\"127.0.0.1\"' + close
+    patched = re.sub(
+        r'(<Connector[^>]*protocol=\"AJP/1\.3\"[^>]*?)(\s*/>)',
+        patch, content, flags=re.DOTALL)
+    if patched == content:
+        sys.exit(0)
+    open(path, 'w').write(patched)
+    print('changed')
+    "
+  register: _ajp_bind
+  changed_when: "'changed' in _ajp_bind.stdout"
+  notify: restart openspecimen
+
+- name: "[tomcat:{{ openspecimen_service_name }}] Log JVM heap sizing"
+  ansible.builtin.debug:
+    msg: >-
+      {{ openspecimen_service_name }} heap:
+      -Xms{{ (_instance.heap_min | string ~ 'm') if (_instance.heap_min | default('') | string | trim | length > 0) else tomcat_heap_min }}
+      -Xmx{{ (_instance.heap_max | string ~ 'm') if (_instance.heap_max | default('') | string | trim | length > 0) else tomcat_heap_max }}
+      (RAM: {{ ansible_facts['memtotal_mb'] }} MB)
+
+- name: "[tomcat:{{ openspecimen_service_name }}] Template context.xml (JNDI datasource)"
+  ansible.builtin.template:
+    src: context.xml.j2
+    dest: "{{ catalina_base }}/conf/context.xml"
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0640'
+  notify: restart openspecimen
+
+- name: "[tomcat:{{ openspecimen_service_name }}] Template setenv.sh (JVM heap)"
+  ansible.builtin.template:
+    src: setenv.sh.j2
+    dest: "{{ catalina_base }}/bin/setenv.sh"
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0750'
+  notify: restart openspecimen
+
+- name: "[tomcat:{{ openspecimen_service_name }}] Install systemd unit"
+  ansible.builtin.template:
+    src: openspecimen.service.j2
+    dest: "/etc/systemd/system/{{ openspecimen_service_name }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart openspecimen
+
+- name: "[tomcat:{{ openspecimen_service_name }}] Enable service"
+  ansible.builtin.systemd:
+    name: "{{ openspecimen_service_name }}"
+    enabled: true
+    daemon_reload: true
