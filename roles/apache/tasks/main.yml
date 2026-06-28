@@ -91,7 +91,7 @@
 - name: Deploy OpenSpecimen VirtualHost config
   ansible.builtin.template:
     src: openspecimen.conf.j2
-    dest: "{{ _apache_conf_dir }}/openspecimen.conf"
+    dest: "{{ _apache_conf_dir }}/{{ apache_vhost_name }}.conf"
     owner: root
     group: root
     mode: '0644'
@@ -104,8 +104,8 @@
 
 - name: Enable site (Debian)
   ansible.builtin.file:
-    src: "{{ _apache_conf_dir }}/openspecimen.conf"
-    dest: "{{ _apache_conf_link }}"
+    src: "{{ _apache_conf_dir }}/{{ apache_vhost_name }}.conf"
+    dest: "{{ _apache_conf_link | dirname }}/{{ apache_vhost_name }}.conf"
     state: link
   when: ansible_os_family == 'Debian'
   notify: reload apache

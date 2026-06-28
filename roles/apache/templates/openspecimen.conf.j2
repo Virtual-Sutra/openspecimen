@@ -2,10 +2,19 @@
 # Proxy backend is {{ apache_proxy_protocol | upper }} ({{ apache_proxy_backend }}).
 # When AJP is used, the Tomcat connector is bound to 127.0.0.1 (tomcat role),
 # so it is never reachable off-box - mitigates CVE-2020-1938 (Ghostcat).
+{# Bind non-default ports (distro already Listens on 80 and, with mod_ssl, 443);
+   a second instance on e.g. 8443 needs its own Listen, but adding Listen 80/443
+   again would be a duplicate-bind error. #}
+{% if (apache_http_port | int) != 80 %}
+Listen {{ apache_http_port }}
+{% endif %}
+{% if apache_enable_ssl and (apache_https_port | int) != 443 %}
+Listen {{ apache_https_port }}
+{% endif %}
 {% if apache_enable_ssl %}
 <VirtualHost *:{{ apache_http_port }}>
     ServerName {{ apache_server_name }}
-    Redirect permanent / https://{{ apache_server_name }}/
+    Redirect permanent / https://{{ apache_server_name }}{{ (':' ~ apache_https_port) if (apache_https_port | int) != 443 else '' }}/
 </VirtualHost>
 
 <VirtualHost *:{{ apache_https_port }}>

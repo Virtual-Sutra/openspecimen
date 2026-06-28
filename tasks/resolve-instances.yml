@@ -38,6 +38,11 @@
       http_port: "{{ item.http_port | default((openspecimen_port_base | default(8080) | int) + idx * 10) }}"
       ajp_port: "{{ item.ajp_port | default((openspecimen_ajp_port_base | default(8009) | int) + idx * 10) }}"
       shutdown_port: "{{ item.shutdown_port | default((openspecimen_shutdown_port_base | default(8005) | int) + idx * 10) }}"
+      # Per-instance Apache vhost ports. Two instances behind one Apache on the same
+      # host either use different ServerNames (set app_url) or different HTTPS ports
+      # (e.g. set apache_https_port: 8443 on the second instance).
+      apache_http_port: "{{ item.apache_http_port | default(80) }}"
+      apache_https_port: "{{ item.apache_https_port | default(443) }}"
       data_dir: "{{ item.data_dir | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/data') }}"
       plugin_dir: "{{ item.plugin_dir | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/plugins') }}"
       backup_dir: "{{ item.backup_dir | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/backup') }}"

@@ -38,6 +38,8 @@
     openspecimen_node_name:             "{{ _instance.node_name }}"
     openspecimen_service_name:          "{{ _instance.service_name }}"
     openspecimen_context_path:          "{{ _instance.context_path }}"
+    apache_http_port:                   "{{ _instance.apache_http_port }}"
+    apache_https_port:                  "{{ _instance.apache_https_port }}"
     catalina_home:                      "{{ _instance.catalina_home }}"
     catalina_base:                      "{{ _instance.catalina_base }}"
     mysql_db_name:                      "{{ _instance.db_name }}"
