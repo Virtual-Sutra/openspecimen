@@ -38,7 +38,9 @@
     - name: Resolve component version spec
       tags: [always]
       vars:
-        _release_key: "{{ openspecimen_release | default('') | regex_replace('^openspecimen_', '') }}"
+        # master-DD-MM-YYYY snapshots roll continuously and share ONE spec, so
+        # normalise any master-* key to 'master' (-> component-specs/master.yml).
+        _release_key: "{{ openspecimen_release | default('') | regex_replace('^openspecimen_', '') | regex_replace('^master-.*$', 'master') }}"
         _spec_file: "{{ playbook_dir }}/component-specs/{{ _release_key }}.yml"
         _os_versions_default:
           java: {track: "17"}
