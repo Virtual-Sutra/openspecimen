@@ -47,10 +47,22 @@
     - "{{ _instance.release_marker }}"
     - "{{ _instance.deploy_success_marker }}"
 
+# On a clean/fresh VM (e.g. cleanup-before-deploy) local MySQL may not be running,
+# so its socket is absent and there is no DB to drop - skip rather than fail trying
+# to connect (deploy reinstalls MySQL and creates the DB afterwards).
+- name: "[{{ _instance.name }}] Probe local MySQL socket"
+  ansible.builtin.stat:
+    path: "{{ '/var/lib/mysql/mysql.sock' if ansible_facts['os_family'] == 'RedHat' else '/run/mysqld/mysqld.sock' }}"
+  register: _mysql_sock
+  when:
+    - db_managed | default(true) | bool
+    - db_type | default('mysql') == 'mysql'
+
 - name: "[{{ _instance.name }}] Drop the database and user (local MySQL only)"
   when:
     - db_managed | default(true) | bool
     - db_type | default('mysql') == 'mysql'
+    - _mysql_sock.stat.exists | default(false)
   vars:
     _socket: "{{ '/var/lib/mysql/mysql.sock' if ansible_facts['os_family'] == 'RedHat' else '/run/mysqld/mysqld.sock' }}"
   block:
