@@ -2,6 +2,12 @@
 apache_http_port:   80
 apache_https_port:  443
 
+# Per-instance vhost file name (sites-available/<name>.conf + sites-enabled link on
+# Debian, conf.d/<name>.conf on RedHat). Defaults to the instance's service name,
+# so the single default instance keeps openspecimen.conf and named instances get
+# openspecimen-<name>.conf - each instance owns its own vhost.
+apache_vhost_name: "{{ openspecimen_service_name | default('openspecimen') }}"
+
 # Enable the Apache reverse-proxy front-end. Defaults to "on when
 # openspecimen_app_url is set" - a customer with a public hostname is fronted
 # by Apache; a bare Tomcat (AWS/ALB path) is not. Override explicitly here, or
@@ -24,6 +30,9 @@ apache_server_name: >-
 #          sample configs. The Tomcat AJP connector is bound to 127.0.0.1 by the
 #          tomcat role, so it is never reachable off-box (Ghostcat mitigation).
 apache_proxy_protocol: http
+# Explicit AJP backend port override. Normally leave unset - the backend below
+# proxies to THIS instance's Tomcat AJP port (openspecimen_ajp_port) so each
+# instance reaches its own Tomcat.
 apache_ajp_port: 8009
 
 # Set to true to terminate SSL at Apache. Requires the two cert vars below.
@@ -36,9 +45,11 @@ apache_ssl_key_file:  ""
 # (browsers will warn on the untrusted cert). Set the cert/key paths when true.
 apache_ssl_self_signed: false
 
-# Proxy backend URL - derived from apache_proxy_protocol above.
+# Proxy backend URL - per instance: AJP/HTTP to THIS instance's Tomcat port.
+# openspecimen_ajp_port / openspecimen_port are shimmed per instance; apache_ajp_port
+# is an optional explicit override of the AJP port only.
 apache_proxy_backend: >-
-  {{ ('ajp://127.0.0.1:' ~ apache_ajp_port ~ '/openspecimen/')
+  {{ ('ajp://127.0.0.1:' ~ (openspecimen_ajp_port | default(apache_ajp_port)) ~ '/openspecimen/')
      if apache_proxy_protocol == 'ajp'
      else ('http://localhost:' ~ openspecimen_port ~ '/openspecimen/') }}
 
