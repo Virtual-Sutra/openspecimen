@@ -32,18 +32,34 @@
     creates: "{{ catalina_base }}/conf/catalina.properties"
   when: catalina_base != catalina_home
 
+- name: "[tomcat:{{ openspecimen_service_name }}] Own seeded conf (cp ran as root)"
+  ansible.builtin.file:
+    path: "{{ catalina_base }}/conf"
+    state: directory
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    recurse: true
+  when: catalina_base != catalina_home
+
 # Set this instance's HTTP / AJP / shutdown ports in its own server.xml. The
 # golden conf ships stock 8080/8009/8005; for the default instance these match
 # (changed=0), for extra instances they are spaced out (base + idx*10).
 - name: "[tomcat:{{ openspecimen_service_name }}] Set HTTP/AJP/shutdown ports in server.xml"
+  # Match each connector block by protocol (any attribute order) then set its own
+  # port - stock Tomcat 9 ships the AJP connector as protocol-before-port, so an
+  # order-dependent regex would leave AJP at 8009 and collide across instances.
   ansible.builtin.shell: |
     python3 -c "
     import re, sys
     path = '{{ catalina_base }}/conf/server.xml'
     c = open(path).read(); orig = c
-    c = re.sub(r'(<Server\s[^>]*?port=\")\d+(\")', r'\g<1>{{ openspecimen_shutdown_port }}\g<2>', c, count=1)
-    c = re.sub(r'(<Connector\s[^>]*?port=\")\d+(\"[^>]*?protocol=\"HTTP/1\.1\")', r'\g<1>{{ openspecimen_port }}\g<2>', c, flags=re.DOTALL)
-    c = re.sub(r'(<Connector\s[^>]*?port=\")\d+(\"[^>]*?protocol=\"AJP/1\.3\")', r'\g<1>{{ openspecimen_ajp_port }}\g<2>', c, flags=re.DOTALL)
+    def setport(block, port):
+        return re.sub(r'(\bport=\")\d+(\")', r'\g<1>%s\g<2>' % port, block, count=1)
+    c = re.sub(r'(<Server\b[^>]*?\bport=\")\d+(\")', r'\g<1>{{ openspecimen_shutdown_port }}\g<2>', c, count=1)
+    c = re.sub(r'<Connector\b[^>]*?protocol=\"HTTP/1\.1\"[^>]*?/>',
+               lambda m: setport(m.group(0), '{{ openspecimen_port }}'), c, flags=re.DOTALL)
+    c = re.sub(r'<Connector\b[^>]*?protocol=\"AJP/1\.3\"[^>]*?/>',
+               lambda m: setport(m.group(0), '{{ openspecimen_ajp_port }}'), c, flags=re.DOTALL)
     if c == orig: sys.exit(0)
     open(path, 'w').write(c); print('changed')
     "
