@@ -209,7 +209,7 @@
     path: "{{ item }}"
     checksum_algorithm: sha256
   loop:
-    - "{{ tomcat_home }}/conf/openspecimen.properties"
+    - "{{ catalina_base }}/conf/openspecimen.properties"
     - /tmp/.openspecimen.properties.probe
   loop_control:
     label: "{{ item | basename }}"

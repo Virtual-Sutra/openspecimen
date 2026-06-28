@@ -161,7 +161,7 @@
 # this timestamp would not restore the prior config.
 - name: Read current openspecimen.properties for backup (before re-template)
   ansible.builtin.slurp:
-    src: "{{ tomcat_home }}/conf/openspecimen.properties"
+    src: "{{ catalina_base }}/conf/openspecimen.properties"
   register: _openspecimen_properties_pre_template
   failed_when: false
   changed_when: false
@@ -170,7 +170,7 @@
 - name: Template openspecimen.properties
   ansible.builtin.template:
     src: openspecimen.properties.j2
-    dest: "{{ tomcat_home }}/conf/openspecimen.properties"
+    dest: "{{ catalina_base }}/conf/openspecimen.properties"
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
     mode: '0640'
@@ -269,7 +269,7 @@
 
 - name: Backup old WAR
   ansible.builtin.shell: |
-    WEBAPPS="{{ tomcat_home }}/webapps"
+    WEBAPPS="{{ catalina_base }}/webapps"
     DEST="{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}"
     if [ -f "$WEBAPPS/openspecimen.war" ]; then
       mv "$WEBAPPS/openspecimen.war" "$DEST/"
@@ -367,8 +367,8 @@
   ansible.builtin.stat:
     path: "{{ item.src }}"
   loop:
-    - { name: setenv.sh,               src: "{{ tomcat_home }}/bin/setenv.sh" }
-    - { name: context.xml,             src: "{{ tomcat_home }}/conf/context.xml" }
+    - { name: setenv.sh,               src: "{{ catalina_base }}/bin/setenv.sh" }
+    - { name: context.xml,             src: "{{ catalina_base }}/conf/context.xml" }
   loop_control:
     label: "{{ item.name }}"
   register: _backup_config_probe
@@ -444,10 +444,10 @@
           exit 1
         fi
         unzip -p /tmp/{{ openspecimen_release }}.zip "$WAR" \
-          > {{ tomcat_home }}/webapps/openspecimen.war
+          > {{ catalina_base }}/webapps/openspecimen.war
       args:
         executable: /bin/bash
-        creates: "{{ tomcat_home }}/webapps/openspecimen.war"
+        creates: "{{ catalina_base }}/webapps/openspecimen.war"
       notify: restart openspecimen
   rescue:
     - name: Fail with operator guidance for WAR extraction error
@@ -456,7 +456,7 @@
           ✗ Could not extract openspecimen.war from the release zip.
 
           Release zip:    /tmp/{{ openspecimen_release }}.zip
-          Target path:    {{ tomcat_home }}/webapps/openspecimen.war
+          Target path:    {{ catalina_base }}/webapps/openspecimen.war
           Customer:       {{ inventory_hostname }}
 
           What likely happened:
@@ -472,12 +472,12 @@
                  df -h {{ tomcat_home }}
 
             3. Verify Tomcat is installed and the webapps dir exists:
-                 ls -la {{ tomcat_home }}/webapps/
+                 ls -la {{ catalina_base }}/webapps/
   when: not (_plugins_only_change | default(false) or _config_only_change | default(false))
 
 - name: Set WAR ownership
   ansible.builtin.file:
-    path: "{{ tomcat_home }}/webapps/openspecimen.war"
+    path: "{{ catalina_base }}/webapps/openspecimen.war"
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
     mode: '0644'
@@ -733,7 +733,7 @@
         python3 << 'PYEOF'
         import subprocess, datetime, re, sys
         result = subprocess.run(
-            ['systemctl', 'show', 'openspecimen', '-p', 'ActiveEnterTimestamp', '--value'],
+            ['systemctl', 'show', '{{ openspecimen_service_name | default("openspecimen") }}', '-p', 'ActiveEnterTimestamp', '--value'],
             capture_output=True, text=True)
         # Normalise: strip microseconds then timezone word - both systemd and
         # Tomcat use the same local clock so TZ is irrelevant for comparison,
@@ -754,7 +754,7 @@
         fail_markers = ('One or more listeners failed to start',
                         'startup failed due to previous errors')
         try:
-            with open('{{ tomcat_home }}/logs/catalina.out') as f:
+            with open('{{ catalina_base }}/logs/catalina.out') as f:
                 for line in f:
                     m = log_re.match(line)
                     if not m:
@@ -784,7 +784,7 @@
       changed_when: false
   rescue:
     - name: Show service status on failure
-      ansible.builtin.shell: systemctl status openspecimen --no-pager -l 2>&1 || true
+      ansible.builtin.shell: systemctl status {{ openspecimen_service_name | default('openspecimen') }} --no-pager -l 2>&1 || true
       become: true
       register: _service_status
       changed_when: false
@@ -794,7 +794,7 @@
         var: _service_status.stdout_lines
 
     - name: Tail catalina.out for diagnostics
-      ansible.builtin.shell: "tail -100 {{ tomcat_home }}/logs/catalina.out 2>&1 || echo '(catalina.out not found)'"
+      ansible.builtin.shell: "tail -100 {{ catalina_base }}/logs/catalina.out 2>&1 || echo '(catalina.out not found)'"
       become: true
       register: _catalina_tail
       changed_when: false
@@ -811,7 +811,7 @@
 
           Customer:  {{ inventory_hostname }}
           Release:   {{ openspecimen_release }}
-          Service:   openspecimen ({{ tomcat_home }})
+          Service:   {{ openspecimen_service_name | default('openspecimen') }} ({{ catalina_base }})
 
           What likely happened (most common):
             1. Database migration failure (Liquibase)
@@ -830,7 +830,7 @@
                → ss -tlnp | grep 8080  (on target)
 
             5. WAR deployment failed at Tomcat layer
-               → check {{ tomcat_home }}/logs/localhost.*.log
+               → check {{ catalina_base }}/logs/localhost.*.log
 
           Diagnostics:
             - Full service status: shown above
