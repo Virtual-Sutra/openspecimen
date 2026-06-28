@@ -56,7 +56,7 @@ Listen {{ apache_https_port }}
 
     ErrorDocument 503 /downtime.html
 
-    ErrorLog  {{ _apache_log_dir }}/openspecimen-error.log
-    CustomLog {{ _apache_log_dir }}/openspecimen-access.log combined
+    ErrorLog  {{ _apache_log_dir }}/{{ apache_vhost_name }}-error.log
+    CustomLog {{ _apache_log_dir }}/{{ apache_vhost_name }}-access.log combined
 
 </VirtualHost>
