@@ -182,5 +182,5 @@
   ansible.builtin.include_tasks: create_db.yml
   loop: "{{ _instances | default([{'db_name': mysql_db_name, 'db_user': mysql_db_user, 'db_password': mysql_db_password | default('')}]) }}"
   loop_control:
-    loop_var: instance
-    label: "{{ instance.db_name }}"
+    loop_var: _instance
+    label: "{{ _instance.db_name }}"
