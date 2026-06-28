@@ -41,14 +41,21 @@
       {{ (_direction_marker.content | b64decode | trim)
          if _direction_marker.content is defined else '' }}
 
-# Use sort -V (natural version sort) so RC12 > RC8 sorts correctly.
+# Auto-rollback is only meaningful between ORDERED semver releases (openspecimen_vX.Y[.Z]),
+# where sort -V correctly ranks RC12 > RC8. Snapshot builds (e.g. openspecimen_master-DD-MM-YYYY)
+# are NOT version-ordered - their day-first date makes sort -V misrank them (a May-30 build
+# sorts "after" a Jun-27 one), which would falsely trigger a rollback on a normal forward
+# deploy. So we only consider rollback when BOTH installed and requested are semver (_v<digit>);
+# everything else (master/snapshot/date builds) deploys forward.
 - name: Detect direction (deploy / rollback)
   ansible.builtin.shell: |
     INSTALLED="{{ _installed_release }}"
     REQUESTED="{{ openspecimen_release }}"
     if [ -z "$INSTALLED" ] || [ "$INSTALLED" = "$REQUESTED" ]; then
       echo deploy
-    elif [ "$(printf '%s\n%s\n' "$INSTALLED" "$REQUESTED" | sort -V | head -1)" = "$REQUESTED" ]; then
+    elif echo "$INSTALLED" | grep -Eq '_v[0-9]' \
+         && echo "$REQUESTED" | grep -Eq '_v[0-9]' \
+         && [ "$(printf '%s\n%s\n' "$INSTALLED" "$REQUESTED" | sort -V | head -1)" = "$REQUESTED" ]; then
       echo rollback
     else
       echo deploy
