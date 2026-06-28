@@ -1,13 +1,17 @@
 # Multiple OpenSpecimen instances per host
 
 Run N independent OpenSpecimen instances on one VM (e.g. `prod` + `test`), each
-fully isolated: its own Tomcat (a `CATALINA_BASE` off a shared `CATALINA_HOME`),
-context, ports, data/plugin/backup dirs, database + user, heap, and systemd unit.
-This is the **1:1 Tomcat-per-deployment** model (ADR-003 / ADR-006).
+fully isolated: its own `CATALINA_BASE` off a shared Tomcat binary
+(`CATALINA_HOME`), ports, data/plugin/backup dirs, database + user, heap, and
+systemd unit. This is the **per-instance Tomcat runtime** model
+(ADR-003 / ADR-006, #72/#73).
 
-> **Status:** the instance model + per-instance database provisioning land in #72
-> (this change). Per-instance Tomcat/ports (#73) and the Apache per-instance
-> vhost (#74) follow. A single-instance host is unaffected today.
+`openspecimen_instances` (a list in `inventory/group_vars/all.yml`) is the
+deployment model. `site.yml` runs the base roles host-level once, then loops the
+app roles over each instance (`tasks/deploy-instance.yml`) - so direction
+detection (deploy / rollback / no-op) and the fresh-vs-upgrade / fast-path logic
+are all **per instance**. One instance rolling back or being already-current does
+not stop the others.
 
 ## Single instance (the default — nothing to do)
 
@@ -20,7 +24,16 @@ dirs, …), so a single-instance host needs no extra configuration.
 ## Multiple instances (infrequent)
 
 Running more than one instance on a host is uncommon. When you need it, **override
-`openspecimen_instances`** in the customer inventory with N entries:
+`openspecimen_instances`** with N entries.
+
+> **Where to put the override:** the Jenkins/ops pipeline runs with `-i inventory/`,
+> under which the top-level `inventory/group_vars/all.yml` loads but per-customer
+> `inventory/customers/<name>/group_vars/` subdirectories do **not**. So a
+> multi-instance `openspecimen_instances` override belongs in
+> `inventory/host_vars/<customer>.yml` (always loaded by hostname), not in the
+> per-customer `group_vars/`. (For a self-hosted run with
+> `-i inventory/customers/<name>/`, the customer `group_vars/openspecimen.yml` is
+> loaded and either location works.)
 
 ```yaml
 openspecimen_instances:
@@ -55,7 +68,29 @@ derive from `name` + list index:
 | `context_path` | `/openspecimen` (constant — isolation is by base, not path) |
 
 Override any derived field by setting it explicitly on the instance. Ports are
-asserted unique across the host at the start of the run.
+asserted unique across the host at the start of the run (set explicit `*_port`
+values or space the instances out if the derived ports would collide).
+
+## Per-instance Tomcat runtime
+
+One shared Tomcat binary (`CATALINA_HOME` = `tomcat_home`, installed host-level)
+serves every instance. Each instance gets its own `CATALINA_BASE` containing its
+own `conf/`, `logs/`, `temp/`, `work/`, `webapps/` and `bin/`:
+
+| Per-instance file | Set from | What differs per instance |
+|-------------------|----------|---------------------------|
+| `conf/server.xml` | seeded from the golden `CATALINA_HOME/conf`, then port-patched | HTTP / AJP / shutdown ports (base + index×10) |
+| `conf/context.xml` | `context.xml.j2` | JNDI datasource → the instance's `db_name` / `db_user` / `db_password` / `db_host` |
+| `conf/openspecimen.properties` | `openspecimen.properties.j2` | `app.url`, data/plugin/backup dirs, node name |
+| `bin/setenv.sh` | `setenv.sh.j2` | `-Xms`/`-Xmx` from the instance's `heap_min`/`heap_max` |
+| `webapps/openspecimen.war` | release zip | the instance's `release` |
+| `/etc/systemd/system/<service_name>.service` | `openspecimen.service.j2` | one unit per instance, `CATALINA_BASE`/`CATALINA_HOME` env |
+
+The AJP connector is patched per `CATALINA_BASE` (`secretRequired="false"`, bound
+to `127.0.0.1` - Ghostcat/CVE-2020-1938). For the **single default instance**
+`CATALINA_BASE == CATALINA_HOME`, so the conf-seed is skipped and every templated
+file lands directly on the shared Tomcat - behaviour is identical to a plain
+single-host setup.
 
 ## Database
 
@@ -84,4 +119,42 @@ ansible-playbook -i inventory/customers/<name>/ site.yml -e instance=test -e @se
 ```
 
 `-e instance=<name>` limits the run to that instance; the others are untouched.
-The same flag applies to rollback and the DB backup/restore playbooks.
+
+## `-e instance=<name>` support per playbook
+
+`-e instance=<name>` works in any playbook that resolves
+`openspecimen_instances` (it imports `tasks/resolve-instances.yml` and loops):
+
+| Playbook | Loops instances? | `-e instance=<name>` |
+|----------|------------------|----------------------|
+| `site.yml` | Yes | Yes - deploy/upgrade/auto-rollback one instance |
+| `cleanup.yml` | Yes | Yes - tear down one instance |
+| `update-heap.yml`, `update-app-url.yml`, `update-db-pool.yml`, `status.yml` | Yes | Yes - act on one instance |
+| `verify-customer.yml` | Yes | Yes |
+| `rollback.yml`, `db-backup.yml`, `db-restore.yml` | **No** | **No** - these run once against the **flat** vars, i.e. the single default instance only |
+
+For a **multi-instance** host, roll one instance back via the auto-rollback path -
+request an older release for just that instance:
+
+```bash
+ansible-playbook -i inventory/customers/<name>/ site.yml \
+  -e instance=test -e openspecimen_release=openspecimen_v12.2.RC8 \
+  -e @secrets/<name>.yml --vault-password-file .vault-pass
+```
+
+The standalone `rollback.yml` / `db-backup.yml` / `db-restore.yml` are intended
+for single-instance hosts (they act on the flat `catalina_base` /
+`openspecimen_backup_dir` / `openspecimen_service_name`, not per instance).
+
+## Tearing down one instance
+
+```bash
+ansible-playbook -i inventory/customers/<name>/ cleanup.yml \
+  -e cleanup_confirm=true -e instance=test \
+  -e @secrets/<name>.yml --vault-password-file .vault-pass
+```
+
+Per-instance cleanup removes that instance's service, webapp, its isolated
+`CATALINA_BASE`, data/plugins/backups/markers and (local MySQL) its DB + user,
+leaving the shared Tomcat/MySQL/Java for the other instances. `-e full_wipe=true`
+removes the shared bits too (whole-host reset).

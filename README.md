@@ -5,8 +5,12 @@ Ansible automation for deploying and upgrading [OpenSpecimen](https://github.com
 ## What this does
 
 - **Fresh install** (`site.yml`) - installs Java, MySQL (optional), Tomcat, and OpenSpecimen from a release zip
-- **Upgrade** (`site.yml`) - a normal run on an existing install upgrades app-only (WAR + plugins) with automatic backup; `-e force_deploy=true` also re-runs the base roles
+- **Upgrade** (`site.yml`) - a normal run on an existing install upgrades app-only (WAR + plugins) with automatic WAR/config and pre-upgrade database backup; `-e force_deploy=true` also re-runs the base roles
+- **Multiple instances per host** - `openspecimen_instances` (a list) is the deployment model; the default is one instance, override it to run N isolated instances on one VM. Target one with `-e instance=<name>`. See [`docs/MULTI-INSTANCE.md`](docs/MULTI-INSTANCE.md)
 - **Plugin tiers** - `openspecimen_paid_plugins` (→ `plugins/paid/`) and `openspecimen_customer_plugins` (→ `plugins/zustomer/`) extract JARs from named zips alongside the release zip
+- **Rollback** - downgrade detection auto-restores the matching backup; `rollback.yml` rolls back artifacts + config, and optionally the database (`-e restore_db=true`)
+- **Day-2 playbooks** - `update-heap.yml`, `update-app-url.yml`, `update-db-pool.yml`, `status.yml`, `db-backup.yml`, `db-restore.yml`, `cleanup.yml`
+- **Component version pinning** - per-release `component-specs/<release>.yml` pins Tomcat/Java/MySQL/Apache versions (see [`component-specs/README.md`](component-specs/README.md))
 - **Pre-flight validation** - fails fast before touching the target if the release zip or any plugin zip is missing
 - **Bounded backup history** - keeps `openspecimen_backup_retention` snapshots (default 3); older backups are pruned automatically
 
@@ -32,22 +36,33 @@ see [Run on the same host](#run-on-the-same-host-no-separate-controller)).
 
 ```
 site.yml                - unified install + upgrade; a normal upgrade is app-only, `-e force_deploy=true` re-runs the base roles
+rollback.yml            - roll back to a previous timestamped backup (-e restore_db=true also restores the DB)
+db-backup.yml           - on-demand consistent MySQL dump
+db-restore.yml          - restore a db-backup.yml dump (destructive)
+update-heap.yml         - day-2: change JVM heap and restart (per instance)
+update-app-url.yml      - day-2: change app.url and restart (per instance)
+update-db-pool.yml      - day-2: change JDBC pool size and restart (per instance)
+status.yml              - day-2: report release/service/health/heap/pool per instance
+cleanup.yml             - tear down instance(s) or the whole host (-e cleanup_confirm=true)
 verify-customer.yml     - pre-deploy readiness check (SSH, disk, version)
 roles/
   common/               - OS prerequisites, system user/group
   java/                 - OpenJDK 17
   mysql/                - MySQL install and config (skipped when db_managed: false)
-  tomcat/               - Tomcat, JDBC drivers, JVM tuning
-  openspecimen/         - WAR deploy, properties, health check
+  tomcat/               - shared Tomcat binary + per-instance CATALINA_BASE (ports, datasource, heap, unit)
+  openspecimen/         - WAR deploy, properties, health check, backup/rollback/cleanup tasks
   plugins/              - customer-specific plugin injection
+  apache/               - optional TLS-terminating reverse proxy (skipped unless apache_enabled)
+component-specs/        - per-release pinned component versions (Tomcat/Java/MySQL/Apache)
 inventory/
-  group_vars/all.yml    - default variable values (all roles)
+  group_vars/all.yml    - default variable values (incl. openspecimen_instances)
   customers/_template/  - copy this for each new customer
   hosts-ec2.sample      - example hosts file for EC2 (controller → target over SSH)
   hosts-local.sample    - same-host inventory (run on the box, ansible_connection=local)
 secrets/_template.yml   - example credential variables (never commit with real values)
 docs/
-  DEPLOY-UPGRADE.md     - fresh install, upgrade, rollback procedures
+  DEPLOY-UPGRADE.md     - fresh install, upgrade, rollback, day-2, cleanup procedures
+  MULTI-INSTANCE.md     - running multiple OpenSpecimen instances on one host
   TROUBLESHOOTING.md    - common errors and fixes
 CONFIG-REFERENCE.md     - every config file the roles write and what controls it
 ```
@@ -127,18 +142,23 @@ For RDS and Oracle, the `mysql` role is skipped - only the JDBC connection is co
 
 ## Customer-specific plugins
 
-For **self-hosted** deployments, define the plugin list in your customer inventory:
+List plugins by **name only** (no version, no extension). The role derives the zip
+filename at runtime as `<name>-<version>.zip`, where `<version>` is
+`openspecimen_release` with the `openspecimen_` prefix stripped - so inventory does
+not change on every upgrade, only the on-disk zip does.
 
 ```yaml
-# inventory/customers/my-hospital/group_vars/plugins.yml
-customer_plugins:
-  - src: "/path/to/enterprise.jar"
-    dest_subdir: paid
-  - src: "/path/to/custom.jar"
-    dest_subdir: customer
+# inventory/host_vars/my-hospital.yml
+openspecimen_paid_plugins:        # JARs extracted to plugins/paid/
+  - os-automated-freezers
+openspecimen_customer_plugins:    # JARs extracted to plugins/zustomer/
+  - acme-custom-workflow
 ```
 
-Plugin files referenced by `src` must be accessible on the Ansible controller at deploy time.
+Each `<name>-<version>.zip` must exist (alongside the release zip, or anywhere
+under `openspecimen_builds_dir`) on the Ansible controller at deploy time and
+contain at least one `.jar`. See [`docs/DEPLOY-UPGRADE.md`](docs/DEPLOY-UPGRADE.md#plugin-deployment)
+for details and the `host_vars` vs `group_vars` loading caveat.
 
 ## Roles
 
@@ -147,9 +167,10 @@ Plugin files referenced by `src` must be accessible on the Ansible controller at
 | `common` | OS prerequisites, system user/group |
 | `java` | OpenJDK 17 installation |
 | `mysql` | MySQL install and configuration (skipped when `db_managed: false`) |
-| `tomcat` | Tomcat, JDBC drivers, JVM tuning |
-| `openspecimen` | WAR deploy, properties config, health check |
+| `tomcat` | Shared Tomcat binary + JDBC drivers; per-instance `CATALINA_BASE` (ports, datasource, heap, systemd unit) |
+| `openspecimen` | WAR deploy, properties config, health check, backup / rollback / cleanup |
 | `plugins` | Customer-specific plugin injection (optional) |
+| `apache` | Optional TLS-terminating reverse proxy (skipped unless `apache_enabled`) |
 
 See [`CONFIG-REFERENCE.md`](CONFIG-REFERENCE.md) for all variables, and
 [`docs/DEPLOY-UPGRADE.md`](docs/DEPLOY-UPGRADE.md) for upgrade and rollback procedures.
