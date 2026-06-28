@@ -1,68 +1,68 @@
 ---
 # Tear down ONE OpenSpecimen instance so the host can be reused (ADR-006, #72).
-# Called per instance from cleanup.yml; `instance` is the loop var. DESTRUCTIVE.
+# Called per instance from cleanup.yml; `_instance` is the loop var. DESTRUCTIVE.
 #
 # Removes the instance's service, deployed webapp, data/plugins/backups/markers
 # and (local MySQL) its DB + user. Leaves the shared Tomcat binary / MySQL
 # server / Java in place for a fast re-deploy unless cleanup.yml's full_wipe
 # host-level step also runs.
 
-- name: "[{{ instance.name }}] Stop and disable the service"
+- name: "[{{ _instance.name }}] Stop and disable the service"
   ansible.builtin.systemd:
-    name: "{{ instance.service_name }}"
+    name: "{{ _instance.service_name }}"
     state: stopped
     enabled: false
   failed_when: false
 
-- name: "[{{ instance.name }}] Remove the systemd unit"
+- name: "[{{ _instance.name }}] Remove the systemd unit"
   ansible.builtin.file:
-    path: "/etc/systemd/system/{{ instance.service_name }}.service"
+    path: "/etc/systemd/system/{{ _instance.service_name }}.service"
     state: absent
 
-- name: "[{{ instance.name }}] Remove the deployed webapp"
+- name: "[{{ _instance.name }}] Remove the deployed webapp"
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
   loop:
-    - "{{ instance.catalina_base }}/webapps/openspecimen.war"
-    - "{{ instance.catalina_base }}/webapps/openspecimen"
+    - "{{ _instance.catalina_base }}/webapps/openspecimen.war"
+    - "{{ _instance.catalina_base }}/webapps/openspecimen"
 
 # Only when the instance has its OWN base (multi-instance). For the single
 # default, catalina_base == the shared CATALINA_HOME, so removing it here would
 # delete the Tomcat binary - that is left to full_wipe instead.
-- name: "[{{ instance.name }}] Remove the isolated CATALINA_BASE (multi-instance)"
+- name: "[{{ _instance.name }}] Remove the isolated CATALINA_BASE (multi-instance)"
   ansible.builtin.file:
-    path: "{{ instance.catalina_base }}"
+    path: "{{ _instance.catalina_base }}"
     state: absent
-  when: instance.catalina_base != (instance.catalina_home | default(catalina_home | default(tomcat_home)))
+  when: _instance.catalina_base != (_instance.catalina_home | default(catalina_home | default(tomcat_home)))
 
-- name: "[{{ instance.name }}] Remove data, plugins, backups and markers"
+- name: "[{{ _instance.name }}] Remove data, plugins, backups and markers"
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
   loop:
-    - "{{ instance.data_dir }}"
-    - "{{ instance.plugin_dir }}"
-    - "{{ instance.backup_dir }}"
-    - "{{ instance.release_marker }}"
-    - "{{ instance.deploy_success_marker }}"
+    - "{{ _instance.data_dir }}"
+    - "{{ _instance.plugin_dir }}"
+    - "{{ _instance.backup_dir }}"
+    - "{{ _instance.release_marker }}"
+    - "{{ _instance.deploy_success_marker }}"
 
-- name: "[{{ instance.name }}] Drop the database and user (local MySQL only)"
+- name: "[{{ _instance.name }}] Drop the database and user (local MySQL only)"
   when:
     - db_managed | default(true) | bool
     - db_type | default('mysql') == 'mysql'
   vars:
     _socket: "{{ '/var/lib/mysql/mysql.sock' if ansible_facts['os_family'] == 'RedHat' else '/run/mysqld/mysqld.sock' }}"
   block:
-    - name: "[{{ instance.name }}] Drop database {{ instance.db_name }}"
+    - name: "[{{ _instance.name }}] Drop database {{ _instance.db_name }}"
       community.mysql.mysql_db:
-        name: "{{ instance.db_name }}"
+        name: "{{ _instance.db_name }}"
         state: absent
         login_unix_socket: "{{ _socket }}"
 
-    - name: "[{{ instance.name }}] Drop database user {{ instance.db_user }}"
+    - name: "[{{ _instance.name }}] Drop database user {{ _instance.db_user }}"
       community.mysql.mysql_user:
-        name: "{{ instance.db_user }}"
+        name: "{{ _instance.db_user }}"
         host: localhost
         state: absent
         login_unix_socket: "{{ _socket }}"

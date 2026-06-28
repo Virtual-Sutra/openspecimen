@@ -40,8 +40,8 @@
         tasks_from: cleanup
       loop: "{{ _instances }}"
       loop_control:
-        loop_var: instance
-        label: "{{ instance.name }}"
+        loop_var: _instance
+        label: "{{ _instance.name }}"
 
     - name: Reload systemd after removing units
       ansible.builtin.systemd:
