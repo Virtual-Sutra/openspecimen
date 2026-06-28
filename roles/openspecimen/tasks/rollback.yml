@@ -359,10 +359,10 @@
 - name: Restore MySQL connector JAR from backup lib/
   ansible.builtin.shell: |
     if compgen -G "{{ _restore_path }}/lib/mysql-connector*.jar" > /dev/null; then
-      rm -f {{ tomcat_home }}/lib/mysql-connector*.jar
-      cp {{ _restore_path }}/lib/mysql-connector*.jar {{ tomcat_home }}/lib/
-      chown {{ tomcat_user }}:{{ tomcat_user }} {{ tomcat_home }}/lib/mysql-connector*.jar
-      chmod 0644 {{ tomcat_home }}/lib/mysql-connector*.jar
+      rm -f {{ catalina_home | default(tomcat_home) }}/lib/mysql-connector*.jar
+      cp {{ _restore_path }}/lib/mysql-connector*.jar {{ catalina_home | default(tomcat_home) }}/lib/
+      chown {{ tomcat_user }}:{{ tomcat_user }} {{ catalina_home | default(tomcat_home) }}/lib/mysql-connector*.jar
+      chmod 0644 {{ catalina_home | default(tomcat_home) }}/lib/mysql-connector*.jar
       echo "restored"
     else
       echo "skipped"

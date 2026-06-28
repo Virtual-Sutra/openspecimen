@@ -30,8 +30,11 @@
       name: "{{ item.name }}"
       context_path: "{{ item.context_path | default('/openspecimen') }}"
       service_name: "{{ item.service_name | default('openspecimen-' ~ item.name) }}"
-      catalina_home: "{{ catalina_home | default(tomcat_home) }}"
-      catalina_base: "{{ item.catalina_base | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/base') }}"
+      # Per-instance standalone Tomcat: HOME == BASE under the instance root, so
+      # each instance owns its own Tomcat binary + version. The single default
+      # instance (group_vars/all.yml) pins both to tomcat_home (legacy layout).
+      catalina_home: "{{ item.catalina_home | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/tomcat') }}"
+      catalina_base: "{{ item.catalina_base | default(item.catalina_home | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/tomcat')) }}"
       http_port: "{{ item.http_port | default((openspecimen_port_base | default(8080) | int) + idx * 10) }}"
       ajp_port: "{{ item.ajp_port | default((openspecimen_ajp_port_base | default(8009) | int) + idx * 10) }}"
       shutdown_port: "{{ item.shutdown_port | default((openspecimen_shutdown_port_base | default(8005) | int) + idx * 10) }}"
