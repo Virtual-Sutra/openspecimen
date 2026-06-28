@@ -12,8 +12,9 @@
   block:
     - name: Health check via public URL ({{ openspecimen_app_url }}/ui-app/)
       # Check the UI app page (what users open) rather than the REST endpoint.
+      # -k when openspecimen_app_url_insecure (self-signed cert hosts).
       ansible.builtin.shell: >
-        curl -sf -o /dev/null -w "%{http_code}"
+        curl -sf {{ '-k ' if (openspecimen_app_url_insecure | default(false) | bool) else '' }}-o /dev/null -w "%{http_code}"
         {{ openspecimen_app_url | regex_replace('/+$', '') }}/ui-app/
         | grep -qE '^200$'
       delegate_to: localhost
