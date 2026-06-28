@@ -69,6 +69,32 @@
   changed_when: "'changed' in _port_patch.stdout"
   notify: restart openspecimen
 
+# Stock Tomcat 9 ships the AJP connector commented out. When this host proxies via
+# AJP (apache_proxy_protocol: ajp), the connector MUST be enabled or Apache gets
+# "AJP ... Connection refused" on 127.0.0.1:<port> and serves the 503 downtime page.
+# The attribute patches below only edit the connector text - they don't uncomment it.
+- name: "[tomcat:{{ openspecimen_service_name }}] Enable (uncomment) the AJP connector"
+  ansible.builtin.shell: |
+    python3 -c "
+    import re, sys
+    path = '{{ catalina_base }}/conf/server.xml'
+    c = open(path).read()
+    # Drop the <!-- ... --> wrapper around the AJP <Connector .../> (leave the
+    # descriptive '<!-- Define an AJP ... -->' comment untouched - it has no <Connector).
+    patched = re.sub(r'<!--\s*(<Connector\b.*?protocol=\"AJP/1\.3\".*?/>)\s*-->', r'\1', c, flags=re.DOTALL)
+    if patched == c:
+        sys.exit(0)
+    open(path, 'w').write(patched); print('changed')
+    "
+  args:
+    executable: /bin/bash
+  register: _ajp_enable
+  changed_when: "'changed' in _ajp_enable.stdout"
+  notify: restart openspecimen
+  when:
+    - apache_enabled | default(false) | bool
+    - (apache_proxy_protocol | default('http')) == 'ajp'
+
 # ── Patch AJP connector (per CATALINA_BASE) ──────────────────────────────────
 # Tomcat 9.0.31+ sets secretRequired="true" by default; without a secret the AJP
 # connector refuses to start and aborts the service. Disable it and bind AJP to
