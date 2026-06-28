@@ -709,6 +709,19 @@
 
 # ── Start service ─────────────────────────────────────────────────────────────
 
+# Truncate catalina.out first so the startup wait below only ever matches THIS
+# run's "Server startup in" line. catalina.out is append-only and survives a
+# (non-full-wipe) cleanup, so a stale line from a previous deploy could otherwise
+# satisfy the wait before the app has actually started.
+- name: Truncate catalina.out before (re)start
+  ansible.builtin.copy:
+    dest: "{{ catalina_base }}/logs/catalina.out"
+    content: ""
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0640'
+  changed_when: false
+
 - name: Start and enable openspecimen service
   ansible.builtin.systemd:
     name: "{{ openspecimen_service_name | default('openspecimen') }}"

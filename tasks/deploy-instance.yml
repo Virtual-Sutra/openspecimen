@@ -79,13 +79,30 @@
         name: apache
       when: apache_enabled | default(false)
 
+    # Apply all pending restarts NOW (WAR / config / plugins / tomcat-unit each
+    # notify "restart openspecimen"; apache notifies "reload apache"), while the
+    # shim still holds THIS instance's values - and crucially BEFORE the readiness
+    # gate below, so the deploy never finishes with Tomcat mid-restart (which makes
+    # Apache return 503 -> the downtime maintenance page).
+    - name: "[{{ _instance.name }}] Apply pending restarts for this instance"
+      ansible.builtin.meta: flush_handlers
+
+    # Authoritative readiness gate: don't declare the instance deployed until
+    # Tomcat actually serves the app locally AFTER that final restart. Immune to
+    # the catalina.out first-pass timing.
+    - name: "[{{ _instance.name }}] Wait until OpenSpecimen serves locally (post-restart)"
+      ansible.builtin.shell: >
+        curl -sf -o /dev/null -w "%{http_code}"
+        http://localhost:{{ openspecimen_port }}{{ openspecimen_context_path | default('/openspecimen') }}/rest/ng/config-settings/app-props
+        | grep -qE '^(200|401)$'
+      register: _instance_ready
+      until: _instance_ready.rc == 0
+      retries: "{{ openspecimen_health_retries | default(90) | int }}"
+      delay: "{{ openspecimen_health_delay | default(10) | int }}"
+      changed_when: false
+      become: true
+
     - name: "[{{ _instance.name }}] Verify app reachable via public URL (opt-in)"
       ansible.builtin.include_role:
         name: openspecimen
         tasks_from: verify-public-url
-
-# Flush handlers now, while the shim still holds THIS instance's values, so the
-# "restart openspecimen" handler restarts this instance's service - not the last
-# instance's (handlers otherwise run at play end after the shim has moved on).
-- name: "[{{ _instance.name }}] Flush handlers (restart this instance now)"
-  ansible.builtin.meta: flush_handlers

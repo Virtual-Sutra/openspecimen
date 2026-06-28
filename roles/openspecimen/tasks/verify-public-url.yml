@@ -10,11 +10,12 @@
 # openspecimen_app_url_check_fatal=true to make it a hard gate.
 - name: Verify app reachable via public URL
   block:
-    - name: Health check via public URL ({{ openspecimen_app_url }})
+    - name: Health check via public URL ({{ openspecimen_app_url }}/ui-app/)
+      # Check the UI app page (what users open) rather than the REST endpoint.
       ansible.builtin.shell: >
         curl -sf -o /dev/null -w "%{http_code}"
-        {{ openspecimen_app_url | regex_replace('/+$', '') }}/openspecimen/rest/ng/config-settings/app-props
-        | grep -qE '^(200|401)$'
+        {{ openspecimen_app_url | regex_replace('/+$', '') }}/ui-app/
+        | grep -qE '^200$'
       delegate_to: localhost
       become: false
       register: _public_health
@@ -30,7 +31,7 @@
           {{ openspecimen_health_retries | default(5) }} attempts. The deployment succeeded
           (the app passed its startup and local health checks); the public URL depends on
           the front-end proxy / ALB / DNS / cert layer. Check:
-            1. ALB / front-end target health (path /openspecimen/rest/ng/config-settings/app-props -> 200/401)
+            1. ALB / front-end target health (path /ui-app/ -> 200)
             2. DNS: dig +short {{ openspecimen_app_url | regex_replace('^https?://', '') | regex_replace('/.*', '') }}
             3. TLS certificate validity (HTTPS)
             4. Security group allows inbound 443
