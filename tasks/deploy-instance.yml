@@ -54,6 +54,7 @@
     _config_only_change:   false
     _config_changed:       false
     _inst_zip_find:        {files: []}
+    openspecimen_java_home: ""
 
 - name: "[{{ _instance.name }}] Guard: no global release/zip override on a multi-instance host"
   # Extra-vars (-e openspecimen_release / -e openspecimen_zip_path) outrank the
