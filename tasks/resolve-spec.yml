@@ -1,9 +1,8 @@
 ---
 # Resolve the component version spec for a single release into `os_versions`
-# (ADR-002 / #90). Caller sets `_spec_release` (e.g. openspecimen_v12.2 or an
+# (ADR-002 / #90). Caller sets `_spec_release` (e.g. openspecimen_v12.2.RC12 or an
 # openspecimen_master-DD-MM-YYYY snapshot). Loaded once host-level (shared Java)
-# and once per instance in tasks/deploy-instance.yml (per-instance Tomcat), so it
-# is self-contained and resets state to avoid leaking a spec across releases.
+# and once per instance in tasks/deploy-instance.yml (per-instance Tomcat).
 #
 # master-* snapshots roll continuously and share ONE spec, so any master-* key
 # normalises to 'master' -> component-specs/master.yml.
@@ -19,16 +18,18 @@
   delegate_to: localhost
   become: false
 
-# Reset first so a release WITHOUT a spec file doesn't inherit the previous
-# include_vars (host-level run, or a prior instance in the loop).
-- name: "Spec: reset component_spec before load"
+# Use the real spec when present, else the empty placeholder. include_vars must
+# ALWAYS run with a real file: a set_fact reset of component_spec would SHADOW
+# include_vars (set_fact outranks include_vars, so component_spec would stay {}),
+# and merely skipping include_vars would leak the previous release's spec across
+# instances. Loading _empty.yml gives a fresh component_spec={} with neither flaw.
+- name: "Spec: choose spec file (real spec, else empty placeholder)"
   ansible.builtin.set_fact:
-    component_spec: {}
+    _spec_file: "{{ playbook_dir }}/component-specs/{{ (_release_key ~ '.yml') if _spec_stat.stat.exists else '_empty.yml' }}"
 
-- name: "Spec: load component-specs/{{ _release_key }}.yml"
+- name: "Spec: load {{ _spec_file | basename }}"
   ansible.builtin.include_vars:
-    file: "{{ playbook_dir }}/component-specs/{{ _release_key }}.yml"
-  when: _spec_stat.stat.exists
+    file: "{{ _spec_file }}"
 
 - name: "Spec: warn when no component spec exists for {{ _release_key }}"
   ansible.builtin.debug:

@@ -1,0 +1,4 @@
+---
+# Placeholder loaded by tasks/resolve-spec.yml when a release has no spec file, so
+# include_vars always runs (avoids set_fact shadowing include_vars and stale leaks).
+component_spec: {}
