@@ -135,6 +135,15 @@
         name: openspecimen
         tasks_from: preflight
 
+    # Per-instance JDK (os_versions.java.track from this instance's spec). Installs
+    # the JDK (idempotent; JDKs coexist) and sets openspecimen_java_home, which the
+    # tomcat runtime below pins into this instance's setenv.sh + systemd unit - so
+    # two instances can run on different Java majors. Runs every deploy because the
+    # runtime config below is re-templated every deploy and needs openspecimen_java_home.
+    - name: "[{{ _instance.name }}] Per-instance Java (JDK + JAVA_HOME)"
+      ansible.builtin.include_role:
+        name: java
+
     # Per-instance Tomcat INSTALL: own CATALINA_HOME (binary at os_versions.tomcat)
     # + golden conf + DB connectors, all from THIS instance's zip. The binary is
     # laid down only when CATALINA_HOME is absent (the role's own guard); a fresh

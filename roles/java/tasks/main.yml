@@ -1,12 +1,26 @@
 ---
+# Per-instance JDK. Run once per instance from tasks/deploy-instance.yml with that
+# instance's os_versions (its release's component spec). _java_track/_java_package/
+# _java_home derive from os_versions.java.track, so two instances can install (and
+# run on) different JDK majors side by side; the JDKs coexist at the OS level and
+# each instance selects its own via openspecimen_java_home (setenv.sh + systemd unit).
 - name: Load OS-specific variables
   ansible.builtin.include_vars: "{{ ansible_facts['os_family'] }}.yml"
 
-- name: Install OpenJDK 17
+# Expose THIS instance's JDK home so the tomcat role's setenv.sh / systemd unit
+# pin JAVA_HOME per instance (not the shared /etc/environment value).
+- name: Expose this instance's JAVA_HOME
+  ansible.builtin.set_fact:
+    openspecimen_java_home: "{{ _java_home }}"
+
+- name: "Install OpenJDK {{ _java_track }}"
   ansible.builtin.package:
     name: "{{ _java_package }}"
     state: present
 
+# Host-wide default for interactive shells / tooling. With multiple instances this
+# holds the last-deployed instance's JDK; each instance's Tomcat overrides it with
+# its own JAVA_HOME in the unit/setenv, so this is only a convenience default.
 - name: Set JAVA_HOME in /etc/environment
   ansible.builtin.lineinfile:
     path: /etc/environment
