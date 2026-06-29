@@ -1,5 +1,8 @@
 #!/bin/bash
 # Managed by Ansible
+{% if openspecimen_java_home is defined and openspecimen_java_home | trim %}
+export JAVA_HOME="{{ openspecimen_java_home }}"
+{% endif %}
 export JAVA_OPTS="-Dfile.encoding=UTF-8 -Xms{{ (_instance.heap_min | string ~ 'm') if (_instance is defined and (_instance.heap_min | default('') | string | trim | length > 0)) else tomcat_heap_min }} -Xmx{{ (_instance.heap_max | string ~ 'm') if (_instance is defined and (_instance.heap_max | default('') | string | trim | length > 0)) else tomcat_heap_max }}"
 export CATALINA_OPTS="$CATALINA_OPTS -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath={{ openspecimen_data_dir }}/heapdumps"
 CATALINA_PID={{ catalina_base }}/bin/pid.txt

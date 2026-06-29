@@ -12,8 +12,12 @@ Type=forking
 User={{ tomcat_user }}
 Group={{ tomcat_user }}
 
-# JAVA_HOME is written to /etc/environment by the java role (OS-aware path).
+# /etc/environment is a host-wide default; the per-instance Environment below
+# overrides JAVA_HOME so this instance runs on ITS own JDK (per its component spec).
 EnvironmentFile=/etc/environment
+{% if openspecimen_java_home is defined and openspecimen_java_home | trim %}
+Environment=JAVA_HOME={{ openspecimen_java_home }}
+{% endif %}
 Environment=CATALINA_HOME={{ catalina_home | default(tomcat_home) }}
 Environment=CATALINA_BASE={{ catalina_base }}
 Environment=CATALINA_PID={{ catalina_base }}/bin/pid.txt

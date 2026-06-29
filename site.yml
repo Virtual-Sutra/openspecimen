@@ -82,17 +82,15 @@
     - role: common
       when: _full_deploy
       tags: [base]
-    - role: java
-      when: _full_deploy
-      tags: [base]
     - role: mysql
       when:
         - _full_deploy
         - db_managed | default(true)
       tags: [base]
-    # NOTE: tomcat is NO LONGER a host-level role. Each instance installs its own
-    # Tomcat (own CATALINA_HOME + version + connectors) in tasks/deploy-instance.yml
-    # so instances can run different OpenSpecimen/Tomcat versions side by side.
+    # NOTE: java and tomcat are NO LONGER host-level roles. Each instance installs
+    # its own JDK + Tomcat (own version) in tasks/deploy-instance.yml so instances
+    # can run different OpenSpecimen / Tomcat / Java versions side by side. Only
+    # truly shared base layers (OS packages, the MySQL server) stay host-level.
 
   # ── App roles run PER INSTANCE (#72 part 2) ──────────────────────────────────
   # Each entry in _instances gets its own direction detection, WAR/config/plugin
