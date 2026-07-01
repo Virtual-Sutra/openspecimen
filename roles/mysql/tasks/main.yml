@@ -156,14 +156,43 @@
   changed_when: false
   when: ansible_facts['os_family'] == 'Debian'
 
-- name: Reinitialize MySQL data directory (Debian, root auth broken)
-  # A re-used instance may have root on an unknown password. Wipe the data
-  # directory - --initialize-insecure re-creates it with an empty-password root,
-  # and our mysqld.cnf (written before install) is applied from first init.
-  # Skipped on a fresh install, where the empty-password root already answers.
+# Before any reinit, positively confirm there is no user data to lose. The wipe
+# below is only ever safe when the data dir holds nothing but the system schemas
+# (mysql/sys/performance_schema) - i.e. a genuinely fresh box. Any other database
+# directory (e.g. openspecimen / os_*) means live data: refuse to wipe.
+- name: Scan for existing user databases before reinit (Debian)
+  ansible.builtin.find:
+    paths: /var/lib/mysql
+    file_type: directory
+    excludes: ['mysql', 'sys', 'performance_schema']
+  register: _mysql_userdbs
   when:
     - ansible_facts['os_family'] == 'Debian'
     - _mysql_root_socket_debian.rc != 0
+
+- name: Refuse to reinit a MySQL data directory that holds user databases (Debian)
+  ansible.builtin.fail:
+    msg: >-
+      MySQL root is not reachable over the socket with no password, but the data
+      directory holds user database(s):
+      {{ _mysql_userdbs.files | map(attribute='path') | map('basename') | join(', ') }}.
+      Refusing to wipe /var/lib/mysql. Restore root auth manually (auth_socket, or
+      the known root password) and re-run.
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - _mysql_root_socket_debian.rc != 0
+    - (_mysql_userdbs.matched | default(0)) > 0
+
+- name: Reinitialize MySQL data directory (Debian, fresh box with broken root auth)
+  # Only reached when root auth is broken AND the data dir has no user databases
+  # (fresh box, or a preseed miss on first install). Wipe + --initialize-insecure
+  # re-creates it with an empty-password root, and our mysqld.cnf (written before
+  # install) is applied from first init. A re-used instance with live data fails
+  # the guard above instead of being wiped.
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - _mysql_root_socket_debian.rc != 0
+    - (_mysql_userdbs.matched | default(0)) == 0
   block:
     - name: Stop MySQL before data directory wipe
       ansible.builtin.service:
