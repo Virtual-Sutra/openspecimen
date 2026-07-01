@@ -94,6 +94,7 @@
     owner: root
     group: root
     mode: '0644'
+  register: _mysqld_cnf
 
 # ── Install and start ─────────────────────────────────────────────────────────
 
@@ -101,12 +102,26 @@
   ansible.builtin.package:
     name: "{{ _mysql_package }}"
     state: present
+  register: _mysql_install
 
 - name: Ensure MySQL is started and enabled
   ansible.builtin.service:
     name: "{{ _mysql_service }}"
     state: started
     enabled: true
+
+# A fresh install (or the Debian reinit path) applies mysqld.cnf at data-dir init,
+# so no restart is needed there. But when the config changes on an ALREADY-installed
+# server (e.g. adding mysql_native_password=ON on a re-run), the running server
+# still has the old settings - restart it so the new options take effect before
+# any DB user is created.
+- name: Restart MySQL to apply config changes on an existing install
+  ansible.builtin.service:
+    name: "{{ _mysql_service }}"
+    state: restarted
+  when:
+    - _mysqld_cnf is changed
+    - _mysql_install is not changed
 
 # ── RHEL 9: initialise root access ───────────────────────────────────────────
 # MySQL Community on RHEL sets a temporary root password printed in the error
