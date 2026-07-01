@@ -171,23 +171,27 @@
     # actually SERVES the app AFTER that final restart. Immune to the catalina.out
     # first-pass timing.
     #
-    # Check through the real serving path. When app_url is set, the instance is
-    # Apache/ALB-fronted (typically AJP) and a direct localhost:port hit answers a
-    # 302/403 (the request Host != app.url) - so the old 200|401 check looped
-    # forever even though the app was up. Instead hit app_url/ui-app/ through the
-    # LOCAL Apache: --resolve pins the app hostname to 127.0.0.1 so the check tests
-    # THIS box's Apache -> AJP -> Tomcat path without depending on external DNS/ALB
-    # (-k: this is a liveness probe, not a cert check - verify-public-url does the
-    # cert-sensitive check from the control node). Only when no app_url is set
-    # (direct-Tomcat, no proxy) do we fall back to the localhost REST endpoint.
+    # Check through the real serving path. An Apache-fronted instance (typically
+    # AJP) answers a direct localhost:port hit with a 302/403 (request Host !=
+    # app.url), so the old 200|401 check looped forever even though the app was up.
+    #
+    # When Apache is the LOCAL front-end (apache_enabled, which auto-enables when
+    # app_url is set), probe app_url/ui-app/ through it: --resolve pins the app
+    # hostname to 127.0.0.1:<app-port> so the check tests THIS box's Apache -> AJP
+    # -> Tomcat path without depending on external DNS/ALB (-k: liveness probe, not
+    # a cert check - verify-public-url does the cert-sensitive check from the
+    # control node). Otherwise (direct-Tomcat, or ALB-direct where 443 is the ALB
+    # not a local listener) probe Tomcat on localhost:port and accept 200|302|401|
+    # 403 - a 302 to an https app.url still means the app is up and responding.
     - name: "[{{ _instance.name }}] Build the readiness-check command"
       ansible.builtin.set_fact:
         _ready_cmd: >-
-          {% if openspecimen_app_url | default('') | trim | length > 0 -%}
-          {% set _hp = openspecimen_app_url | regex_replace('^https?://', '') | regex_replace('/.*$', '') -%}
+          {% set _app = openspecimen_app_url | default('') | trim -%}
+          {% if _app | length > 0 and (apache_enabled | default(true) | bool) -%}
+          {% set _hp = _app | regex_replace('^https?://', '') | regex_replace('/.*$', '') -%}
           {% set _h = _hp.split(':')[0] -%}
-          {% set _p = _hp.split(':')[1] if ':' in _hp else ('443' if openspecimen_app_url.startswith('https') else '80') -%}
-          curl -sf -k -o /dev/null -w "%{http_code}" --resolve {{ _h }}:{{ _p }}:127.0.0.1 {{ openspecimen_app_url | regex_replace('/+$', '') }}/ui-app/ | grep -qE '^200$'
+          {% set _p = _hp.split(':')[1] if ':' in _hp else ('443' if _app.startswith('https') else '80') -%}
+          curl -sf -k -o /dev/null -w "%{http_code}" --resolve {{ _h }}:{{ _p }}:127.0.0.1 {{ _app | regex_replace('/+$', '') }}/ui-app/ | grep -qE '^200$'
           {%- else -%}
           curl -sf -o /dev/null -w "%{http_code}" http://localhost:{{ openspecimen_port }}{{ openspecimen_context_path | default('/openspecimen') }}/rest/ng/config-settings/app-props | grep -qE '^(200|302|401|403)$'
           {%- endif %}
