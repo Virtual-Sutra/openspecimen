@@ -38,6 +38,9 @@
     owner: root
     group: root
     mode: '0644'
+    # Always refresh: a box that fetched the pre-renewal (expired) key on an
+    # earlier run must pick up the renewed key, and the key rotates over time.
+    force: true
   when: ansible_facts['os_family'] == 'Debian'
 
 - name: Add MySQL 8.4 LTS APT repository (Debian)

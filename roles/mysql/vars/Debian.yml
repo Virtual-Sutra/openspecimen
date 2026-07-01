@@ -13,5 +13,11 @@ _mysql_socket:   "/var/run/mysqld/mysqld.sock"
 # MySQL APT repo (Debian/Ubuntu). Component pins the 8.4 LTS track; the repo
 # path segment (ubuntu|debian) is derived from the distribution at run time.
 _mysql_apt_component: "mysql-8.4-lts"
-_mysql_apt_key_url: "https://repo.mysql.com/RPM-GPG-KEY-mysql-2023"
+# MySQL's signing key (fingerprint BCA43417C3B485DD128EC6D4B7B3B788A8D3785C).
+# The 2023 key expired 2025-10-23 and was renewed (new expiry 2027-10-23), but
+# MySQL only refreshed the renewed copy on the keyserver + in mysql-apt-config -
+# the standalone repo.mysql.com/RPM-GPG-KEY-mysql-2023 file still serves the
+# EXPIRED key, so apt rejects the repo with EXPKEYSIG. Fetch the renewed key
+# from the Ubuntu keyserver by fingerprint instead.
+_mysql_apt_key_url: "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xBCA43417C3B485DD128EC6D4B7B3B788A8D3785C"
 _mysql_apt_keyring: "/etc/apt/keyrings/mysql.asc"
