@@ -175,8 +175,10 @@
     # AJP) answers a direct localhost:port hit with a 302/403 (request Host !=
     # app.url), so the old 200|401 check looped forever even though the app was up.
     #
-    # When Apache is the LOCAL front-end (apache_enabled, which auto-enables when
-    # app_url is set), probe app_url/ui-app/ through it: --resolve pins the app
+    # When Apache is the LOCAL front-end - same condition as the apache role
+    # include above (apache_enabled | default(false)), so the probe always matches
+    # whether Apache was actually installed - probe app_url/ui-app/ through it:
+    # --resolve pins the app
     # hostname to 127.0.0.1:<app-port> so the check tests THIS box's Apache -> AJP
     # -> Tomcat path without depending on external DNS/ALB (-k: liveness probe, not
     # a cert check - verify-public-url does the cert-sensitive check from the
@@ -187,7 +189,7 @@
       ansible.builtin.set_fact:
         _ready_cmd: >-
           {% set _app = openspecimen_app_url | default('') | trim -%}
-          {% if _app | length > 0 and (apache_enabled | default(true) | bool) -%}
+          {% if _app | length > 0 and (apache_enabled | default(false) | bool) -%}
           {% set _hp = _app | regex_replace('^https?://', '') | regex_replace('/.*$', '') -%}
           {% set _h = _hp.split(':')[0] -%}
           {% set _p = _hp.split(':')[1] if ':' in _hp else ('443' if _app.startswith('https') else '80') -%}
