@@ -14,8 +14,8 @@ component_spec:
     track: "17"
     validated: "17.0.19"
   mysql:
-    track: "8.0"            # 8.4 on RHEL (Community repo)
-    validated: "8.0.46"
+    track: "5.7"
+    validated: "5.7"
   apache:
     track: "2.4"
     validated: "2.4.58"
