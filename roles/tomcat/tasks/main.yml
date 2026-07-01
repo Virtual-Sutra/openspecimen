@@ -68,7 +68,10 @@
   register: tomcat_stat
 
 - name: Install Tomcat (binaries from download, config overlaid from the zip)
-  when: not tomcat_stat.stat.exists
+  # (Re)install on a fresh box OR a version change. When invoked from
+  # deploy-instance.yml the decision is _inst_tomcat_needs_install (compares the
+  # installed version to the spec); standalone it falls back to "not installed".
+  when: _inst_tomcat_needs_install | default(not tomcat_stat.stat.exists) | bool
   block:
     # Download straight onto the target VM (it already has outbound internet for
     # the apt/dnf package installs). get_url is idempotent and verifies the
@@ -96,6 +99,9 @@
         extra_opts: ['--strip-components=1']
         owner: "{{ tomcat_user }}"
         group: "{{ tomcat_user }}"
+      # A binary swap (upgrade) must restart to load the new version, even if the
+      # WAR/config didn't otherwise change.
+      notify: restart openspecimen
 
     - name: Remove the downloaded Tomcat tarball
       ansible.builtin.file:

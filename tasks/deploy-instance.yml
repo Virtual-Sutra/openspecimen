@@ -134,11 +134,43 @@
         path: "{{ catalina_home }}/bin/startup.sh"
       register: _inst_tomcat_stat
 
-    - name: "[{{ _instance.name }}] Install this instance's Tomcat (binary + conf + connectors)"
+    - name: "[{{ _instance.name }}] Detect the installed Tomcat version"
+      # Tomcat's own version script. "Server version: Apache Tomcat/9.0.59" gives
+      # the version to compare against the spec's tomcat_version. JAVA_HOME comes
+      # from the existing setenv.sh (this only runs on a prior install). If it can't
+      # be read, stdout is empty -> treated as a version mismatch -> reinstall.
+      ansible.builtin.shell: >-
+        set -o pipefail;
+        {{ catalina_home }}/bin/version.sh 2>/dev/null
+        | awk -F/ '/^Server version:/{print $2}' | tr -d '[:space:]'
+      args:
+        executable: /bin/bash
+      register: _inst_tomcat_ver
+      changed_when: false
+      failed_when: false
+      when: _inst_tomcat_stat.stat.exists
+
+    - name: "[{{ _instance.name }}] Decide whether Tomcat needs (re)installing"
+      # (Re)install when Tomcat is absent OR the installed version differs from the
+      # spec's tomcat_version. Compare the first three components (server.number is
+      # 4-part). An unreadable/empty version also forces a reinstall (fail-safe).
+      ansible.builtin.set_fact:
+        _inst_tomcat_needs_install: >-
+          {{ (not _inst_tomcat_stat.stat.exists)
+             or ((_inst_tomcat_ver.stdout | default('') | trim).split('.')[:3] | join('.') != os_versions.tomcat) }}
+
+    - name: "[{{ _instance.name }}] Log Tomcat (re)install decision"
+      ansible.builtin.debug:
+        msg: >-
+          {% if not _inst_tomcat_stat.stat.exists %}Fresh Tomcat install: {{ os_versions.tomcat }}.
+          {% elif _inst_tomcat_needs_install | bool %}Tomcat upgrade: installed {{ _inst_tomcat_ver.stdout | default('unknown') | trim }} -> spec {{ os_versions.tomcat }} - re-installing binaries.
+          {% else %}Tomcat already at {{ os_versions.tomcat }} - no reinstall.{% endif %}
+
+    - name: "[{{ _instance.name }}] Install/upgrade this instance's Tomcat (binary + conf + connectors)"
       ansible.builtin.include_role:
         name: tomcat
         tasks_from: main
-      when: not _inst_tomcat_stat.stat.exists
+      when: _inst_tomcat_needs_install | bool
 
     - name: "[{{ _instance.name }}] Per-instance Tomcat runtime (CATALINA_BASE, ports, unit)"
       ansible.builtin.include_role:
