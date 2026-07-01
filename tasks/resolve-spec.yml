@@ -36,8 +36,9 @@
   ansible.builtin.debug:
     msg: >-
       No component-specs/{{ _release_key }}.yml - using the master.yml fallback
-      (matches v12.2.RC12). Add a dedicated component-specs/{{ _release_key }}.yml
-      to pin different versions; generate one with discover-versions.yml (ops).
+      (Tomcat 11, MySQL 8.4). Add a dedicated component-specs/{{ _release_key }}.yml
+      to pin different versions (e.g. Tomcat 9 for a lower release); generate one
+      with discover-versions.yml (ops).
   when: not _spec_stat.stat.exists
 
 - name: "Spec: compute os_versions (spec + customer override)"

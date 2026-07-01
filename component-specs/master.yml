@@ -3,23 +3,26 @@
 #
 # This is the SINGLE fallback spec: any release selected that does not have its
 # own component-specs/<release>.yml uses THIS file (resolve-spec.yml), and every
-# master-* snapshot (openspecimen_master-DD-MM-YYYY) normalises to it. Kept in
-# step with v12.2.RC12. Per-customer overrides still apply via
-# component_versions_override in the customer inventory.
+# master-* snapshot (openspecimen_master-DD-MM-YYYY) normalises to it.
+# Per-customer overrides still apply via component_versions_override in the
+# customer inventory.
 
 component_spec:
   release: "openspecimen_master"
 
-  # Pinned exact — installed by the tomcat role (#91). Same as v12.2.RC12.
-  tomcat: "9.0.111"
+  # Pinned exact — installed by the tomcat role (#91). master runs Tomcat 11;
+  # the pinned lower releases (v11.2.RC17, v12.2.RC12) stay on Tomcat 9.
+  # 3-part download version (archive.apache.org artifact). Confirm this exact
+  # 11.0.x matches the Tomcat conf bundled in the current master release zip.
+  tomcat: "11.0.2"
 
-  # OS packages — supported track + validated build (same as v12.2.RC12).
+  # OS packages — supported track + validated build.
   java:
     track: "17"
     validated: "17.0.19"
   mysql:
-    track: "5.7"
-    validated: "5.7"
+    track: "8.4"           # 8.4 LTS - latest patch from the MySQL Community repo
+    validated: "8.4"
   apache:
     track: "2.4"
     validated: "2.4.58"

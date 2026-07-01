@@ -14,8 +14,8 @@ component_spec:
     track: "17"
     validated: "17.0.19"
   mysql:
-    track: "5.7"
-    validated: "5.7"
+    track: "8.4"           # 8.4 LTS - latest patch from the MySQL Community repo
+    validated: "8.4"
   apache:
     track: "2.4"
     validated: "2.4.58"
