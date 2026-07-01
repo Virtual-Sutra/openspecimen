@@ -27,21 +27,19 @@
   become: true
 
   pre_tasks:
-    # Resolve `_instances` from openspecimen_instances (ADR-006, #72).
-    - name: Resolve instances
+    # Resolve `_instances` (one instance from the flat customer vars, ADR-009).
+    - name: Resolve instance
       ansible.builtin.import_tasks: tasks/resolve-instances.yml
 
     # Resolve the SHARED component spec - drives the host-level Java install.
-    # Per-instance Tomcat versions are resolved AGAIN per instance (their own
-    # os_versions) in tasks/deploy-instance.yml. Base release = explicit
-    # openspecimen_base_release, else the global -e openspecimen_release, else the
-    # first instance's release.
+    # The instance's Tomcat version is resolved AGAIN (its own os_versions) in
+    # tasks/deploy-instance.yml. Base release = explicit openspecimen_base_release,
+    # else the instance's release.
     - name: Determine base release (shared Java / host spec)
       ansible.builtin.set_fact:
         _base_release: >-
           {{ openspecimen_base_release | default('', true)
-             or openspecimen_release | default('', true)
-             or ((openspecimen_instances | default([]) | first).release | default('')) }}
+             or ((_instances | first).release | default('')) }}
       tags: [always]
 
     - name: Resolve host-level component spec (base release)

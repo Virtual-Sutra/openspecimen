@@ -2,7 +2,7 @@
 # Day-2: Update app.url in openspecimen.properties and restart. Per instance (#102).
 # Usage:
 #   ansible-playbook -i inventory/customers/<name>/ update-app-url.yml -e app_url=https://os.example.com
-#   # app.url is per-instance - on multi-instance hosts target one:  ... -e instance=<name>
+#   # app.url comes from the customer folder config (ADR-009)
 # After running, also update in the app UI: Settings -> Common -> Allowed Request Origins.
 - name: Update app.url in openspecimen.properties
   hosts: openspecimen

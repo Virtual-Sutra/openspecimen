@@ -1,80 +1,41 @@
 ---
-# Resolve `_instances` from openspecimen_instances (ADR-006, #72).
+# Resolve `_instances` — a single OpenSpecimen instance from the flat customer
+# vars (ADR-009). One instance per customer folder is the deployment model; a
+# multi-instance VM is expressed as multiple customer folders, each overriding
+# the colliding values (port, context_path, service_name, catalina_base,
+# mysql_db_name) explicitly. There is no list, no name/index derivation, and no
+# `-e instance=<name>` selection any more.
 #
-# openspecimen_instances is the deployment model (single source of truth).
-# group_vars/all.yml ships a ONE-instance default using the standard single-host
-# layout; a customer inventory overrides it with N entries to run multiple
-# instances (infrequent). Here we normalise each entry, deriving the per-instance
-# fields (service_name, catalina_base, ports, dirs, markers) from name + index
-# when not given explicitly, assert ports are unique, and apply -e instance=<name>
-# selection. Every playbook that acts on instances (site.yml, cleanup.yml,
-# rollback, status, update-*) imports this so they share one resolution.
+# `_instances` stays a one-element list so every playbook that acts on it
+# (site.yml, cleanup.yml, status.yml, update-*.yml) shares one shape. The single
+# entry is byte-for-byte the legacy single-host layout.
 
-- name: Require at least one instance
-  ansible.builtin.fail:
-    msg: >-
-      openspecimen_instances is empty/undefined. group_vars/all.yml ships a
-      single default; if you override it in inventory, declare at least one
-      instance (name + db_name + db_user + db_password + app_url).
-  when: (openspecimen_instances | default([]) | length) == 0
-
-- name: Normalise declared instances (derive per-instance fields)
+- name: Resolve the single instance from flat vars
   ansible.builtin.set_fact:
-    _instances: "{{ _instances | default([]) + [_derived] }}"
-  loop: "{{ openspecimen_instances | default([]) }}"
-  loop_control:
-    index_var: idx
-    label: "{{ item.name }}"
-  vars:
-    _derived:
-      name: "{{ item.name }}"
-      context_path: "{{ item.context_path | default('/openspecimen') }}"
-      service_name: "{{ item.service_name | default('openspecimen-' ~ item.name) }}"
-      # Per-instance standalone Tomcat: HOME == BASE under the instance root, so
-      # each instance owns its own Tomcat binary + version. The single default
-      # instance (group_vars/all.yml) pins both to tomcat_home (legacy layout).
-      catalina_home: "{{ item.catalina_home | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/tomcat') }}"
-      catalina_base: "{{ item.catalina_base | default(item.catalina_home | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/tomcat')) }}"
-      http_port: "{{ item.http_port | default((openspecimen_port_base | default(8080) | int) + idx * 10) }}"
-      ajp_port: "{{ item.ajp_port | default((openspecimen_ajp_port_base | default(8009) | int) + idx * 10) }}"
-      shutdown_port: "{{ item.shutdown_port | default((openspecimen_shutdown_port_base | default(8005) | int) + idx * 10) }}"
-      data_dir: "{{ item.data_dir | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/data') }}"
-      plugin_dir: "{{ item.plugin_dir | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/plugins') }}"
-      backup_dir: "{{ item.backup_dir | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/backup') }}"
-      release_marker: "{{ item.release_marker | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/.release') }}"
-      deploy_success_marker: "{{ item.deploy_success_marker | default(openspecimen_instances_base ~ '/' ~ item.name ~ '/.deploy_success') }}"
-      release: "{{ item.release | default(openspecimen_release | default('')) }}"
-      db_name: "{{ item.db_name }}"
-      db_user: "{{ item.db_user }}"
-      db_password: "{{ item.db_password | default('') }}"
-      db_host: "{{ item.db_host | default(mysql_db_host) }}"
-      heap_max: "{{ item.heap_max | default('') }}"
-      heap_min: "{{ item.heap_min | default('') }}"
-      app_url: "{{ item.app_url | default('') }}"
-      node_name: "{{ item.node_name | default(item.name) }}"
-      paid_plugins: "{{ item.paid_plugins | default([]) }}"
-      customer_plugins: "{{ item.customer_plugins | default([]) }}"
-  when: (openspecimen_instances | default([]) | length) > 0
-
-- name: Assert instance ports are unique across the host
-  ansible.builtin.assert:
-    that:
-      - (_instances | map(attribute='http_port') | list | unique | length) == (_instances | length)
-      - (_instances | map(attribute='ajp_port') | list | unique | length) == (_instances | length)
-      - (_instances | map(attribute='shutdown_port') | list | unique | length) == (_instances | length)
-    fail_msg: >-
-      http/ajp/shutdown ports must be unique across openspecimen_instances -
-      set explicit *_port values or space the instances out.
-
-
-- name: Limit to a single instance when -e instance=<name>
-  ansible.builtin.set_fact:
-    _instances: "{{ _instances | selectattr('name', 'equalto', instance) | list }}"
-  when: instance is defined and instance | trim
-
-- name: Fail when -e instance matches no declared instance
-  ansible.builtin.fail:
-    msg: "instance='{{ instance }}' matches none of: {{ openspecimen_instances | default([{'name': 'openspecimen'}]) | map(attribute='name') | list }}"
-  when:
-    - instance is defined and instance | trim
-    - (_instances | length) == 0
+    _instances:
+      - name:          "{{ openspecimen_instance_name | default('openspecimen') }}"
+        service_name:  "{{ openspecimen_service_name | default('openspecimen') }}"
+        context_path:  "{{ openspecimen_context_path | default('/openspecimen') }}"
+        catalina_home: "{{ catalina_home | default(tomcat_home) }}"
+        catalina_base: "{{ catalina_base | default(tomcat_home) }}"
+        http_port:     "{{ openspecimen_port | int }}"
+        ajp_port:      "{{ (apache_ajp_port | default(openspecimen_ajp_port | default(8009))) | int }}"
+        shutdown_port: "{{ openspecimen_shutdown_port | default(8005) | int }}"
+        data_dir:      "{{ openspecimen_data_dir }}"
+        plugin_dir:    "{{ openspecimen_plugin_dir }}"
+        backup_dir:    "{{ openspecimen_backup_dir }}"
+        release_marker:        "{{ openspecimen_release_marker }}"
+        deploy_success_marker: "{{ openspecimen_deploy_success_marker }}"
+        release:       "{{ openspecimen_release | default('') }}"
+        db_name:       "{{ mysql_db_name }}"
+        db_user:       "{{ mysql_db_user }}"
+        db_password:   "{{ mysql_db_password | default('') }}"
+        db_host:       "{{ mysql_db_host }}"
+        # Empty → the tomcat role's own auto-sizing / tomcat_heap_*_override wins
+        # in setenv.sh (matches the legacy single-instance default exactly).
+        heap_max:      ""
+        heap_min:      ""
+        app_url:       "{{ openspecimen_app_url | default('') }}"
+        node_name:     "{{ openspecimen_node_name | default('openspecimen') }}"
+        paid_plugins:      "{{ openspecimen_paid_plugins | default([]) }}"
+        customer_plugins:  "{{ openspecimen_customer_plugins | default([]) }}"

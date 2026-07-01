@@ -6,7 +6,7 @@ Ansible automation for deploying and upgrading [OpenSpecimen](https://github.com
 
 - **Fresh install** (`site.yml`) - installs Java, MySQL (optional), Tomcat, and OpenSpecimen from a release zip
 - **Upgrade** (`site.yml`) - a normal run on an existing install upgrades app-only (WAR + plugins) with automatic WAR/config and pre-upgrade database backup; `-e force_deploy=true` also re-runs the base roles
-- **Multiple instances per host** - `openspecimen_instances` (a list) is the deployment model; the default is one instance, override it to run N isolated instances on one VM. Target one with `-e instance=<name>`. See [`docs/MULTI-INSTANCE.md`](docs/MULTI-INSTANCE.md)
+- **One instance per customer folder** (ADR-009) - each `inventory/customers/<name>/` deploys a single OpenSpecimen instance from flat vars. Two environments on one VM (e.g. prod + test) are two customer folders pointing at the same host, each overriding the colliding values (`openspecimen_port`, `openspecimen_context_path`, `openspecimen_service_name`, `catalina_base`, DB) explicitly
 - **Plugin tiers** - `openspecimen_paid_plugins` (→ `plugins/paid/`) and `openspecimen_customer_plugins` (→ `plugins/zustomer/`) extract JARs from named zips alongside the release zip
 - **Rollback** - downgrade detection auto-restores the matching backup; `rollback.yml` rolls back artifacts + config, and optionally the database (`-e restore_db=true`)
 - **Day-2 playbooks** - `update-heap.yml`, `update-app-url.yml`, `update-db-pool.yml`, `status.yml`, `db-backup.yml`, `db-restore.yml`, `cleanup.yml`
@@ -55,7 +55,7 @@ roles/
   apache/               - optional TLS-terminating reverse proxy (skipped unless apache_enabled)
 component-specs/        - per-release pinned component versions (Tomcat/Java/MySQL/Apache)
 inventory/
-  group_vars/all.yml    - default variable values (incl. openspecimen_instances)
+  group_vars/all.yml    - default variable values (flat single-instance layout)
   customers/_template/  - copy this for each new customer
   hosts-ec2.sample      - example hosts file for EC2 (controller → target over SSH)
   hosts-local.sample    - same-host inventory (run on the box, ansible_connection=local)

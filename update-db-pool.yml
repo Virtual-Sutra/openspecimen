@@ -2,7 +2,7 @@
 # Day-2: Update JDBC pool and restart. Per instance (#102).
 # Usage:
 #   ansible-playbook -i inventory/customers/<name>/ update-db-pool.yml -e pool_max_active=150
-#   #   optionally -e pool_min_idle=20 ; one instance:  -e instance=<name>
+#   #   optionally -e pool_min_idle=20
 - name: Update JDBC connection pool settings
   hosts: openspecimen
   become: true

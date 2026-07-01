@@ -1,6 +1,6 @@
 ---
 # Per-instance app.url update (#102). Looped from update-app-url.yml.
-# app.url is per-instance: target one with -e instance=<name> on multi-instance hosts.
+# app.url comes from the customer folder config (one instance per folder, ADR-009).
 - name: "[{{ _instance.name }}] Backup openspecimen.properties"
   ansible.builtin.include_tasks: tasks/backup_config.yml
   vars:
