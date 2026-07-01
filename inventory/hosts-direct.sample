@@ -8,8 +8,8 @@
 #   ansible-playbook -i inventory/customers/<name>/ site.yml
 #
 #   # site.yml auto-detects fresh vs upgrade. A normal upgrade is app-only
-#   # (openspecimen/plugins/apache); base roles are skipped. Add
-#   # -e force_deploy=true to force a full re-deploy of the entire stack.
+#   # (openspecimen/plugins/apache); base roles are skipped. A fresh install
+#   # (no .release marker) runs the full stack automatically.
 #   ansible-playbook -i inventory/customers/<name>/ site.yml   # upgrade
 # ─────────────────────────────────────────────────────────────────────────────
 

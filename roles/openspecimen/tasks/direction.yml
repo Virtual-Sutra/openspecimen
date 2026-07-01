@@ -7,7 +7,7 @@
 #   no-op     - requested version == installed AND .deploy_success marker shows
 #               the prior deploy reached its very last task AND every paid +
 #               customer plugin JAR is present at the matching version → end play
-#               (override with -e force_deploy=true)
+#               (idempotent: a re-run of the current release is a no-op)
 #   deploy    - fresh install, upgrade, same-version run after a failed deploy
 #               (.deploy_success stale), or a missing/new plugin → continue with
 #               the rest of the play
@@ -92,7 +92,8 @@
 #   2. .deploy_success marker exists and references the same version
 #      (proves the prior deploy reached the very last task - no partial state)
 #   3. Every paid + customer plugin has a matching JAR on disk
-# Override with: -e force_deploy=true   (re-runs the deploy even when current)
+# A same-version re-run after a FAILED deploy still proceeds (the .deploy_success
+# marker is stale / absent), so no force flag is needed to recover.
 
 # Use a default so this also works against inventories that don't yet declare
 # openspecimen_deploy_success_marker (e.g. the ops repo's inventory/group_vars/all.yml
@@ -118,7 +119,6 @@
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
     - _last_deploy_success_release == openspecimen_release
-    - not (force_deploy | default(false) | bool)
 
 - name: Probe installed paid plugin JARs
   ansible.builtin.find:
@@ -130,7 +130,6 @@
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
     - _last_deploy_success_release == openspecimen_release
-    - not (force_deploy | default(false) | bool)
 
 - name: Probe installed customer plugin JARs
   ansible.builtin.find:
@@ -142,7 +141,6 @@
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
     - _last_deploy_success_release == openspecimen_release
-    - not (force_deploy | default(false) | bool)
 
 # Detect orphan JARs - those present on disk but NOT in the current inventory
 # list. The orphan list is consumed twice:
@@ -191,7 +189,6 @@
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
     - _last_deploy_success_release == openspecimen_release
-    - not (force_deploy | default(false) | bool)
 
 # ── Config drift detection ────────────────────────────────────────────────────
 # Probe-render openspecimen.properties to a temp location and SHA-256 compare
@@ -209,7 +206,6 @@
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
     - _last_deploy_success_release == openspecimen_release
-    - not (force_deploy | default(false) | bool)
 
 - name: Compute live vs probe config checksums
   ansible.builtin.stat:
@@ -226,7 +222,6 @@
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
     - _last_deploy_success_release == openspecimen_release
-    - not (force_deploy | default(false) | bool)
 
 - name: Remove config probe
   ansible.builtin.file:
@@ -237,7 +232,6 @@
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
     - _last_deploy_success_release == openspecimen_release
-    - not (force_deploy | default(false) | bool)
 
 - name: Set config-drift fact
   ansible.builtin.set_fact:
@@ -248,7 +242,6 @@
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
     - _last_deploy_success_release == openspecimen_release
-    - not (force_deploy | default(false) | bool)
 
 # ── Fast-path selection ──────────────────────────────────────────────────────
 # Plugins-only and config-only are independent - both can be true on the same
@@ -262,7 +255,6 @@
       {{ _direction.stdout == 'deploy'
          and _installed_release == openspecimen_release
          and _last_deploy_success_release == openspecimen_release
-         and not (force_deploy | default(false) | bool)
          and not (_all_paid_current | default(true)
                   and _all_customer_current | default(true)
                   and _no_orphans | default(true)) }}
@@ -270,7 +262,6 @@
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
     - _last_deploy_success_release == openspecimen_release
-    - not (force_deploy | default(false) | bool)
 
 - name: Detect config-only change
   ansible.builtin.set_fact:
@@ -278,14 +269,12 @@
       {{ _direction.stdout == 'deploy'
          and _installed_release == openspecimen_release
          and _last_deploy_success_release == openspecimen_release
-         and not (force_deploy | default(false) | bool)
          and (_config_changed | default(false))
          and not (_plugins_only_change | default(false)) }}
   when:
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
     - _last_deploy_success_release == openspecimen_release
-    - not (force_deploy | default(false) | bool)
 
 - name: Announce plugins-only deploy
   ansible.builtin.debug:
@@ -315,12 +304,11 @@
       - "✓ Already at openspecimen_release={{ openspecimen_release }} with all plugins matching and config unchanged."
       - "  paid_plugins    : {{ openspecimen_paid_plugins | default([]) }}"
       - "  customer_plugins: {{ openspecimen_customer_plugins | default([]) }}"
-      - "  Skipping the deploy. Pass -e force_deploy=true to override."
+      - "  Skipping the deploy (already current - nothing to do)."
   when:
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
     - _last_deploy_success_release == openspecimen_release
-    - not (force_deploy | default(false) | bool)
     - _all_paid_current | default(false)
     - _all_customer_current | default(false)
     - _no_orphans | default(false)
@@ -333,7 +321,6 @@
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
     - _last_deploy_success_release == openspecimen_release
-    - not (force_deploy | default(false) | bool)
     - _all_paid_current | default(false)
     - _all_customer_current | default(false)
     - _no_orphans | default(false)
@@ -352,5 +339,4 @@
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release
     - _last_deploy_success_release == openspecimen_release
-    - not (force_deploy | default(false) | bool)
     - not (_all_paid_current | default(true) and _all_customer_current | default(true) and _no_orphans | default(true))

@@ -8,8 +8,6 @@
 #       mysql, tomcat) run, then the app roles.
 #   - Upgrade (existing install)         -> FAST app-only: base roles are
 #       skipped; app roles (openspecimen, plugins, apache) run.
-#   - force_deploy=true                  -> FULL (fully unified): base roles are
-#       re-run even on an upgrade.
 # The base roles are also tagged `base`, so you can force the choice directly:
 #   --skip-tags base   (app-only)      --tags base   (base only).
 #
@@ -18,9 +16,6 @@
 #     -e openspecimen_release=openspecimen_v12.3 \
 #     -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
 #     -e mysql_db_password=<password>
-#
-#   # Full re-deploy (re-run base roles on an existing install):
-#   #   ... -e force_deploy=true
 
 - name: Deploy OpenSpecimen
   hosts: openspecimen
@@ -51,8 +46,8 @@
     # Host-level deploy scope. Direction (deploy / rollback / no-op) and the
     # artifact pre-flight are now detected PER INSTANCE in tasks/deploy-instance.yml.
     # Here we only decide whether the host-level base roles (common/java/mysql/
-    # tomcat) need to run: when ANY instance is fresh (missing/empty .release
-    # marker) or when force_deploy is set.
+    # tomcat) need to run: when the instance is fresh (missing/empty .release
+    # marker).
     - name: Probe each instance .release marker (host-level base gate)
       ansible.builtin.slurp:
         src: "{{ item.release_marker }}"
@@ -67,8 +62,7 @@
     - name: Determine deploy scope (full base+app vs app-only)
       ansible.builtin.set_fact:
         _full_deploy: >-
-          {{ (force_deploy | default(false) | bool)
-             or (_marker_probe.results
+          {{ (_marker_probe.results
                  | selectattr('content', 'undefined') | list | length > 0)
              or (_marker_probe.results
                  | selectattr('content', 'defined')
@@ -76,7 +70,7 @@
                  | select('equalto', '') | list | length > 0) }}
 
   roles:
-    # ── Base roles - fresh install or force_deploy only (skipped on fast upgrades)
+    # ── Base roles - fresh install only (skipped on fast upgrades)
     - role: common
       when: _full_deploy
       tags: [base]

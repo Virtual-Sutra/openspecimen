@@ -12,8 +12,10 @@
 #                           openspecimen_release as target_version)
 #   3. (neither)          : restore from the most recent backup (mtime)
 #
-# Safety: halts before stopping the service if Liquibase has applied changesets
-# after the backup was created. Override with allow_downgrade=true.
+# Rollback restores the prior deploy backup END TO END - WAR, config, plugins,
+# and (for local MySQL) the database dump together - so the schema is always
+# brought back with the app. There is no separate schema-drift concern and no
+# allow_downgrade override.
 
 # ── 1. Resolve which backup to restore ───────────────────────────────────────
 
@@ -43,8 +45,7 @@
       How to fix:
         - There is nothing to roll back to. To deploy an older version,
           run site.yml with -e openspecimen_release=<older-version> and
-          -e allow_downgrade=true, and place the older release zip in
-          openspecimen_builds_dir.
+          place the older release zip in openspecimen_builds_dir.
   when: _backup_dirs.files | length == 0
 
 # Compute most-recent backup (used when neither backup_timestamp nor
@@ -107,7 +108,7 @@
       How to fix:
         - Pick a version that has a backup directory above, OR
         - Restore the database from an RDS snapshot taken before that version's
-          rollout and re-run with -e allow_downgrade=true on site.yml.
+          rollout, then re-run.
   when: _restore_path == 'NO_MATCH'
 
 - name: Verify the resolved backup exists
@@ -157,103 +158,18 @@
       - "Backup mtime  : {{ '%Y-%m-%d %H:%M:%S' | strftime(_restore_stat.stat.mtime) }}"
       - "WAR size      : {{ (_war_stat.stat.size / 1024 / 1024) | round(1) }} MB"
 
-# Probe the DB dump up-front (#98) so the schema-drift halt below can be skipped
-# ONLY when a restore will actually happen (restore_db AND a dump present).
-# Without the dump, restore_db cannot bring the schema back, so drift must still
-# halt - otherwise we'd silently land an old WAR on a forward-migrated schema.
+# Probe the DB dump in the backup. Rollback restores it as part of the
+# end-to-end revert (local MySQL). RDS / Oracle / large-DB manual-backup
+# upgrades have no local dump - those warn below and need an RDS-snapshot /
+# manual DB restore to complete the rollback.
 - name: Probe database dump in backup
   ansible.builtin.find:
     paths:    "{{ _restore_path }}/db"
     patterns: "*.sql.gz"
   register: _db_dump
   when:
-    - restore_db | default(false) | bool
     - db_managed | default(true) | bool
     - db_type | default('mysql') == 'mysql'
-
-# ── 2b. Schema-incompatible downgrade detection ──────────────────────────────
-
-- name: Read live release marker (for diagnostics)
-  ansible.builtin.slurp:
-    src: "{{ openspecimen_release_marker }}"
-  register: _live_marker_slurp
-  failed_when: false
-  changed_when: false
-
-- name: Read backup release marker (for diagnostics)
-  ansible.builtin.slurp:
-    src: "{{ _restore_path }}/.release"
-  register: _backup_marker_slurp
-  failed_when: false
-  changed_when: false
-
-- name: Count Liquibase migrations applied after the backup
-  ansible.builtin.shell: |
-    set -eo pipefail
-    mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' \
-      -h {{ mysql_db_host }} {{ mysql_db_name }} \
-      -sNe "SELECT COUNT(*) FROM DATABASECHANGELOG
-            WHERE DATEEXECUTED > FROM_UNIXTIME({{ _restore_stat.stat.mtime | int }});"
-  args:
-    executable: /bin/bash
-  register: _changelog_count
-  changed_when: false
-  failed_when: false
-  no_log: true
-  when:
-    - db_type | default('mysql') == 'mysql'
-    - mysql_db_password is defined
-
-- name: Halt rollback if schema has moved forward since backup
-  ansible.builtin.fail:
-    msg: |
-      ✗ Schema-incompatible downgrade detected.
-
-      Customer:           {{ inventory_hostname }}
-      Live release:       {{ (_live_marker_slurp.content | b64decode | trim) if _live_marker_slurp.content is defined else '(no marker)' }}
-      Backup release:     {{ (_backup_marker_slurp.content | b64decode | trim) if _backup_marker_slurp.content is defined else '(no marker)' }}
-      Backup mtime:       {{ '%Y-%m-%d %H:%M:%S' | strftime(_restore_stat.stat.mtime) }}
-      New migrations:     {{ _changelog_count.stdout | trim }} row(s) in DATABASECHANGELOG since backup
-
-      What likely happened:
-        OpenSpecimen applied Liquibase migrations after this backup was created.
-        Rolling back the WAR without rolling back the schema would leave the older
-        application running against a newer schema - risk of runtime errors, missing
-        columns, or refused startup.
-
-      What to check (list the offending changesets):
-        mysql -u {{ mysql_db_user }} -p -h {{ mysql_db_host }} {{ mysql_db_name }} \
-          -e "SELECT ID, AUTHOR, FILENAME, DATEEXECUTED FROM DATABASECHANGELOG \
-              WHERE DATEEXECUTED > FROM_UNIXTIME({{ _restore_stat.stat.mtime | int }}) \
-              ORDER BY DATEEXECUTED ASC;"
-
-      How to fix (pick one):
-        1. Use a MORE RECENT backup that postdates the new migrations.
-        2. Restore the database from an RDS snapshot taken before
-           {{ '%Y-%m-%d %H:%M:%S' | strftime(_restore_stat.stat.mtime) }}, then re-run.
-        3. Override (use only after manual schema fix or confirmed-safe downgrade):
-             ansible-playbook ... -e allow_downgrade=true
-           - in Jenkins: tick the ALLOW_DOWNGRADE checkbox on the deploy job.
-  when:
-    - not (allow_downgrade | default(false) | bool)
-    # Skip drift halt only when a DB restore will ACTUALLY happen (restore_db AND
-    # a dump is present) - then the schema is brought back to match the WAR (#98).
-    # If restore_db is set but no dump exists, drift must still halt.
-    - not ((restore_db | default(false) | bool) and ((_db_dump.matched | default(0)) > 0))
-    - _changelog_count is defined
-    - _changelog_count.stdout is defined
-    - (_changelog_count.stdout | trim | int) > 0
-
-- name: Warn that schema-downgrade detection was bypassed
-  ansible.builtin.debug:
-    msg: >-
-      ⚠ allow_downgrade=true - skipping schema-downgrade detection.
-      Proceeding with the rollback. Make sure the database schema is
-      compatible with the target WAR before continuing.
-  when:
-    - allow_downgrade | default(false) | bool
-    - _changelog_count is defined
-    - (_changelog_count.stdout | default('0') | trim | int) > 0
 
 # ── 3. Stop the service ──────────────────────────────────────────────────────
 
@@ -262,15 +178,13 @@
     name: "{{ openspecimen_service_name | default('openspecimen') }}"
     state: stopped
 
-# ── 3b. Restore database (opt-in: -e restore_db=true) ────────────────────────
-# Brings WAR + schema + data back to the backup point together so the rolled-
-# back app runs against its matching schema (the drift halt above is skipped
-# when restore_db is set). NOTE: discards data written after the backup - a
-# deliberate operator choice. Local MySQL only; the dump used
-# --add-drop-database so it drops+recreates the schema cleanly (the DB user
-# needs CREATE/DROP on its own schema - true for the local :ALL grant). RDS
-# snapshot restore is a heavier, documented manual step (#99). _db_dump was
-# registered up-front (before the drift check).
+# ── 3b. Restore database (end-to-end rollback) ───────────────────────────────
+# Always part of the rollback: brings WAR + schema + data back to the backup
+# point together so the rolled-back app runs against its matching schema.
+# Discards data written after the backup - inherent to a full rollback. Local
+# MySQL only; the dump used --add-drop-database so it drops+recreates the schema
+# cleanly (the DB user needs CREATE/DROP on its own schema - true for the local
+# :ALL grant). RDS/Oracle have no local dump - see the warning below.
 - name: Restore database from backup dump
   ansible.builtin.shell: |
     set -o pipefail
@@ -280,20 +194,18 @@
     executable: /bin/bash
   no_log: true
   when:
-    - restore_db | default(false) | bool
     - db_managed | default(true) | bool
     - db_type | default('mysql') == 'mysql'
     - (_db_dump.matched | default(0)) > 0
 
-- name: Warn when restore_db set but no DB dump in backup
+- name: Warn when no DB dump in backup (database NOT restored)
   ansible.builtin.debug:
     msg: >-
-      restore_db=true but no db/*.sql.gz in {{ _restore_path | basename }} - the
-      database was NOT restored (this backup predates DB snapshots, or was a
-      large-DB manual-backup upgrade). The WAR/files were rolled back; verify
-      schema compatibility manually or restore your manual/RDS backup.
+      No db/*.sql.gz in {{ _restore_path | basename }} - the database was NOT
+      restored (RDS/Oracle, or a large-DB manual-backup upgrade). The WAR / config
+      / plugins were rolled back; restore your RDS snapshot or manual DB backup to
+      complete the end-to-end rollback.
   when:
-    - restore_db | default(false) | bool
     - db_managed | default(true) | bool
     - db_type | default('mysql') == 'mysql'
     - (_db_dump.matched | default(0)) == 0

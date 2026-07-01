@@ -125,11 +125,10 @@
 
     # Per-instance Tomcat INSTALL: own CATALINA_HOME (binary at os_versions.tomcat)
     # + golden conf + DB connectors, all from THIS instance's zip. The binary is
-    # laid down only when CATALINA_HOME is absent (the role's own guard); a fresh
-    # instance installs its pinned Tomcat. force_deploy re-runs the role to refresh
-    # connectors/conf but does NOT replace an existing binary - to change an
-    # instance's Tomcat version, full_wipe that instance first. App-only upgrades
-    # skip this include entirely (the openspecimen role uploads its own zip).
+    # laid down only when CATALINA_HOME is absent - a fresh instance installs its
+    # pinned Tomcat; to change an existing instance's Tomcat version, clean up
+    # that instance first. App-only upgrades skip this include entirely (the
+    # openspecimen role uploads its own zip).
     - name: "[{{ _instance.name }}] Check this instance's Tomcat install"
       ansible.builtin.stat:
         path: "{{ catalina_home }}/bin/startup.sh"
@@ -139,7 +138,7 @@
       ansible.builtin.include_role:
         name: tomcat
         tasks_from: main
-      when: (not _inst_tomcat_stat.stat.exists) or (force_deploy | default(false) | bool)
+      when: not _inst_tomcat_stat.stat.exists
 
     - name: "[{{ _instance.name }}] Per-instance Tomcat runtime (CATALINA_BASE, ports, unit)"
       ansible.builtin.include_role:

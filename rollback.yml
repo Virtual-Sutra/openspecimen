@@ -12,9 +12,10 @@
 #   2. target_version     : restore from the backup whose .release matches this
 #   3. (neither)          : restore from the most recent backup (by mtime)
 #
-# Safety: halts before stopping the service if Liquibase has applied changesets
-# after the backup was created (schema-incompatible downgrade). Override with
-# -e allow_downgrade=true.
+# Rollback restores the prior deploy backup END TO END - WAR, config, plugins,
+# and (for local MySQL) the database dump together - so the schema is always
+# brought back with the app. Discards data written after the backup, which is
+# inherent to a full rollback.
 #
 # Usage:
 #   # Roll back to the most recent backup (default)
@@ -29,11 +30,6 @@
 #   # Roll back to whichever backup matches a specific OpenSpecimen version
 #   ansible-playbook -i inventory/customers/<name>/ rollback.yml \
 #     -e target_version=openspecimen_v12.1.RC8 \
-#     -e @secrets/<name>.yml --vault-password-file .vault-pass
-#
-#   # Override schema-downgrade halt (use only when you're sure)
-#   ansible-playbook -i inventory/customers/<name>/ rollback.yml \
-#     -e allow_downgrade=true \
 #     -e @secrets/<name>.yml --vault-password-file .vault-pass
 #
 #   # Dry run (no service stop, no file moves)
