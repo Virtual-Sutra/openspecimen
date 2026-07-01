@@ -2,7 +2,7 @@
 # Day-2: Update JVM heap and restart. Per instance (#102).
 # Usage:
 #   ansible-playbook -i inventory/customers/<name>/ update-heap.yml -e heap_min_mb=512 -e heap_max_mb=4096
-#   # one instance on a multi-instance host:  ... -e instance=<name>
+#   # (one OpenSpecimen instance per customer folder - ADR-009)
 - name: Update JVM heap settings
   hosts: openspecimen
   become: true

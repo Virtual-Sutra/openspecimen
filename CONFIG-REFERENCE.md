@@ -71,7 +71,7 @@ shared Tomcat; with multiple instances each has its own copy.
 | `/etc/systemd/system/<service_name>.service` | `tomcat_user`, `catalina_home`, `catalina_base`, `db_managed`, `openspecimen_service_name` | systemd unit (one per instance; `openspecimen` for the default) | Yes - `systemctl daemon-reload` |
 
 `$CATALINA_HOME` = `tomcat_home` = `/usr/local/openspecimen/tomcat-as`.
-For extra instances, `$CATALINA_BASE` = `<openspecimen_instances_base>/<name>/base`.
+A co-located 2nd customer sets its own `catalina_base` explicitly (ADR-009).
 
 **Tomcat install source** (#90/#91): the binary comes from a pinned Apache download
 (`tomcat_version` from the component spec, default `9.0.59`), not an OS package;

@@ -2,7 +2,7 @@
 # Day-2: Show live config + health per instance (#102).
 # Usage:
 #   ansible-playbook -i inventory/customers/<name>/ status.yml
-#   # one instance:  ... -e instance=<name>
+#   # (one OpenSpecimen instance per customer folder - ADR-009)
 - name: OpenSpecimen status
   hosts: openspecimen
   become: true

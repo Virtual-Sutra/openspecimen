@@ -43,7 +43,7 @@
 
 # Set this instance's HTTP / AJP / shutdown ports in its own server.xml. The
 # golden conf ships stock 8080/8009/8005; for the default instance these match
-# (changed=0), for extra instances they are spaced out (base + idx*10).
+# (changed=0). A co-located 2nd customer sets its own ports explicitly (ADR-009).
 - name: "[tomcat:{{ openspecimen_service_name }}] Set HTTP/AJP/shutdown ports in server.xml"
   # Match each connector block by protocol (any attribute order) then set its own
   # port - stock Tomcat 9 ships the AJP connector as protocol-before-port, so an

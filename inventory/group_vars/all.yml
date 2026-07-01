@@ -81,10 +81,10 @@ openspecimen_deploy_success_marker: /usr/local/openspecimen/.deploy_success
 openspecimen_backup_retention: 3
 
 # ── High Availability (optional) ──────────────────────────────────────────────
-# Uncomment and set a unique name per node when running multiple OpenSpecimen
-# nodes behind a load balancer. Name must not contain whitespace.
+# openspecimen_node_name defaults to 'openspecimen' above. When running multiple
+# OpenSpecimen nodes behind a load balancer, OVERRIDE it per customer folder with
+# a unique name (no whitespace) - do not re-declare it here.
 # Ref: https://openspecimen.atlassian.net/wiki/spaces/CAT/pages/1193082943
-# openspecimen_node_name: ""
 
 # Public URL for OpenSpecimen - required when the app is accessed via a hostname
 # that differs from the server's own address (reverse proxy, ALB, VPN gateway).
