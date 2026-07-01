@@ -1,6 +1,17 @@
 ---
-_mysql_package:  "mysql-server"
+# MySQL Community Server 8.4 LTS - installed via the official MySQL APT repo
+# (added by the mysql role before install). Ubuntu ships 8.0 in its default
+# repos; the MySQL APT repo provides genuine MySQL 8.4 LTS, matching RHEL.
+# Package/service/paths follow the standard Debian layout (my.cnf includes
+# /etc/mysql/mysql.conf.d/), so the config written before install is applied.
+_mysql_package:  "mysql-community-server"
 _mysql_service:  "mysql"
 _mysql_conf_dir: "/etc/mysql/mysql.conf.d"
 _mysql_conf_file: "/etc/mysql/mysql.conf.d/mysqld.cnf"
 _mysql_socket:   "/var/run/mysqld/mysqld.sock"
+
+# MySQL APT repo (Debian/Ubuntu). Component pins the 8.4 LTS track; the repo
+# path segment (ubuntu|debian) is derived from the distribution at run time.
+_mysql_apt_component: "mysql-8.4-lts"
+_mysql_apt_key_url: "https://repo.mysql.com/RPM-GPG-KEY-mysql-2023"
+_mysql_apt_keyring: "/etc/apt/keyrings/mysql.asc"
