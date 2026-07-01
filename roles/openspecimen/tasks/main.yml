@@ -100,14 +100,22 @@
 # site.yml on an upgrade runs only the app roles (openspecimen/plugins/apache) -
 # upload if not already present.
 
+- name: Check whether the release zip is already on target
+  ansible.builtin.stat:
+    path: "/tmp/{{ openspecimen_release }}.zip"
+  register: _target_zip
+  when: not (_plugins_only_change | default(false) or _config_only_change | default(false))
+
 - name: Upload release zip to target (if not already present)
+  # copy has no `creates:` (that is a command/shell option) - gate on a stat so a
+  # large zip already staged on the target is not re-uploaded.
   ansible.builtin.copy:
     src:  "{{ openspecimen_zip_path | expanduser }}"
     dest: "/tmp/{{ openspecimen_release }}.zip"
     mode: '0644'
-  args:
-    creates: "/tmp/{{ openspecimen_release }}.zip"
-  when: not (_plugins_only_change | default(false) or _config_only_change | default(false))
+  when:
+    - not (_plugins_only_change | default(false) or _config_only_change | default(false))
+    - not (_target_zip.stat.exists | default(false))
 
 # ── Cache zip contents listing ────────────────────────────────────────────────
 # Listed once here; reused for WAR and plugin extraction below.
