@@ -18,25 +18,26 @@
   delegate_to: localhost
   become: false
 
-# Use the real spec when present, else the empty placeholder. include_vars must
-# ALWAYS run with a real file: a set_fact reset of component_spec would SHADOW
-# include_vars (set_fact outranks include_vars, so component_spec would stay {}),
-# and merely skipping include_vars would leak the previous release's spec across
-# instances. Loading _empty.yml gives a fresh component_spec={} with neither flaw.
-- name: "Spec: choose spec file (real spec, else empty placeholder)"
+# Use the release's own spec when present, else the SINGLE master.yml fallback
+# (one master config for any release without a dedicated spec). include_vars must
+# ALWAYS run with a real file: merely skipping it would leak the previous
+# release's spec across instances, and a set_fact reset of component_spec would
+# SHADOW include_vars (set_fact outranks include_vars). Loading master.yml (a full
+# spec, freshly) gives a clean component_spec each time with neither flaw.
+- name: "Spec: choose spec file (release spec, else master.yml fallback)"
   ansible.builtin.set_fact:
-    _spec_file: "{{ playbook_dir }}/component-specs/{{ (_release_key ~ '.yml') if _spec_stat.stat.exists else '_empty.yml' }}"
+    _spec_file: "{{ playbook_dir }}/component-specs/{{ (_release_key ~ '.yml') if _spec_stat.stat.exists else 'master.yml' }}"
 
 - name: "Spec: load {{ _spec_file | basename }}"
   ansible.builtin.include_vars:
     file: "{{ _spec_file }}"
 
-- name: "Spec: warn when no component spec exists for {{ _release_key }}"
+- name: "Spec: note the master.yml fallback for {{ _release_key }}"
   ansible.builtin.debug:
     msg: >-
-      No component-specs/{{ _release_key }}.yml found - using built-in defaults
-      (Java 17). Generate one with discover-versions.yml (ops) and add it under
-      component-specs/.
+      No component-specs/{{ _release_key }}.yml - using the master.yml fallback
+      (matches v12.2.RC12). Add a dedicated component-specs/{{ _release_key }}.yml
+      to pin different versions; generate one with discover-versions.yml (ops).
   when: not _spec_stat.stat.exists
 
 - name: "Spec: compute os_versions (spec + customer override)"
