@@ -42,7 +42,8 @@
 # binaries come from a pinned Apache download (tomcat_version = os_versions.tomcat,
 # component spec #90). The OpenSpecimen-tuned config (conf/, and any non-binary
 # dirs in the bundle) and the DB connectors continue to come from the release
-# zip. conf and binaries must share the same Tomcat major (9).
+# zip. conf and binaries must share the same Tomcat major: master runs Tomcat 11,
+# the pinned lower releases (v11.2.RC17, v12.2.RC12) run Tomcat 9.
 
 - name: Create /usr/local/openspecimen base dir
   ansible.builtin.file:
@@ -52,13 +53,14 @@
     group: "{{ tomcat_user }}"
     mode: '0755'
 
-- name: Assert Tomcat major is 9
+- name: Assert Tomcat major is 9 or 11
   ansible.builtin.assert:
-    that: tomcat_major == '9'
+    that: tomcat_major in ['9', '11']
     fail_msg: >-
       tomcat_version={{ tomcat_version }} (major {{ tomcat_major }}), but the
-      OpenSpecimen webapp and the bundled conf require Tomcat 9. Set
-      os_versions.tomcat to a 9.0.x release in the component spec.
+      OpenSpecimen webapp supports Tomcat 9 (pinned lower releases) or Tomcat 11
+      (master). Set os_versions.tomcat to a 9.0.x or 11.0.x release in the
+      component spec, matching the Tomcat conf bundled in the release zip.
 
 - name: Check if Tomcat is already installed
   ansible.builtin.stat:
