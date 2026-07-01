@@ -218,24 +218,27 @@ leave it disabled - the ALB terminates TLS instead.
 
 ---
 
-## Instances (`openspecimen_instances`)
+## Instances — one per customer folder (ADR-009)
 
-`openspecimen_instances` (a list in `inventory/group_vars/all.yml`) is the
-deployment model. The shipped default is **one** entry mapping onto the flat vars
-(service `openspecimen`, `CATALINA_BASE == CATALINA_HOME`, ports 8080/8009/8005,
-context `/openspecimen`), so a single-instance host needs no extra config.
+Each `inventory/customers/<name>/` deploys **one** OpenSpecimen instance,
+described by the flat vars in this reference (service `openspecimen`,
+`CATALINA_BASE == CATALINA_HOME`, ports 8080/8009/8005, context `/openspecimen`).
+`tasks/resolve-instances.yml` assembles them into the single internal
+`_instances` entry the roles consume. There is no instance list, no name/index
+derivation, and no `-e instance=<name>` selection (ADR-009 supersedes ADR-006/007).
 
-To run **multiple** instances, override `openspecimen_instances` (in
-`inventory/host_vars/<customer>.yml` - see the loading caveat in
-[`docs/MULTI-INSTANCE.md`](docs/MULTI-INSTANCE.md)) with N entries. Per-instance
-fields and their derivations (ports = base + index×10, etc.) are documented there.
+To run **two** environments on one VM (e.g. prod + test), create **two customer
+folders** pointing `openspecimen_host` at the same VM and override the colliding
+values explicitly in each:
 
-| Variable | Default | Notes |
-|----------|---------|-------|
-| `openspecimen_instances` | one default instance | List of instances on the host |
-| `openspecimen_instances_base` | `/usr/local/openspecimen/instances` | Root for each extra instance's `base`/`data`/`plugins`/`backup` |
-| `openspecimen_port_base` / `openspecimen_ajp_port_base` / `openspecimen_shutdown_port_base` | `8080` / `8009` / `8005` | Instance N gets base + N×10 |
-| `catalina_home` | `{{ tomcat_home }}` | Shared Tomcat binary for all instances |
+| Variable | Default | Override in the 2nd folder |
+|----------|---------|----------------------------|
+| `openspecimen_port` | `8080` | e.g. `8090` |
+| `openspecimen_context_path` | `/openspecimen` | e.g. `/openspecimen-test` |
+| `openspecimen_service_name` | `openspecimen` | e.g. `openspecimen-test` |
+| `catalina_base` | `{{ tomcat_home }}` | a separate path, e.g. `/usr/local/openspecimen/test/tomcat-as` |
+| `openspecimen_data_dir` / `openspecimen_plugin_dir` / `openspecimen_backup_dir` | under `/usr/local/openspecimen` | separate paths |
+| `mysql_db_name` / `mysql_db_user` | `openspecimen` | a separate schema |
 
 ---
 

@@ -1,5 +1,14 @@
 # Multiple OpenSpecimen instances per host
 
+> **⚠️ SUPERSEDED by ADR-009 (2026-07).** The `openspecimen_instances` list and
+> its name/index derivation described below have been **removed**. Deploy **one
+> instance per customer folder** instead: two environments on one VM (e.g. prod +
+> test) are two customer folders pointing `openspecimen_host` at the same VM, each
+> overriding the colliding values (`openspecimen_port`, `openspecimen_context_path`,
+> `openspecimen_service_name`, `catalina_base`, data/plugin/backup dirs, DB)
+> explicitly. See CONFIG-REFERENCE.md "Instances — one per customer folder". This
+> document is retained only for historical context.
+
 Run N independent OpenSpecimen instances on one VM (e.g. `prod` + `test`), each
 fully isolated: its own `CATALINA_BASE` off a shared Tomcat binary
 (`CATALINA_HOME`), ports, data/plugin/backup dirs, database + user, heap, and
