@@ -5,10 +5,10 @@ Ansible automation for deploying and upgrading [OpenSpecimen](https://github.com
 ## What this does
 
 - **Fresh install** (`site.yml`) - installs Java, MySQL (optional), Tomcat, and OpenSpecimen from a release zip
-- **Upgrade** (`site.yml`) - a normal run on an existing install upgrades app-only (WAR + plugins) with automatic WAR/config and pre-upgrade database backup; `-e force_deploy=true` also re-runs the base roles
+- **Upgrade** (`site.yml`) - a normal run on an existing install upgrades app-only (WAR + plugins) with automatic WAR/config and pre-upgrade database backup; a fresh host (no `.release` marker) runs the full stack automatically
 - **One instance per customer folder** (ADR-009) - each `inventory/customers/<name>/` deploys a single OpenSpecimen instance from flat vars. Two environments on one VM (e.g. prod + test) are two customer folders pointing at the same host, each overriding the colliding values (`openspecimen_port`, `openspecimen_context_path`, `openspecimen_service_name`, `catalina_base`, DB) explicitly
 - **Plugin tiers** - `openspecimen_paid_plugins` (→ `plugins/paid/`) and `openspecimen_customer_plugins` (→ `plugins/zustomer/`) extract JARs from named zips alongside the release zip
-- **Rollback** - downgrade detection auto-restores the matching backup; `rollback.yml` rolls back artifacts + config, and optionally the database (`-e restore_db=true`)
+- **Rollback** - downgrade detection auto-restores the matching backup; `rollback.yml` restores the prior deploy end-to-end (WAR + config + plugins + database) so the schema is always brought back with the app
 - **Day-2 playbooks** - `update-heap.yml`, `update-app-url.yml`, `update-db-pool.yml`, `status.yml`, `db-backup.yml`, `db-restore.yml`, `cleanup.yml`
 - **Component version pinning** - per-release `component-specs/<release>.yml` pins Tomcat/Java/MySQL/Apache versions (see [`component-specs/README.md`](component-specs/README.md))
 - **Pre-flight validation** - fails fast before touching the target if the release zip or any plugin zip is missing
@@ -35,8 +35,8 @@ see [Run on the same host](#run-on-the-same-host-no-separate-controller)).
 ## Repository layout
 
 ```
-site.yml                - unified install + upgrade; a normal upgrade is app-only, `-e force_deploy=true` re-runs the base roles
-rollback.yml            - roll back to a previous timestamped backup (-e restore_db=true also restores the DB)
+site.yml                - unified install + upgrade; a normal upgrade is app-only, a fresh host runs the full stack automatically
+rollback.yml            - roll back to a previous timestamped backup, end-to-end (WAR + config + plugins + database)
 db-backup.yml           - on-demand consistent MySQL dump
 db-restore.yml          - restore a db-backup.yml dump (destructive)
 update-heap.yml         - day-2: change JVM heap and restart (per instance)

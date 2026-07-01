@@ -30,8 +30,8 @@
 # roles/openspecimen/tasks/direction.yml (the first pre_task in site.yml): a
 # requested release older than the installed one triggers the backup-restore
 # rollback flow (roles/openspecimen/tasks/rollback.yml) and ends the play
-# before this base role runs. Schema-incompatible downgrades are caught there
-# (Liquibase changeset check) and overridable with -e allow_downgrade=true.
+# before this base role runs. Rollback restores the prior deploy backup
+# end-to-end (WAR + config + plugins + DB), so schema drift is never a concern.
 # A second, contradictory "downgrade not supported" hard-stop used to live here
 # (dead code, since direction.yml already ended the play) and has been removed.
 # See ADR-004.

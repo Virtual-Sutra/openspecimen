@@ -280,8 +280,8 @@
     - not (_plugins_only_change | default(false) or _config_only_change | default(false))
 
 # Snapshot the database into the same timestamped backup (#98), so a rollback
-# can restore WAR + schema + data together (opt-in -e restore_db=true) and
-# schema-drift stops being a concern. Auto-dumps only when the DB is at/under
+# restores WAR + schema + data together (end-to-end) - schema-drift is never a
+# concern. Auto-dumps only when the DB is at/under
 # db_backup_auto_max_mb; larger DBs were gated above (manual backup + confirm),
 # so they fall through here without an SLA-busting inline dump.
 # --add-drop-database --databases makes the restore drop+recreate the schema
@@ -878,7 +878,7 @@
 # requires this file to match the requested release before it will short-circuit
 # a re-deploy. If a previous run failed before this point - even partway through
 # WAR/plugin extraction - the file is stale and the next run proceeds with a
-# full deploy without needing -e force_deploy=true.
+# full deploy automatically (no force flag needed).
 - name: Record successful deploy
   ansible.builtin.copy:
     content: |
