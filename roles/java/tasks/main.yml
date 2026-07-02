@@ -18,6 +18,25 @@
     name: "{{ _java_package }}"
     state: present
 
+# Standardised on the OS OpenJDK package for the spec's major track (not an exact
+# patch pin - apt carries one patch per major). Capture the ACTUAL installed build so
+# the deploy record + discover reflect what is really running.
+- name: Capture the installed JDK build
+  ansible.builtin.shell: |
+    "$OS_JAVA_HOME/bin/java" -version 2>&1 | awk -F'"' '/version/ {print $2; exit}'
+  environment:
+    OS_JAVA_HOME: "{{ _java_home }}"
+  register: _java_build
+  changed_when: false
+
+- name: Record the installed JDK build (major track {{ _java_track }})
+  ansible.builtin.set_fact:
+    openspecimen_java_build: "{{ _java_build.stdout | trim }}"
+
+- name: Show the installed JDK
+  ansible.builtin.debug:
+    msg: "OpenJDK {{ _java_track }} (OS package {{ _java_package }}) → build {{ openspecimen_java_build | default('unknown') }}"
+
 # Host-wide default for interactive shells / tooling. With multiple instances this
 # holds the last-deployed instance's JDK; each instance's Tomcat overrides it with
 # its own JAVA_HOME in the unit/setenv, so this is only a convenience default.
