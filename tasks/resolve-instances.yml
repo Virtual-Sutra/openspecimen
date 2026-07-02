@@ -13,7 +13,11 @@
 - name: Resolve the single instance from flat vars
   ansible.builtin.set_fact:
     _instances:
-      - name:          "{{ openspecimen_instance_name | default('openspecimen') }}"
+      # Instance label (used in task headers, loop labels, backup-file prefixes).
+      # Default to the service name so a co-located instance (e.g. openspecimen-test)
+      # is clearly identified in the deploy/verify output instead of every instance
+      # reading as 'openspecimen'.
+      - name:          "{{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}"
         service_name:  "{{ openspecimen_service_name | default('openspecimen') }}"
         context_path:  "{{ openspecimen_context_path | default('/openspecimen') }}"
         catalina_home: "{{ catalina_home | default(tomcat_home) }}"
