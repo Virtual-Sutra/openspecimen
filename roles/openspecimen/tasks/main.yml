@@ -811,6 +811,11 @@
             svc_start = datetime.datetime.strptime(ts_str, '%a %Y-%m-%d %H:%M:%S')
         except ValueError:
             sys.exit(1)
+        # Bound the scan to the last {{ openspecimen_health_lookback_min | default(20) }}
+        # minutes so a stale service-start timestamp doesn't sweep in unrelated old
+        # errors. A fresh (re)start makes svc_start the effective cutoff anyway.
+        cutoff = max(svc_start, datetime.datetime.now()
+                     - datetime.timedelta(minutes={{ openspecimen_health_lookback_min | default(20) }}))
         log_re = re.compile(r'^(\d{2}-\w{3}-\d{4} \d{2}:\d{2}:\d{2})\.')
         # Fail-fast markers: Tomcat logs one of these when the webapp context
         # aborts (e.g. a Liquibase lock timeout). Detecting them lets the task
@@ -828,7 +833,7 @@
                         log_ts = datetime.datetime.strptime(m.group(1), '%d-%b-%Y %H:%M:%S')
                     except ValueError:
                         continue
-                    if log_ts < svc_start:
+                    if log_ts < cutoff:
                         continue
                     if 'Server startup in' in line:
                         sys.exit(0)
@@ -900,7 +905,7 @@
           Diagnostics:
             - Full service status: shown above
             - Last 100 catalina.out lines: shown above
-            - Full log:  sudo journalctl -u {{ openspecimen_service_name | default('openspecimen') }} --since '1 hour ago'
+            - Full log:  sudo journalctl -u {{ openspecimen_service_name | default('openspecimen') }} --since '{{ openspecimen_health_lookback_min | default(20) }} min ago'
 
 # Phase 2 (external public-URL reachability) is intentionally NOT here. It now
 # runs as a post_task in site.yml (roles/openspecimen/tasks/
@@ -925,20 +930,32 @@
     group: "{{ tomcat_user }}"
     mode: '0644'
 
-# Explicit success flag written ONLY here, as the absolute last step of the
-# deploy. The skip-if-current logic in roles/openspecimen/tasks/direction.yml
-# requires this file to match the requested release before it will short-circuit
-# a re-deploy. If a previous run failed before this point - even partway through
-# WAR/plugin extraction - the file is stale and the next run proceeds with a
-# full deploy automatically (no force flag needed).
-- name: Record successful deploy
+# Deploy record + success flag, written ONLY here as the last step of the deploy.
+# direction.yml's skip-if-current reads the `release:` line (regex) and short-
+# circuits a re-deploy when it matches the requested release (so the zip is never
+# re-copied for an already-installed release). A run that fails before this point
+# leaves the file stale and the next run does a full deploy automatically.
+- name: Record successful deploy (host-side deploy details)
   ansible.builtin.copy:
     content: |
       release: {{ openspecimen_release }}
+      instance: {{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}
+      service: {{ openspecimen_service_name | default('openspecimen') }}
+      node_name: {{ openspecimen_node_name | default('openspecimen') }}
+      tomcat: {{ os_versions.tomcat | default('') }}
+      java: {{ os_versions.java.track | default('') }}
+      app_url: {{ openspecimen_app_url | default('') }}
+      context_path: {{ openspecimen_context_path | default('/openspecimen') }}
+      http_port: {{ openspecimen_port }}
+      ajp_port: {{ openspecimen_ajp_port | default('') }}
+      catalina_base: {{ catalina_base }}
+      db_name: {{ mysql_db_name }}
+      db_host: {{ mysql_db_host }}
+      db_managed: {{ db_managed | default(true) }}
       paid_plugins: {{ openspecimen_paid_plugins | default([]) | to_json }}
       customer_plugins: {{ openspecimen_customer_plugins | default([]) | to_json }}
-      timestamp: {{ ansible_date_time.iso8601 | default('') }}
       install_type: {{ openspecimen_install_type | default('unknown') }}
+      timestamp: {{ ansible_date_time.iso8601 | default('') }}
     dest: "{{ openspecimen_deploy_success_marker | default('/usr/local/openspecimen/.deploy_success') }}"
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
