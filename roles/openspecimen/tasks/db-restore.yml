@@ -1,22 +1,11 @@
 ---
-# Standalone database restore (#98) - local MySQL. Companion to db-backup.yml.
-#
-# Restores a gzipped mysqldump produced by db-backup.yml (which used
-# --add-drop-database, so the dump drops+recreates the schema). DESTRUCTIVE:
-# overwrites the live database; all data written since the dump is lost.
-# Requires -e db_restore_confirm=true.
-#
-# Stops the service and leaves it STOPPED: the on-disk WAR may be NEWER than the
-# restored schema, and starting it would let Liquibase migrate the restored DB
-# forward again. Deploy the matching release first (site.yml -e
-# openspecimen_release=<that version>), or start manually only if the on-disk WAR
-# already matches the dump.
-#
-# Dump selection (precedence):
-#   1. db_backup_file : restore this exact .sql.gz (any path)
-#   2. (none)         : newest *.sql.gz under db_backup_dir
-#
-# RDS -> restore the AWS snapshot (#99). Oracle -> DBA tooling.
+# Standalone DB restore (#98) - local MySQL. Companion to db-backup.yml. Restores a
+# gzipped mysqldump (made with --add-drop-database, so it drops+recreates the schema).
+# DESTRUCTIVE: overwrites the live DB; requires -e db_restore_confirm=true.
+# Leaves the service STOPPED - the on-disk WAR may be newer than the restored schema
+# (starting it would re-migrate the DB forward), so deploy the matching release first.
+# Dump selection: db_backup_file (exact) > newest *.sql.gz under db_backup_dir.
+# RDS -> AWS snapshot (#99); Oracle -> DBA tooling.
 
 - name: Assert this is a managed local MySQL database
   ansible.builtin.assert:
