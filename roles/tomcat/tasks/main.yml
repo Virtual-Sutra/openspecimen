@@ -38,12 +38,9 @@
   changed_when: false
 
 # ── Install Tomcat: binaries from pinned download, conf from the release zip ──
-# Tomcat 9 is not packaged on Ubuntu 24.04 (ships Tomcat 10) or RHEL 9, so the
-# binaries come from a pinned Apache download (tomcat_version = os_versions.tomcat,
-# component spec #90). The OpenSpecimen-tuned config (conf/, and any non-binary
-# dirs in the bundle) and the DB connectors continue to come from the release
-# zip. conf and binaries must share the same Tomcat major: master runs Tomcat 11,
-# the pinned lower releases (v11.2.RC17, v12.2.RC12) run Tomcat 9.
+# Tomcat 9 isn't packaged on Ubuntu 24.04 / RHEL 9, so binaries come from a pinned
+# Apache download (tomcat_version = os_versions.tomcat); conf + connectors come from
+# the release zip. conf and binaries must share a Tomcat major (master=11, lowers=9).
 
 - name: Create /usr/local/openspecimen base dir
   ansible.builtin.file:
@@ -73,9 +70,8 @@
   # installed version to the spec); standalone it falls back to "not installed".
   when: _inst_tomcat_needs_install | default(not tomcat_stat.stat.exists) | bool
   block:
-    # Download straight onto the target VM (it already has outbound internet for
-    # the apt/dnf package installs). get_url is idempotent and verifies the
-    # tarball against Apache's published .sha512 - no control-node staging/upload.
+    # Download onto the target (it already has outbound internet for apt/dnf);
+    # get_url verifies the tarball against Apache's published .sha512.
     - name: Download pinned Tomcat tarball on the target
       ansible.builtin.get_url:
         url: "{{ tomcat_download_url }}"
@@ -119,10 +115,8 @@
         unzip -p /tmp/{{ openspecimen_release }}.zip "$TOMCAT_ZIP" > /tmp/tomcat-as.zip
         test -s /tmp/tomcat-as.zip || { echo "ERROR: extracted tomcat-as.zip is empty"; exit 1; }
 
-    # Overlay everything from the bundle EXCEPT the binaries (bin/, lib/) - keeps
-    # the OpenSpecimen-tuned conf/ (server.xml etc.) and any other bundle dirs on
-    # top of the pinned Tomcat. The bundle's lib/ is empty; connectors are copied
-    # from the release zip below.
+    # Overlay the bundle EXCEPT binaries (bin/, lib/) - keeps the OpenSpecimen conf/
+    # (server.xml etc.) on top of the pinned Tomcat. Connectors come from the zip below.
     - name: Overlay OpenSpecimen config from the bundle over the pinned Tomcat
       ansible.builtin.shell: |
         set -o pipefail
