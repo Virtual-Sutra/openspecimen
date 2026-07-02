@@ -907,8 +907,8 @@
                → check {{ openspecimen_data_dir }}/heapdumps/
                → increase tomcat_heap_max_override (MB)
 
-            4. Port 8080 already in use
-               → ss -tlnp | grep 8080  (on target)
+            4. Port {{ openspecimen_port }} already in use
+               → ss -tlnp | grep {{ openspecimen_port }}  (on target)
 
             5. WAR deployment failed at Tomcat layer
                → check {{ catalina_base }}/logs/localhost.*.log
@@ -916,7 +916,7 @@
           Diagnostics:
             - Full service status: shown above
             - Last 100 catalina.out lines: shown above
-            - Full log:  sudo journalctl -u openspecimen --since '1 hour ago'
+            - Full log:  sudo journalctl -u {{ openspecimen_service_name | default('openspecimen') }} --since '1 hour ago'
 
 # Phase 2 (external public-URL reachability) is intentionally NOT here. It now
 # runs as a post_task in site.yml (roles/openspecimen/tasks/

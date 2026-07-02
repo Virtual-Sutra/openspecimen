@@ -40,6 +40,9 @@
         heap_max:      ""
         heap_min:      ""
         app_url:       "{{ openspecimen_app_url | default('') }}"
-        node_name:     "{{ openspecimen_node_name | default('openspecimen') }}"
+        # node.name is the app's instance identity (written to openspecimen.properties).
+        # Default to the distinct service name so two co-located instances never both
+        # advertise node.name=openspecimen. An explicit openspecimen_node_name wins.
+        node_name:     "{{ openspecimen_node_name | default(openspecimen_service_name | default('openspecimen'), true) }}"
         paid_plugins:      "{{ openspecimen_paid_plugins | default([]) }}"
         customer_plugins:  "{{ openspecimen_customer_plugins | default([]) }}"
