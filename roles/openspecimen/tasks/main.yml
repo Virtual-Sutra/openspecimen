@@ -542,22 +542,27 @@
     _os_is_master: "{{ openspecimen_release is match('openspecimen_master') }}"
 
 - name: Tier bundled master paid plugins into paid/
+  # PLUGIN / PLUGIN_DIR come via environment, and the body avoids bash arrays -
+  # both an inlined {{ item }} in a quoted glob AND `arr=(...)` / ${arr[@]} trip
+  # Ansible's split_args on the free-form command.
   ansible.builtin.shell: |
     set -eo pipefail
-    shopt -s nullglob
-    d={{ openspecimen_plugin_dir }}/default
-    t={{ openspecimen_plugin_dir }}/paid
-    src=("$d/{{ item }}-"[0-9]*.jar)
-    [ -f "$d/{{ item }}.jar" ] && src+=("$d/{{ item }}.jar")
-    if [ ${#src[@]} -gt 0 ]; then
-      mv -f "${src[@]}" "$t"/; echo CHANGED
-    elif compgen -G "$t/{{ item }}-[0-9]*.jar" >/dev/null 2>&1 || [ -f "$t/{{ item }}.jar" ]; then
+    moved=0
+    for j in "$PLUGIN_DIR/default/$PLUGIN-"[0-9]*.jar "$PLUGIN_DIR/default/$PLUGIN.jar"; do
+      if [ -f "$j" ]; then mv -f "$j" "$PLUGIN_DIR/paid/"; moved=1; fi
+    done
+    if [ "$moved" = 1 ]; then
+      echo CHANGED
+    elif ls "$PLUGIN_DIR/paid/$PLUGIN-"[0-9]*.jar >/dev/null 2>&1 || [ -f "$PLUGIN_DIR/paid/$PLUGIN.jar" ]; then
       echo "already tiered"
     else
-      echo "WARN: paid plugin '{{ item }}' not in the master bundle - use a full deploy to add it"
+      echo "WARN: paid plugin $PLUGIN not in the master bundle - use a full deploy to add it"
     fi
   args:
     executable: /bin/bash
+  environment:
+    PLUGIN_DIR: "{{ openspecimen_plugin_dir }}"
+    PLUGIN: "{{ item }}"
   loop: "{{ openspecimen_paid_plugins | default([]) }}"
   register: _master_paid_tier
   changed_when: "'CHANGED' in _master_paid_tier.stdout"
@@ -567,22 +572,25 @@
   notify: restart openspecimen
 
 - name: Tier bundled master customer plugins into zustomer/
+  # See the paid task above (environment vars + no bash arrays, to satisfy split_args).
   ansible.builtin.shell: |
     set -eo pipefail
-    shopt -s nullglob
-    d={{ openspecimen_plugin_dir }}/default
-    t={{ openspecimen_plugin_dir }}/zustomer
-    src=("$d/{{ item }}-"[0-9]*.jar)
-    [ -f "$d/{{ item }}.jar" ] && src+=("$d/{{ item }}.jar")
-    if [ ${#src[@]} -gt 0 ]; then
-      mv -f "${src[@]}" "$t"/; echo CHANGED
-    elif compgen -G "$t/{{ item }}-[0-9]*.jar" >/dev/null 2>&1 || [ -f "$t/{{ item }}.jar" ]; then
+    moved=0
+    for j in "$PLUGIN_DIR/default/$PLUGIN-"[0-9]*.jar "$PLUGIN_DIR/default/$PLUGIN.jar"; do
+      if [ -f "$j" ]; then mv -f "$j" "$PLUGIN_DIR/zustomer/"; moved=1; fi
+    done
+    if [ "$moved" = 1 ]; then
+      echo CHANGED
+    elif ls "$PLUGIN_DIR/zustomer/$PLUGIN-"[0-9]*.jar >/dev/null 2>&1 || [ -f "$PLUGIN_DIR/zustomer/$PLUGIN.jar" ]; then
       echo "already tiered"
     else
-      echo "WARN: customer plugin '{{ item }}' not in the master bundle - use a full deploy to add it"
+      echo "WARN: customer plugin $PLUGIN not in the master bundle - use a full deploy to add it"
     fi
   args:
     executable: /bin/bash
+  environment:
+    PLUGIN_DIR: "{{ openspecimen_plugin_dir }}"
+    PLUGIN: "{{ item }}"
   loop: "{{ openspecimen_customer_plugins | default([]) }}"
   register: _master_cust_tier
   changed_when: "'CHANGED' in _master_cust_tier.stdout"
