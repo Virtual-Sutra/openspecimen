@@ -1,21 +1,8 @@
 ---
-# Unified deploy playbook - handles both fresh install and upgrade.
-#
-# The openspecimen role auto-detects fresh vs upgrade (DB schema check) and
-# direction.yml detects deploy / rollback / no-op from the on-target .release
-# marker. Deploy scope is selected automatically:
-#   - Fresh install (no .release marker) -> FULL: base roles (common, java,
-#       mysql, tomcat) run, then the app roles.
-#   - Upgrade (existing install)         -> FAST app-only: base roles are
-#       skipped; app roles (openspecimen, plugins, apache) run.
-# The base roles are also tagged `base`, so you can force the choice directly:
-#   --skip-tags base   (app-only)      --tags base   (base only).
-#
-# Usage:
-#   ansible-playbook -i inventory/customers/<name>/ site.yml \
-#     -e openspecimen_release=openspecimen_v12.3 \
-#     -e openspecimen_zip_path=/path/to/openspecimen_v12.3.zip \
-#     -e mysql_db_password=<password>
+# Unified deploy playbook (fresh install + upgrade). direction.yml detects
+# deploy/rollback/no-op; scope is automatic - a fresh install runs the base roles
+# (common, mysql) then the app roles, an upgrade skips the base roles (also
+# `base`-tagged: --skip-tags base / --tags base to force). See docs/DEPLOY-UPGRADE.md.
 
 - name: Deploy OpenSpecimen
   hosts: openspecimen
@@ -79,15 +66,12 @@
         - _full_deploy
         - db_managed | default(true)
       tags: [base]
-    # NOTE: java and tomcat are NO LONGER host-level roles. Each instance installs
-    # its own JDK + Tomcat (own version) in tasks/deploy-instance.yml so instances
-    # can run different OpenSpecimen / Tomcat / Java versions side by side. Only
-    # truly shared base layers (OS packages, the MySQL server) stay host-level.
+    # java + tomcat are per-instance (installed in deploy-instance.yml) so instances
+    # can run different OpenSpecimen/Tomcat/Java versions side by side; only shared
+    # layers (OS packages, MySQL server) stay host-level.
 
-  # ── App roles run PER INSTANCE (#72 part 2) ──────────────────────────────────
-  # Each entry in _instances gets its own direction detection, WAR/config/plugin
-  # deploy, apache vhost, and opt-in public-URL verify. The base roles above stay
-  # host-level (run once). See tasks/deploy-instance.yml.
+  # App roles run PER INSTANCE (#72 part 2): each _instances entry gets its own
+  # direction detection, WAR/config/plugin deploy, apache vhost, and verify.
   tasks:
     - name: Deploy each OpenSpecimen instance
       ansible.builtin.include_tasks: tasks/deploy-instance.yml

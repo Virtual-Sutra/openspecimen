@@ -1,9 +1,7 @@
-# Managed by Ansible - do not edit by hand
-# Proxy backend is {{ apache_proxy_protocol | upper }} ({{ apache_proxy_backend }}).
-# When AJP is used, the Tomcat connector is bound to 127.0.0.1 (tomcat role),
-# so it is never reachable off-box - mitigates CVE-2020-1938 (Ghostcat).
-# Instances on one host are routed by distinct ServerName (subdomain/domain) on the
-# standard 80/443 ports - NOT custom ports (ADR-007), so no per-vhost Listen.
+# Managed by Ansible - do not edit by hand.
+# Backend: {{ apache_proxy_protocol | upper }} ({{ apache_proxy_backend }}). AJP is
+# bound to 127.0.0.1 (mitigates CVE-2020-1938 Ghostcat). Instances route by distinct
+# ServerName on 80/443, not custom ports (ADR-007).
 {% if apache_enable_ssl %}
 <VirtualHost *:{{ apache_http_port }}>
     ServerName {{ apache_server_name }}
