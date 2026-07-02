@@ -864,6 +864,29 @@
       ansible.builtin.debug:
         var: _service_status.stdout_lines
 
+    # Liquibase logs the failing changeset and its Reason just before the generic
+    # Tomcat listeners-failed message. Surface that trail explicitly: the plain
+    # tail below is often crowded out by the manager/ROOT/docs webapp deploys that
+    # Tomcat runs AFTER the app context has already failed.
+    - name: Extract migration / startup failure trail from catalina.out
+      ansible.builtin.shell: |
+        set -o pipefail
+        LOG="$OS_CATALINA_BASE/logs/catalina.out"
+        [ -f "$LOG" ] || { echo "(catalina.out not found)"; exit 0; }
+        grep -nE 'Running Changeset|Migration failed|liquibase\.exception|Failed SQL|Reason:|Caused by:|One or more listeners failed|startup failed due to previous' "$LOG" \
+          | tail -40 || true
+      args:
+        executable: /bin/bash
+      environment:
+        OS_CATALINA_BASE: "{{ catalina_base }}"
+      become: true
+      register: _migration_trail
+      changed_when: false
+
+    - name: Print migration / startup failure trail
+      ansible.builtin.debug:
+        var: _migration_trail.stdout_lines
+
     - name: Tail catalina.out for diagnostics
       ansible.builtin.shell: "tail -100 {{ catalina_base }}/logs/catalina.out 2>&1 || echo '(catalina.out not found)'"
       become: true
