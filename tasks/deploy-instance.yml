@@ -41,6 +41,7 @@
     _config_changed:       false
     _inst_zip_find:        {files: []}
     openspecimen_java_home: ""
+    openspecimen_java_build: ""
 
 - name: "[{{ _instance.name }}] Detect direction (deploy / rollback / noop)"
   ansible.builtin.include_role:

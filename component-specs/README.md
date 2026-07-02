@@ -26,6 +26,13 @@ Precedence (lowest → highest): built-in defaults → `component_spec` (this fi
 | `java`, `mysql`, `apache` | track + validated build | OS packages; pin the track, record the tested build |
 | connectors | from the release zip | bundled like the WAR/plugins; commented placeholders only |
 
+**JDK:** standardised on the OS OpenJDK package for the spec's major `track`
+(`openjdk-<track>-jdk` / `java-<track>-openjdk-devel`) — not an exact-patch pin, since
+apt carries one patch per major. `java.validated` records the tested build; the java
+role also captures the ACTUAL installed build at deploy time into the host deploy record
+(`.deploy_success` → `java_build`), and `discover-versions.yml` reads it back from a
+running host. So the major is configured and the exact build is always captured.
+
 ## Adding a release
 
 Generate a draft from a running host with the ops discovery playbook

@@ -972,6 +972,7 @@
       node_name: {{ openspecimen_node_name | default('openspecimen') }}
       tomcat: {{ os_versions.tomcat | default('') }}
       java: {{ os_versions.java.track | default('') }}
+      java_build: {{ openspecimen_java_build | default('') }}
       app_url: {{ openspecimen_app_url | default('') }}
       context_path: {{ openspecimen_context_path | default('/openspecimen') }}
       http_port: {{ openspecimen_port }}
