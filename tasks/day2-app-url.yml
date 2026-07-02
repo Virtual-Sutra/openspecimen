@@ -5,12 +5,12 @@
   ansible.builtin.include_tasks: tasks/backup_config.yml
   vars:
     openspecimen_backup_dir: "{{ _instance.backup_dir }}"
-    backup_src: "{{ _instance.catalina_base }}/conf/openspecimen.properties"
-    backup_label: "openspecimen.properties-{{ _instance.name }}"
+    backup_src: "{{ _instance.catalina_base }}/conf/{{ _instance.war_name }}.properties"
+    backup_label: "{{ _instance.war_name }}.properties-{{ _instance.name }}"
 
 - name: "[{{ _instance.name }}] Set app.url"
   ansible.builtin.lineinfile:
-    path: "{{ _instance.catalina_base }}/conf/openspecimen.properties"
+    path: "{{ _instance.catalina_base }}/conf/{{ _instance.war_name }}.properties"
     regexp: '^app\.url='
     line: "app.url={{ app_url }}"
 

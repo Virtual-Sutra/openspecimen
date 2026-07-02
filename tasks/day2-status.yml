@@ -22,7 +22,7 @@
 
 - name: "[{{ _instance.name }}] Read app.url"
   ansible.builtin.command:
-    cmd: "grep '^app\\.url=' {{ _instance.catalina_base }}/conf/openspecimen.properties"
+    cmd: "grep '^app\\.url=' {{ _instance.catalina_base }}/conf/{{ _instance.war_name }}.properties"
   register: _app_url
   changed_when: false
   failed_when: false
