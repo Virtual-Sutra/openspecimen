@@ -125,15 +125,25 @@
 
     # Overlay the bundle EXCEPT binaries (bin/, lib/) - keeps the OpenSpecimen conf/
     # (server.xml etc.) on top of the pinned Tomcat. Connectors come from the zip below.
+    # Extract to a temp dir and copy the bundle's tomcat-as/ CONTENTS into THIS
+    # instance's CATALINA_HOME. The bundle's top dir is always 'tomcat-as', so
+    # unzipping straight to a fixed path would clobber /usr/local/openspecimen/tomcat-as
+    # (the default/prod instance) even when a co-located instance is deploying.
     - name: Overlay OpenSpecimen config from the bundle over the pinned Tomcat
       ansible.builtin.shell: |
-        set -o pipefail
-        unzip -o /tmp/tomcat-as.zip -d /usr/local/openspecimen/ \
+        set -eo pipefail
+        rm -rf /tmp/os-tomcat-bundle
+        mkdir -p /tmp/os-tomcat-bundle
+        unzip -o /tmp/tomcat-as.zip -d /tmp/os-tomcat-bundle \
           -x 'tomcat-as/bin/*' 'tomcat-as/lib/*'
-        test -f {{ catalina_home }}/conf/server.xml \
+        test -f /tmp/os-tomcat-bundle/tomcat-as/conf/server.xml \
           || { echo "ERROR: tomcat-as/conf/server.xml not found in bundle"; exit 1; }
+        cp -a /tmp/os-tomcat-bundle/tomcat-as/. "$OS_CATALINA_HOME/"
+        rm -rf /tmp/os-tomcat-bundle
       args:
         executable: /bin/bash
+      environment:
+        OS_CATALINA_HOME: "{{ catalina_home }}"
 
     - name: Remove inner tomcat-as.zip
       ansible.builtin.file:
