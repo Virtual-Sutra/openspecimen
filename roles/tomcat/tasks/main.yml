@@ -72,12 +72,20 @@
   block:
     # Download onto the target (it already has outbound internet for apt/dnf);
     # get_url verifies the tarball against Apache's published .sha512.
+    # archive.apache.org (the only source for archived versions) is often slow, so
+    # use a generous read timeout and retry - a single short attempt flakes with
+    # "read operation timed out".
     - name: Download pinned Tomcat tarball on the target
       ansible.builtin.get_url:
         url: "{{ tomcat_download_url }}"
         dest: "/tmp/{{ tomcat_tarball }}"
         checksum: "{{ tomcat_download_checksum }}"
         mode: '0644'
+        timeout: "{{ tomcat_download_timeout | default(60) | int }}"
+      register: _tomcat_download
+      until: _tomcat_download is succeeded
+      retries: "{{ tomcat_download_retries | default(5) | int }}"
+      delay: "{{ tomcat_download_delay | default(10) | int }}"
 
     - name: Create CATALINA_HOME
       ansible.builtin.file:
