@@ -165,16 +165,18 @@
 # timestamp wouldn't restore it).
 - name: Read current openspecimen.properties for backup (before re-template)
   ansible.builtin.slurp:
-    src: "{{ catalina_base }}/conf/openspecimen.properties"
+    src: "{{ catalina_base }}/conf/{{ openspecimen_war_name }}.properties"
   register: _openspecimen_properties_pre_template
   failed_when: false
   changed_when: false
   when: openspecimen_install_type == 'upgrade'
 
+# Named after the webapp/context (<war_name>.properties) so OpenSpecimen's
+# config/<context> JNDI lookup + conf/<context>.properties fallback both resolve.
 - name: Template openspecimen.properties
   ansible.builtin.template:
     src: openspecimen.properties.j2
-    dest: "{{ catalina_base }}/conf/openspecimen.properties"
+    dest: "{{ catalina_base }}/conf/{{ openspecimen_war_name }}.properties"
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
     mode: '0640'
@@ -371,7 +373,7 @@
 - name: Backup openspecimen.properties (pre-template content)
   ansible.builtin.copy:
     content: "{{ _openspecimen_properties_pre_template.content | b64decode }}"
-    dest:    "{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/config/openspecimen.properties"
+    dest:    "{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/config/{{ openspecimen_war_name }}.properties"
     owner:   "{{ tomcat_user }}"
     group:   "{{ tomcat_user }}"
     mode:    '0640'

@@ -275,7 +275,7 @@
   ansible.builtin.stat:
     path: "{{ _restore_path }}/config/{{ item.name }}"
   loop:
-    - { name: openspecimen.properties, dest: "{{ catalina_base }}/conf/openspecimen.properties", mode: '0640' }
+    - { name: "{{ openspecimen_war_name }}.properties", dest: "{{ catalina_base }}/conf/{{ openspecimen_war_name }}.properties", mode: '0640' }
     - { name: setenv.sh,               dest: "{{ catalina_base }}/bin/setenv.sh",                mode: '0755' }
     - { name: context.xml,             dest: "{{ catalina_base }}/conf/context.xml",             mode: '0640' }
   loop_control:

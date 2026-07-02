@@ -87,8 +87,11 @@
     />
 {% endif %}
 
-    <Environment name="config/openspecimen"
-                 value="{{ catalina_base }}/conf/openspecimen.properties"
+    {# JNDI name + properties file are keyed to the webapp/context name: OpenSpecimen
+       looks up config/<context> and falls back to conf/<context>.properties, so a
+       co-located instance at /openspecimen-test uses openspecimen-test.properties. #}
+    <Environment name="config/{{ openspecimen_war_name | default('openspecimen') }}"
+                 value="{{ catalina_base }}/conf/{{ openspecimen_war_name | default('openspecimen') }}.properties"
                  type="java.lang.String"
     />
 
