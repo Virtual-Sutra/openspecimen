@@ -532,10 +532,70 @@
   # WAR is unchanged so the existing default JARs are already correct.
   when: not (_plugins_only_change | default(false) or _config_only_change | default(false))
 
-# ── Deploy additional plugin zips ─────────────────────────────────────────────
-# Pre-flight already searched recursively under openspecimen_builds_dir and
-# stored results in _preflight_paid_find / _preflight_customer_find.
-# Reuse those here - no second find needed.
+# ── Master builds: tier the bundled plugins ───────────────────────────────────
+# A master zip ships every plugin as a JAR in plugin_build/, so the step above
+# extracted them all into plugins/default/. There is no separate <name>-<version>.zip
+# for master, so move the named paid/customer plugins out of default/ into their own
+# tier (backup/licensing separation; a move, so the JAR is never loaded twice).
+- name: Flag a master release for this instance
+  ansible.builtin.set_fact:
+    _os_is_master: "{{ openspecimen_release is match('openspecimen_master') }}"
+
+- name: Tier bundled master paid plugins into paid/
+  ansible.builtin.shell: |
+    set -eo pipefail
+    shopt -s nullglob
+    d={{ openspecimen_plugin_dir }}/default
+    t={{ openspecimen_plugin_dir }}/paid
+    src=("$d/{{ item }}-"*.jar)
+    [ -f "$d/{{ item }}.jar" ] && src+=("$d/{{ item }}.jar")
+    if [ ${#src[@]} -gt 0 ]; then
+      mv -f "${src[@]}" "$t"/; echo CHANGED
+    elif compgen -G "$t/{{ item }}-*.jar" >/dev/null 2>&1 || [ -f "$t/{{ item }}.jar" ]; then
+      echo "already tiered"
+    else
+      echo "WARN: paid plugin '{{ item }}' not in the master bundle - use a full deploy to add it"
+    fi
+  args:
+    executable: /bin/bash
+  loop: "{{ openspecimen_paid_plugins | default([]) }}"
+  register: _master_paid_tier
+  changed_when: "'CHANGED' in _master_paid_tier.stdout"
+  when:
+    - _os_is_master | bool
+    - not (_config_only_change | default(false))
+  notify: restart openspecimen
+
+- name: Tier bundled master customer plugins into zustomer/
+  ansible.builtin.shell: |
+    set -eo pipefail
+    shopt -s nullglob
+    d={{ openspecimen_plugin_dir }}/default
+    t={{ openspecimen_plugin_dir }}/zustomer
+    src=("$d/{{ item }}-"*.jar)
+    [ -f "$d/{{ item }}.jar" ] && src+=("$d/{{ item }}.jar")
+    if [ ${#src[@]} -gt 0 ]; then
+      mv -f "${src[@]}" "$t"/; echo CHANGED
+    elif compgen -G "$t/{{ item }}-*.jar" >/dev/null 2>&1 || [ -f "$t/{{ item }}.jar" ]; then
+      echo "already tiered"
+    else
+      echo "WARN: customer plugin '{{ item }}' not in the master bundle - use a full deploy to add it"
+    fi
+  args:
+    executable: /bin/bash
+  loop: "{{ openspecimen_customer_plugins | default([]) }}"
+  register: _master_cust_tier
+  changed_when: "'CHANGED' in _master_cust_tier.stdout"
+  when:
+    - _os_is_master | bool
+    - not (_config_only_change | default(false))
+  notify: restart openspecimen
+
+# ── Deploy additional plugin zips (pinned releases: separate <name>-<version>.zip) ─
+# Pre-flight already searched recursively under openspecimen_builds_dir and stored
+# results in _preflight_paid_find / _preflight_customer_find. Reuse those here.
+# For a master build these all self-skip (pre-flight found no separate zips →
+# matched=0), so the loops are no-ops and the tiering above applies instead.
 
 # Paid + customer plugin upload/extract: skipped on config-only fast path
 # (no plugin drift - extracting them again would just rewrite identical JARs).
