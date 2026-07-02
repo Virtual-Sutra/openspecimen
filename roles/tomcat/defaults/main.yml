@@ -1,12 +1,7 @@
 ---
-# JVM heap auto-sized from ansible_facts['memtotal_mb'] at deploy time.
-# Rule: max(2048 MB minimum, 50% of total RAM)
-# OpenSpecimen enforces the 2 GB floor itself - the app exits at startup
-# if Xmx is below that threshold.
-#
-# To set an explicit value, add to inventory/customers/<name>/group_vars/openspecimen.yml:
-#   tomcat_heap_max_override: "4096"   # integer MB, no suffix
-#   tomcat_heap_min_override: "512"    # integer MB, no suffix
+# JVM heap auto-sized at deploy: max(2048 MB, 50% of RAM). OpenSpecimen exits at
+# startup if Xmx < 2 GB. Override per customer with tomcat_heap_max_override /
+# tomcat_heap_min_override (integer MB).
 
 tomcat_heap_max: >-
   {{ (tomcat_heap_max_override
@@ -17,9 +12,8 @@ tomcat_heap_min: >-
   {{ (tomcat_heap_min_override | default(512) | int) | string }}m
 
 # ── Tomcat install source (#91) ───────────────────────────────────────────────
-# Binaries come from a pinned Apache download (Tomcat 9 is not packaged on
-# Ubuntu 24.04 / RHEL 9). The OpenSpecimen-tuned conf/ and the DB connectors
-# still come from the release zip. Version is driven by the component spec (#90):
+# Binaries from a pinned Apache download (Tomcat 9 isn't packaged on Ubuntu 24.04 /
+# RHEL 9); conf + connectors from the release zip. Version = component spec (#90).
 tomcat_version: "{{ os_versions.tomcat | default('9.0.59') }}"
 tomcat_major: "{{ tomcat_version.split('.')[0] }}"
 tomcat_tarball: "apache-tomcat-{{ tomcat_version }}.tar.gz"

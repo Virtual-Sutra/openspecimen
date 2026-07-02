@@ -1,13 +1,8 @@
 ---
-# External public-URL health check: curl openspecimen_app_url from the Ansible
-# control node (Jenkins), which validates the full public path - front-end proxy
-# / ALB / DNS / cert. Runs as a post_task (after ALL roles, notably apache) so
-# the proxy that serves the URL is already in place.
-#
-# OPT-IN: gated by openspecimen_verify_app_url (default false) - enable it only
-# once the public hostname resolves. The always-on local readiness check is
-# Phase 1 (Tomcat startup) in the openspecimen role. Non-fatal by default; set
-# openspecimen_app_url_check_fatal=true to make it a hard gate.
+# External public-URL health check: curl openspecimen_app_url from the control node
+# (validates the full public path - proxy/ALB/DNS/cert). Runs as a post_task (after
+# apache). OPT-IN via openspecimen_verify_app_url (default false); non-fatal unless
+# openspecimen_app_url_check_fatal=true. The always-on local check is in the openspecimen role.
 - name: Verify app reachable via public URL
   block:
     - name: Health check via public URL ({{ openspecimen_app_url }}/ui-app/)

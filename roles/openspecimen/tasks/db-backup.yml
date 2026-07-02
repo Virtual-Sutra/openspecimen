@@ -1,16 +1,8 @@
 ---
-# Standalone, on-demand database backup (#98) - local MySQL.
-#
-# Primary use: large databases where the upgrade's size gate halts (auto-dump is
-# skipped to protect the deploy SLA). Run this first, then re-run the upgrade
-# with -e db_backup_confirmed=true. Also usable as a general day-2 DB backup.
-#
-# --single-transaction takes a consistent InnoDB snapshot WITHOUT locking, so
-# this can run while the application is still serving (no outage).
-# --add-drop-database --databases makes the dump self-restoring (drops+recreates
-# the schema on restore).
-#
-# RDS -> take an AWS snapshot instead (#99). Oracle -> DBA backup tooling.
+# Standalone on-demand DB backup (#98) - local MySQL. Mainly for large DBs where
+# the upgrade's size gate halts: run this, then re-run with -e db_backup_confirmed=true.
+# --single-transaction = consistent InnoDB snapshot without locking (no outage);
+# --add-drop-database makes the dump self-restoring. RDS -> AWS snapshot; Oracle -> DBA.
 
 - name: Assert this is a managed local MySQL database
   ansible.builtin.assert:
