@@ -20,6 +20,10 @@
       - name:          "{{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}"
         service_name:  "{{ openspecimen_service_name | default('openspecimen') }}"
         context_path:  "{{ openspecimen_context_path | default('/openspecimen') }}"
+        # WAR filename = context with the leading slash stripped ('#' for nested
+        # paths): openspecimen.war → /openspecimen, openspecimen-test.war →
+        # /openspecimen-test. Drives cleanup's webapp removal.
+        war_name:      "{{ (openspecimen_context_path | default('/openspecimen')) | regex_replace('^/', '') | regex_replace('/', '#') }}"
         catalina_home: "{{ catalina_home | default(tomcat_home) }}"
         catalina_base: "{{ catalina_base | default(tomcat_home) }}"
         # Instance root dir. Co-located instances live under /usr/local/openspecimen/

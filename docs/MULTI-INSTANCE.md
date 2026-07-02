@@ -74,7 +74,7 @@ derive from `name` + list index:
 | `http_port` / `ajp_port` / `shutdown_port` | base (`8080`/`8009`/`8005`) + index×10 |
 | `release` | falls back to `openspecimen_release` |
 | `db_host` | falls back to `mysql_db_host` (shared local MySQL) |
-| `context_path` | `/openspecimen` (constant — isolation is by base, not path) |
+| `context_path` | `/openspecimen` — deploys the WAR at that Tomcat context (`webapps/<context>.war`), so a distinct value serves the app under a distinct path |
 
 Override any derived field by setting it explicitly on the instance. Ports are
 asserted unique across the host at the start of the run (set explicit `*_port`
@@ -96,8 +96,9 @@ deployment (default `domain`):
 | Apache | one full vhost per instance | one shared base vhost that `Include`s one drop-in snippet per instance (`<dropin>/<service>.conf`) |
 
 **Path mode setup:** give each instance a distinct `context_path` (e.g. `/openspecimen`
-and `/openspecimen-test`), set each `app.url` to `https://<shared-host><context_path>`,
-and set `apache_routing_mode: path`. The shared base vhost (`openspecimen-shared.conf`)
+and `/openspecimen-test`) — this deploys its WAR at that Tomcat context (`openspecimen-test.war`
+→ `/openspecimen-test`), so the app is genuinely served there and Apache proxies 1:1.
+Set each `app.url` to `https://<shared-host><context_path>`, and set `apache_routing_mode: path`. The shared base vhost (`openspecimen-shared.conf`)
 is instance-agnostic — every co-located deploy renders it identically — and each deploy
 manages only its own path snippet. Trailing-slash mounts keep sibling paths from
 overlapping, so Include order is irrelevant. In path mode all instances share one TLS

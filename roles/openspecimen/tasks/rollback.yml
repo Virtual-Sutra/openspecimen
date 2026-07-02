@@ -125,15 +125,15 @@
 
 # ── 2. Verify the backup contains a WAR (sanity check) ───────────────────────
 
-- name: Verify the backup contains openspecimen.war
+- name: Verify the backup contains the WAR
   ansible.builtin.stat:
-    path: "{{ _restore_path }}/openspecimen.war"
+    path: "{{ _restore_path }}/{{ openspecimen_war_name }}.war"
   register: _war_stat
 
 - name: Fail if the backup is incomplete (no WAR)
   ansible.builtin.fail:
     msg: |
-      ✗ Backup is incomplete: {{ _restore_path }}/openspecimen.war is missing.
+      ✗ Backup is incomplete: {{ _restore_path }}/{{ openspecimen_war_name }}.war is missing.
 
       This backup directory may have been partially deleted, or was created
       by an older version of the playbook that did not back up the WAR.
@@ -201,13 +201,13 @@
     path:  "{{ item }}"
     state: absent
   loop:
-    - "{{ catalina_base }}/webapps/openspecimen.war"
-    - "{{ catalina_base }}/webapps/openspecimen"
+    - "{{ catalina_base }}/webapps/{{ openspecimen_war_name }}.war"
+    - "{{ catalina_base }}/webapps/{{ openspecimen_war_name }}"
 
-- name: Restore openspecimen.war from backup
+- name: Restore the WAR from backup
   ansible.builtin.copy:
-    src:        "{{ _restore_path }}/openspecimen.war"
-    dest:       "{{ catalina_base }}/webapps/openspecimen.war"
+    src:        "{{ _restore_path }}/{{ openspecimen_war_name }}.war"
+    dest:       "{{ catalina_base }}/webapps/{{ openspecimen_war_name }}.war"
     remote_src: true
     owner:      "{{ tomcat_user }}"
     group:      "{{ tomcat_user }}"
