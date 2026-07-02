@@ -69,16 +69,12 @@
   changed_when: "'changed' in _port_patch.stdout"
   notify: restart openspecimen
 
-# Stock Tomcat 9 ships the AJP connector commented out. When this host proxies via
-# AJP (apache_proxy_protocol: ajp), the connector MUST be enabled or Apache gets
-# "AJP ... Connection refused" on 127.0.0.1:<port> and serves the 503 downtime page.
-# The attribute patches below only edit the connector text - they don't uncomment it.
+# Stock Tomcat ships the AJP connector commented out; when proxying via AJP it must
+# be uncommented or Apache gets "Connection refused" and serves the 503 page.
 - name: "[tomcat:{{ openspecimen_service_name }}] Enable (uncomment) the AJP connector"
-  # Line-based, not regex: find the AJP <Connector .../> block, then remove only a
-  # BARE '<!--' on the line immediately before it and a BARE '-->' on the line
-  # immediately after. Bare-only means the descriptive '<!-- Define an AJP ... -->'
-  # comment is never touched and we can never leave a half-open comment (which a
-  # naive regex did, breaking server.xml with "string -- not permitted in comments").
+  # Line-based (not regex): remove only a BARE '<!--'/'-->' bracketing the AJP
+  # <Connector>, so the descriptive comment survives and we never leave a half-open
+  # comment (which breaks server.xml).
   ansible.builtin.shell: |
     python3 -c "
     import sys
