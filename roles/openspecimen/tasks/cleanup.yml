@@ -65,6 +65,7 @@
     state: absent
   when:
     - _inst_dir | length > 0
+    - "'..' not in _inst_dir.split('/')"   # no traversal: '..' would resolve to an ancestor on delete
     - _inst_dir != _shared_root
     - _inst_dir.startswith(_shared_root ~ '/')
 
