@@ -1,0 +1,10 @@
+# Managed by Ansible - do not edit by hand.
+# PATH-mode proxy mount for instance '{{ apache_vhost_name }}' (ADR-007).
+# Include'd inside the shared vhost ({{ apache_shared_vhost_name }}.conf). Proxies this
+# instance's URL path 1:1 to its own Tomcat context ({{ apache_proxy_protocol | upper }}
+# backend {{ apache_path_backend }}), so no cookie/path rewrite is needed. Trailing
+# slashes keep sibling mounts non-overlapping (e.g. /openspecimen vs /openspecimen-test),
+# so the shared vhost's Include order is irrelevant.
+RedirectMatch ^{{ apache_path_prefix }}$ {{ apache_path_prefix }}/
+ProxyPass        {{ apache_path_prefix }}/ {{ apache_path_backend }}{{ apache_path_prefix }}/
+ProxyPassReverse {{ apache_path_prefix }}/ {{ apache_path_backend }}{{ apache_path_prefix }}/

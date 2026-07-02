@@ -11,3 +11,7 @@ _apache_webroot:  /var/www/html
 # "Install mod_ssl (RedHat)" task in tasks/main.yml when apache_enable_ssl is set.
 _apache_modules:  []
 _apache_ssl_modules: []
+# path mode: per-instance proxy snippets Include'd by the shared vhost. Deliberately
+# OUTSIDE conf.d/ (which httpd auto-includes at the top level) so the snippets load
+# ONLY inside the shared <VirtualHost>, not as stray server-level directives.
+_apache_dropin_dir: /etc/httpd/openspecimen.d

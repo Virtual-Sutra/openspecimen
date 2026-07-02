@@ -1,0 +1,56 @@
+# Managed by Ansible - do not edit by hand.
+# Shared base vhost for PATH routing mode (ADR-007): one ServerName, and each
+# co-located instance mounts at its own URL path via a drop-in snippet under
+# {{ _apache_dropin_dir }}/ that this vhost Include's. Instance-agnostic: every
+# co-located deploy renders this file identically. Per-instance proxy rules live
+# in the snippets, NOT here.
+{% if apache_enable_ssl %}
+<VirtualHost *:{{ apache_http_port }}>
+    ServerName {{ apache_shared_server_name }}
+    Redirect permanent / https://{{ apache_shared_server_name }}/
+</VirtualHost>
+
+<VirtualHost *:{{ apache_https_port }}>
+    ServerName {{ apache_shared_server_name }}
+
+    SSLEngine             on
+    SSLCertificateFile    {{ apache_ssl_cert_file }}
+    SSLCertificateKeyFile {{ apache_ssl_key_file }}
+    SSLProtocol           all -TLSv1 -TLSv1.1
+    SSLCipherSuite        HIGH:!aNULL:!MD5:!3DES
+    SSLHonorCipherOrder   on
+
+{% else %}
+<VirtualHost *:{{ apache_http_port }}>
+    ServerName {{ apache_shared_server_name }}
+
+{% endif %}
+    # Serve static error pages directly - exclusions must precede the instance ProxyPass rules.
+    ProxyPass /downtime.html    !
+    ProxyPass /OS_LOGO_BANNER.png !
+
+    ProxyPreserveHost On
+
+    # Per-instance mounts (ProxyPass <path> ...) - one file per co-located instance.
+    # Apache matches the longest path prefix, so mount order across files is safe.
+    IncludeOptional {{ _apache_dropin_dir }}/*.conf
+
+{% if apache_security_headers %}
+    Header always set X-Frame-Options        "SAMEORIGIN"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy        "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy     "accelerometer=(),autoplay=(),camera=(),encrypted-media=(),fullscreen=*,geolocation=(self),gyroscope=(),magnetometer=(),microphone=(),midi=(),payment=(),sync-xhr=(self),usb=(),xr-spatial-tracking=()"
+{% if apache_enable_ssl %}
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+{% endif %}
+{% endif %}
+
+    ExpiresActive On
+    ExpiresDefault "access plus 3 hours"
+
+    ErrorDocument 503 /downtime.html
+
+    ErrorLog  {{ _apache_log_dir }}/{{ apache_shared_vhost_name }}-error.log
+    CustomLog {{ _apache_log_dir }}/{{ apache_shared_vhost_name }}-access.log combined
+
+</VirtualHost>
