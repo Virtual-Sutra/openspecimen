@@ -1,9 +1,12 @@
 #!/bin/bash
-# OpenSpecimen configuration update script
+# OpenSpecimen configuration update script - Ansible-managed, do not edit by hand.
 # Applies the three most frequent configuration changes without a full Ansible re-run.
 # Creates a timestamped backup before every change and restarts the service.
 #
-# Usage: sudo update-config.sh <command> [args]
+# Instance: {{ openspecimen_service_name | default('openspecimen') }} (context {{ openspecimen_context_path | default('/openspecimen') }})
+# One script per co-located instance; this one targets ONLY the instance above.
+#
+# Usage: sudo <this-script> <command> [args]
 #
 # Commands:
 #   status                     Show current heap, pool size, and app URL
@@ -13,12 +16,12 @@
 
 set -euo pipefail
 
-TOMCAT_HOME=/usr/local/openspecimen/tomcat-as
+TOMCAT_HOME={{ catalina_base }}
 SETENV=$TOMCAT_HOME/bin/setenv.sh
 CONTEXT=$TOMCAT_HOME/conf/context.xml
-OS_PROPS=$TOMCAT_HOME/conf/openspecimen.properties
-BACKUP_ROOT=/usr/local/openspecimen/backup/config-changes
-SERVICE=openspecimen
+OS_PROPS=$TOMCAT_HOME/conf/{{ openspecimen_war_name | default('openspecimen') }}.properties
+BACKUP_ROOT={{ openspecimen_backup_dir }}/config-changes
+SERVICE={{ openspecimen_service_name | default('openspecimen') }}
 
 die()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
@@ -120,7 +123,7 @@ case "${1:-}" in
     echo "  app-url <url>           Update app.url  (e.g. app-url https://os.example.com)"
     echo ""
     echo "Each change backs up the modified file to $BACKUP_ROOT/<timestamp>/"
-    echo "and restarts the openspecimen service automatically."
+    echo "and restarts the $SERVICE service automatically."
     exit 1
     ;;
 esac

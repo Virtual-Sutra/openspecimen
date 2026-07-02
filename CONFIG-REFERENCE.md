@@ -117,7 +117,7 @@ each resolves under that instance's `$CATALINA_BASE` and per-instance dirs.
 | `$PLUGIN_DIR/zustomer/*.jar` | `openspecimen_customer_plugins` | Customer-specific plugin JARs | Yes (Tomcat re-scans on startup) |
 | `/usr/local/openspecimen/.release` | `openspecimen_release` | Deployed version marker (per instance) - drives downgrade/no-op detection | No |
 | `/usr/local/openspecimen/.deploy_success` | _(written by the role)_ | Records the last fully-successful deploy (release + plugins). The no-op fast path requires this to match the requested release. | No |
-| `/usr/local/openspecimen/scripts/update-config.sh` | _(from the repo)_ | On-box helper for heap / db-pool / app-url changes | No |
+| `/usr/local/openspecimen/scripts/update-config[-<service>].sh` | _(templated per instance)_ | On-box helper for heap / db-pool / app-url changes; one per instance (default keeps `update-config.sh`) | No |
 
 `$PLUGIN_DIR` = `openspecimen_plugin_dir` = `/usr/local/openspecimen/plugins`
 
@@ -299,5 +299,11 @@ sudo /usr/local/openspecimen/scripts/update-config.sh db-pool 150
 sudo /usr/local/openspecimen/scripts/update-config.sh app-url https://openspecimen.example.com
 ```
 
-See `scripts/update-config.sh` for full usage. The script creates a timestamped backup
+See `scripts/update-config.sh.j2` for full usage. The script creates a timestamped backup
 before every change and restarts the service automatically.
+
+> **Co-located instances:** the script is generated **per instance** with that
+> instance's Tomcat, service, properties file, and backup dir baked in. The default
+> instance keeps `update-config.sh`; a co-located instance gets
+> `update-config-<service>.sh` (e.g. `update-config-openspecimen-test.sh`) so it only
+> ever edits its own config. Run the one matching the instance you mean.
