@@ -84,9 +84,20 @@
 
 # ── Verify artifacts exist on control node ───────────────────────────────────
 
-- name: Compute plugin version from openspecimen_release
+- name: Compute plugin version + master flag from openspecimen_release
   ansible.builtin.set_fact:
     _preflight_plugin_version: "{{ openspecimen_release | regex_replace('^openspecimen_', '') }}"
+    # master builds bundle every plugin inside the release zip - there are no
+    # separate <plugin>-<version>.zip files to validate before the zip is copied.
+    _is_master_release: "{{ openspecimen_release is match('openspecimen_master') }}"
+
+- name: Note bundled-plugin exception for master builds
+  ansible.builtin.debug:
+    msg: >-
+      Master build ({{ openspecimen_release }}): plugins ship inside the release
+      zip, so the pre-copy <plugin>-<version>.zip validation is skipped. The named
+      plugins are extracted from the master zip on the host (default-plugin path).
+  when: _is_master_release | bool
 
 - name: Check release zip exists on control node
   ansible.builtin.stat:
@@ -157,7 +168,9 @@
           as openspecimen_{{ _preflight_plugin_version }}.zip, OR
         - Remove "{{ item.item }}" from openspecimen_paid_plugins in inventory.
   loop: "{{ _preflight_paid_find.results }}"
-  when: item.matched == 0
+  when:
+    - item.matched == 0
+    - not (_is_master_release | bool)   # master bundles plugins in the zip
 
 - name: Find customer plugin zips under builds_dir (pre-flight)
   ansible.builtin.find:
@@ -191,7 +204,9 @@
           as openspecimen_{{ _preflight_plugin_version }}.zip, OR
         - Remove "{{ item.item }}" from openspecimen_customer_plugins in inventory.
   loop: "{{ _preflight_customer_find.results }}"
-  when: item.matched == 0
+  when:
+    - item.matched == 0
+    - not (_is_master_release | bool)   # master bundles plugins in the zip
 
 - name: Show pre-flight summary
   ansible.builtin.debug:

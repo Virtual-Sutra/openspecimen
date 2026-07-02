@@ -146,6 +146,15 @@ The version is derived from `openspecimen_release` by stripping the `openspecime
 upgrade therefore picks up the matching plugin version automatically - no inventory edit needed
 on every upgrade.
 
+**Master builds (`openspecimen_master-*`) — bundled plugins:** a master release ships every
+plugin *inside* the release zip, so there are no separate `<name>-<version>.zip` files. Because
+those files only exist on the host after the zip is copied, the control-node pre-flight
+`<name>-<version>.zip` validation cannot run and is **skipped for any `openspecimen_master*`
+release** (deploy or upgrade). The named plugins are extracted from the master zip on the host
+via the default-plugin path (`plugin_build/*.jar` → `$PLUGIN_DIR/default/`), which Tomcat scans
+alongside `paid/` and `zustomer/`. Pinned releases (e.g. `v12.2.RC12`) still require the separate
+plugin zips and are validated as before.
+
 **Backup retention:**
 
 | Variable | Default | Notes |
