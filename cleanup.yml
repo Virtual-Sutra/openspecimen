@@ -1,21 +1,10 @@
 ---
-# Tear down OpenSpecimen so a (test) VM can be reused for daily deploy/test runs
-# (ADR-006, #72). DESTRUCTIVE - requires -e cleanup_confirm=true.
-#
-# Default: per-instance teardown (service, webapp, data/plugins/backups/markers,
-# and local-MySQL DB+user), leaving the shared Tomcat binary / MySQL server /
-# Java in place for a fast re-deploy. Targets all instances; -e instance=<name>
-# limits to one.
-#
-# -e full_wipe=true ALSO removes the shared bits for a from-scratch host reset:
-# the whole /usr/local/openspecimen tree (Tomcat binary + all instances), the
-# MySQL server + its data, OpenJDK, and Apache (httpd) + its OpenSpecimen vhost.
-#
-# Usage:
-#   ansible-playbook -i inventory/customers/<name>/ cleanup.yml \
-#     -e cleanup_confirm=true -e @secrets/<name>.yml --vault-password-file .vault-pass
-#   # one instance:           ... -e instance=test
-#   # full host reset:        ... -e full_wipe=true
+# Tear down OpenSpecimen so a (test) VM can be reused (ADR-006). DESTRUCTIVE -
+# requires -e cleanup_confirm=true. Default: per-instance teardown (service, webapp,
+# data/plugins/backups/markers, local-MySQL DB+user), leaving the shared Tomcat/
+# MySQL/Java for a fast re-deploy; -e instance=<name> limits to one.
+# -e full_wipe=true ALSO removes the shared bits (whole /usr/local/openspecimen,
+# MySQL server+data, OpenJDK, Apache+vhost) for a from-scratch host reset.
 
 - name: Clean up OpenSpecimen
   hosts: openspecimen

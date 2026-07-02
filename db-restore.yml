@@ -1,19 +1,10 @@
 ---
-# Standalone database restore (local MySQL). Companion to db-backup.yml. Thin
-# wrapper around roles/openspecimen/tasks/db-restore.yml.
-#
-# DESTRUCTIVE - overwrites the live database and discards data written since the
-# dump. Requires -e db_restore_confirm=true. Stops the service and leaves it
-# stopped; deploy the matching WAR before starting (see the role tasks).
-#
-# Usage:
-#   # restore the newest dump under db_backup_dir
-#   ansible-playbook -i inventory/customers/<name>/ db-restore.yml \
-#     -e db_restore_confirm=true \
-#     -e @secrets/<name>.yml --vault-password-file .vault-pass
-#
-#   # restore a specific dump
-#   ... -e db_backup_file=/usr/local/openspecimen/db-backups/<ts>_<db>.sql.gz
+# Standalone DB restore (local MySQL), companion to db-backup.yml. Thin wrapper
+# around roles/openspecimen/tasks/db-restore.yml.
+# DESTRUCTIVE - overwrites the live DB, discards data since the dump; requires
+# -e db_restore_confirm=true. Stops the service and leaves it stopped (deploy the
+# matching WAR before starting). Restores the newest dump under db_backup_dir, or
+# -e db_backup_file=<path> for a specific one.
 
 - name: Restore OpenSpecimen database
   hosts: openspecimen
