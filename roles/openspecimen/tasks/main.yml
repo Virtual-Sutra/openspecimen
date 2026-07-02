@@ -547,11 +547,11 @@
     shopt -s nullglob
     d={{ openspecimen_plugin_dir }}/default
     t={{ openspecimen_plugin_dir }}/paid
-    src=("$d/{{ item }}-"*.jar)
+    src=("$d/{{ item }}-"[0-9]*.jar)
     [ -f "$d/{{ item }}.jar" ] && src+=("$d/{{ item }}.jar")
     if [ ${#src[@]} -gt 0 ]; then
       mv -f "${src[@]}" "$t"/; echo CHANGED
-    elif compgen -G "$t/{{ item }}-*.jar" >/dev/null 2>&1 || [ -f "$t/{{ item }}.jar" ]; then
+    elif compgen -G "$t/{{ item }}-[0-9]*.jar" >/dev/null 2>&1 || [ -f "$t/{{ item }}.jar" ]; then
       echo "already tiered"
     else
       echo "WARN: paid plugin '{{ item }}' not in the master bundle - use a full deploy to add it"
@@ -572,11 +572,11 @@
     shopt -s nullglob
     d={{ openspecimen_plugin_dir }}/default
     t={{ openspecimen_plugin_dir }}/zustomer
-    src=("$d/{{ item }}-"*.jar)
+    src=("$d/{{ item }}-"[0-9]*.jar)
     [ -f "$d/{{ item }}.jar" ] && src+=("$d/{{ item }}.jar")
     if [ ${#src[@]} -gt 0 ]; then
       mv -f "${src[@]}" "$t"/; echo CHANGED
-    elif compgen -G "$t/{{ item }}-*.jar" >/dev/null 2>&1 || [ -f "$t/{{ item }}.jar" ]; then
+    elif compgen -G "$t/{{ item }}-[0-9]*.jar" >/dev/null 2>&1 || [ -f "$t/{{ item }}.jar" ]; then
       echo "already tiered"
     else
       echo "WARN: customer plugin '{{ item }}' not in the master bundle - use a full deploy to add it"
