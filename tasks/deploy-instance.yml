@@ -1,21 +1,9 @@
 ---
-# Per-instance app deploy wrapper (#72 part 2).
-#
-# Looped from site.yml over `_instances` with loop_var=_instance. For each
-# instance we set_fact the flat global vars the app roles already read (a "shim"
-# off the _instance dict), then include_role direction -> preflight -> openspecimen
-# (main) -> plugins -> apache -> verify-public-url. This keeps the 877-line role
-# internals untouched while running them once per instance.
-#
-# direction.yml sets `_instance_direction` (deploy | rollback | noop) instead of
-# ending the whole play, so a rolled-back or already-current instance skips its
-# own deploy steps WITHOUT stopping the other instances.
-#
-# IMPORTANT: set_fact is host-scoped and persists across loop iterations, so we
-# explicitly reset the direction/probe facts each iteration - otherwise an
-# instance whose direction.yml skips a conditional set_fact would inherit the
-# previous instance's value (e.g. _plugins_only_change). Instances run serially,
-# so overwriting the flat vars each iteration is safe.
+# Per-instance app deploy wrapper (#72 part 2). Looped from site.yml over
+# `_instances`; shims the flat vars off `_instance`, then includes direction ->
+# preflight -> openspecimen -> plugins -> apache -> verify per instance.
+# Facts are reset each iteration below: set_fact is host-scoped and persists, so a
+# conditional set_fact skipped this iteration would otherwise leak the prior one.
 
 - name: "[{{ _instance.name }}] Shim flat vars from instance"
   ansible.builtin.set_fact:
@@ -191,32 +179,16 @@
         name: apache
       when: apache_enabled | default(false)
 
-    # Apply all pending restarts NOW (WAR / config / plugins / tomcat-unit each
-    # notify "restart openspecimen"; apache notifies "reload apache"), while the
-    # shim still holds THIS instance's values - and crucially BEFORE the readiness
-    # gate below, so the deploy never finishes with Tomcat mid-restart (which makes
-    # Apache return 503 -> the downtime maintenance page).
+    # Apply pending restarts BEFORE the readiness gate - a mid-restart Tomcat makes
+    # Apache serve the 503 downtime page.
     - name: "[{{ _instance.name }}] Apply pending restarts for this instance"
       ansible.builtin.meta: flush_handlers
 
-    # Authoritative readiness gate: don't declare the instance deployed until it
-    # actually SERVES the app AFTER that final restart. Immune to the catalina.out
-    # first-pass timing.
-    #
-    # Check through the real serving path. An Apache-fronted instance (typically
-    # AJP) answers a direct localhost:port hit with a 302/403 (request Host !=
-    # app.url), so the old 200|401 check looped forever even though the app was up.
-    #
-    # When Apache is the LOCAL front-end - same condition as the apache role
-    # include above (apache_enabled | default(false)), so the probe always matches
-    # whether Apache was actually installed - probe app_url/ui-app/ through it:
-    # --resolve pins the app
-    # hostname to 127.0.0.1:<app-port> so the check tests THIS box's Apache -> AJP
-    # -> Tomcat path without depending on external DNS/ALB (-k: liveness probe, not
-    # a cert check - verify-public-url does the cert-sensitive check from the
-    # control node). Otherwise (direct-Tomcat, or ALB-direct where 443 is the ALB
-    # not a local listener) probe Tomcat on localhost:port and accept 200|302|401|
-    # 403 - a 302 to an https app.url still means the app is up and responding.
+    # Authoritative readiness gate: don't finish until the instance actually SERVES.
+    # Apache-fronted instances answer a direct localhost hit with a 302/403 (Host !=
+    # app.url), so probe app_url/ui-app/ through the local Apache (--resolve to
+    # 127.0.0.1); else probe localhost:port accepting 200|302|401|403. Gated on the
+    # same apache_enabled as the include above. See docs/TROUBLESHOOTING.md.
     - name: "[{{ _instance.name }}] Build the readiness-check command"
       ansible.builtin.set_fact:
         _ready_cmd: >-

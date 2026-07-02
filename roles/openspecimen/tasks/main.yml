@@ -1,9 +1,7 @@
 ---
 # ── Prior version check ───────────────────────────────────────────────────────
-# site.yml on a fresh install: common role already ran this and set
-#   _version_check_done=true.
-# site.yml on an upgrade: base roles (incl. common) are skipped, so include_role
-#   runs the check here.
+# Fresh install: the common role already ran this. Upgrade (base roles skipped):
+# run it here.
 
 - name: Prior version check
   ansible.builtin.include_role:
@@ -162,11 +160,9 @@
 
 # ── openspecimen.properties ───────────────────────────────────────────────────
 
-# Slurp the pre-template content of openspecimen.properties so the upgrade
-# backup (further below) can write the OLD content - otherwise the template
-# task one line down overwrites the live file before backup runs, and the
-# backup ends up snapshotting the NEW content. Without this, a rollback to
-# this timestamp would not restore the prior config.
+# Slurp the OLD openspecimen.properties before the template below overwrites it,
+# so the upgrade backup snapshots the prior config (else a rollback to this
+# timestamp wouldn't restore it).
 - name: Read current openspecimen.properties for backup (before re-template)
   ansible.builtin.slurp:
     src: "{{ catalina_base }}/conf/openspecimen.properties"
@@ -192,10 +188,9 @@
   when: openspecimen_install_type == 'upgrade'
 
 # ── Pre-upgrade DB backup gate (#98) ─────────────────────────────────────────
-# Small DBs are dumped inline below; large DBs would risk the deploy SLA, so we
-# halt and ask the operator to back up manually + re-run with
-# -e db_backup_confirmed=true. Runs BEFORE the service is stopped (fail fast,
-# no outage). Local MySQL only (db_managed); RDS snapshot is a follow-up (#99).
+# Small DBs are dumped inline; large ones would risk the deploy SLA, so halt and
+# ask the operator to back up + re-run with -e db_backup_confirmed=true. Runs
+# before the service is stopped (fail fast). Local MySQL only.
 - name: Measure database size for the DB-backup gate
   ansible.builtin.shell: |
     mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' -h {{ mysql_db_host }} -sN \
@@ -248,17 +243,9 @@
     state: stopped
   when: openspecimen_install_type == 'upgrade'
 
-# Per-tier backup directories are conditional so that rollback.yml line 274
-# ("Wipe current plugin tier - only when backup has it") doesn't clobber live
-# state from a fast-path backup that didn't capture that tier:
-#   - plugins-only: skip plugins/default (WAR unchanged → default JARs live and
-#                   correct; an empty default/ in backup would wipe them on
-#                   rollback). Keep paid/zustomer (plugin drift is what's being
-#                   backed up) and config (cheap).
-#   - config-only: skip plugins/default, plugins/paid, plugins/zustomer (all
-#                  unchanged). Keep only config - the openspecimen.properties
-#                  snapshot for rollback.
-#   - full deploy: all four (default, paid, zustomer, config).
+# Per-tier backup dirs are conditional so rollback doesn't clobber live state from
+# a fast-path backup that skipped a tier: plugins-only backs up paid/zustomer+config,
+# config-only backs up config only, full backs up all four. See docs/DEPLOY-UPGRADE.md.
 - name: Create backup directory structure
   ansible.builtin.file:
     path: "{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/{{ item }}"
@@ -311,9 +298,8 @@
     - db_backup_enabled | default(true) | bool
     - (_db_size_mb_val | default(0) | int) <= (db_backup_auto_max_mb | default(2048) | int)
 
-# Remove orphan plugin JARs BEFORE the backup mv - without this, the backup
-# would snapshot the orphan and a rollback to that timestamp would resurrect
-# the plugin the operator just removed from inventory.
+# Remove orphan JARs before the backup mv, else the backup snapshots them and a
+# rollback resurrects a plugin the operator just removed from inventory.
 - name: Remove orphan plugin JARs from live dirs (no longer in inventory)
   ansible.builtin.file:
     path: "{{ item }}"
@@ -321,13 +307,9 @@
   loop: "{{ (_orphan_paid_jars.stdout_lines | default([])) + (_orphan_customer_jars.stdout_lines | default([])) }}"
   when: openspecimen_install_type == 'upgrade'
 
-# Also purge the orphan from EXISTING backups under paid/ and zustomer/. The
-# rationale is licensing: paid + customer plugins ride on contractual entitlements,
-# so a lapsed license must not survive in a backup that a future rollback could
-# restore. Scoped strictly to plugins/paid/ and plugins/zustomer/ - plugins/default/
-# (open-source, from the release zip) is left intact, as is the WAR.
-# Matches every version of the orphan plugin (e.g. os-hl7-v12.1.jar,
-# os-hl7-v12.2.RC8.jar) so backups taken under prior releases are also cleaned.
+# Purge the orphan from EXISTING paid/zustomer backups too (licensing: a lapsed
+# license must not survive in a backup a rollback could restore). All versions
+# matched; plugins/default (open-source) and the WAR are left intact.
 - name: Purge orphan paid/customer plugin JARs from existing backups (licensing compliance)
   ansible.builtin.shell: |
     set -e
@@ -396,11 +378,8 @@
     - openspecimen_install_type == 'upgrade'
     - _openspecimen_properties_pre_template.content is defined
 
-# setenv.sh and context.xml are templated only by the tomcat role (which runs
-# on site.yml fresh installs, not on site.yml upgrades - base roles are skipped).
-# On the upgrade path
-# these files are untouched between the prior deploy and this point, so the
-# live file IS the OLD file - remote_src copy captures the right content.
+# setenv.sh / context.xml are templated only on fresh installs, so on an upgrade
+# the live file is still the OLD one - remote_src copy captures it.
 - name: Backup config files that exist (setenv.sh, context.xml)
   ansible.builtin.copy:
     src:        "{{ item.item.src }}"
@@ -806,14 +785,11 @@
     daemon_reload: true
 
 # ── Wait for app to be ready ──────────────────────────────────────────────────
-# Phase 1 - internal readiness: wait until Tomcat logs "Server startup in"
-#   AFTER the most recent service activation timestamp. The timestamp filter
-#   prevents a stale match on upgrade - catalina.out is append-only so a plain
-#   grep would hit the previous run's startup line immediately.
-# Phase 2 - external reachability (optional): if openspecimen_app_url is set,
-#   curl that URL from the Ansible control node to confirm the ALB / reverse-
-#   proxy path is live. delegate_to: localhost exercises the real network stack
-#   rather than a loopback from the server to itself.
+# Phase 1: wait until catalina.out logs "Server startup in" AFTER the service's
+#   last activation timestamp (append-only log, so the timestamp filter avoids a
+#   stale match from the previous run).
+# Phase 2 (opt-in): if app_url is set, curl it from the control node (real network
+#   path, not a loopback) to confirm the front-end is live.
 
 - name: Wait for Tomcat startup completion
   block:
