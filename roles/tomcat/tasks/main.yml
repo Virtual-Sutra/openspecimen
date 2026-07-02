@@ -131,7 +131,7 @@
     # (the default/prod instance) even when a co-located instance is deploying.
     - name: Overlay OpenSpecimen config from the bundle over the pinned Tomcat
       ansible.builtin.shell: |
-        set -o pipefail
+        set -eo pipefail
         rm -rf /tmp/os-tomcat-bundle
         mkdir -p /tmp/os-tomcat-bundle
         unzip -o /tmp/tomcat-as.zip -d /tmp/os-tomcat-bundle \
