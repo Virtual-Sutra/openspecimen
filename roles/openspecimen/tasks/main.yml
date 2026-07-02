@@ -794,15 +794,16 @@
 - name: Wait for Tomcat startup completion
   block:
     - name: Wait for service active and startup in catalina.out since last activation
+      # Service / catalina_base / lookback come via environment so the Python body
+      # has NO Jinja - inline {{ }} in a shell body can trip Ansible's split_args.
       ansible.builtin.shell: |
         python3 << 'PYEOF'
-        import subprocess, datetime, re, sys
+        import subprocess, datetime, re, sys, os
         result = subprocess.run(
-            ['systemctl', 'show', '{{ openspecimen_service_name | default("openspecimen") }}', '-p', 'ActiveEnterTimestamp', '--value'],
+            ['systemctl', 'show', os.environ['OS_SERVICE'], '-p', 'ActiveEnterTimestamp', '--value'],
             capture_output=True, text=True)
-        # Normalise: strip microseconds then timezone word - both systemd and
-        # Tomcat use the same local clock so TZ is irrelevant for comparison,
-        # and strptime('%Z') only reliably parses UTC/GMT on most Python builds.
+        # Strip microseconds then the timezone word (systemd + Tomcat share the local
+        # clock; strptime('%Z') only parses UTC/GMT reliably).
         ts_str = re.sub(r'(\d{2}:\d{2}:\d{2})\.\d+', r'\1', result.stdout.strip())
         ts_str = re.sub(r'\s\S+$', '', ts_str)
         if not ts_str:
@@ -811,20 +812,17 @@
             svc_start = datetime.datetime.strptime(ts_str, '%a %Y-%m-%d %H:%M:%S')
         except ValueError:
             sys.exit(1)
-        # Bound the scan to the last {{ openspecimen_health_lookback_min | default(20) }}
-        # minutes so a stale service-start timestamp doesn't sweep in unrelated old
-        # errors. A fresh (re)start makes svc_start the effective cutoff anyway.
+        # Bound the scan to the last OS_LOOKBACK_MIN minutes so a stale service-start
+        # timestamp does not sweep in unrelated old errors.
         cutoff = max(svc_start, datetime.datetime.now()
-                     - datetime.timedelta(minutes={{ openspecimen_health_lookback_min | default(20) }}))
+                     - datetime.timedelta(minutes=int(os.environ['OS_LOOKBACK_MIN'])))
         log_re = re.compile(r'^(\d{2}-\w{3}-\d{4} \d{2}:\d{2}:\d{2})\.')
-        # Fail-fast markers: Tomcat logs one of these when the webapp context
-        # aborts (e.g. a Liquibase lock timeout). Detecting them lets the task
-        # fail in seconds (rc 2) instead of spinning the full retry window after
-        # the app has already given up.
+        # Fail-fast markers: Tomcat logs one when the webapp context aborts, so we
+        # fail in seconds (rc 2) instead of spinning the full retry window.
         fail_markers = ('One or more listeners failed to start',
                         'startup failed due to previous errors')
         try:
-            with open('{{ catalina_base }}/logs/catalina.out') as f:
+            with open(os.environ['OS_CATALINA_BASE'] + '/logs/catalina.out') as f:
                 for line in f:
                     m = log_re.match(line)
                     if not m:
@@ -843,10 +841,13 @@
             pass
         sys.exit(1)
         PYEOF
+      environment:
+        OS_SERVICE: "{{ openspecimen_service_name | default('openspecimen') }}"
+        OS_CATALINA_BASE: "{{ catalina_base }}"
+        OS_LOOKBACK_MIN: "{{ openspecimen_health_lookback_min | default(20) }}"
       become: true
       register: health_check
-      # rc 0 = started, rc 2 = startup failed (abort now), rc 1 = still starting
-      # (retry). Stop the loop on anything but rc 1; treat rc 2 as a failure.
+      # rc 0 = started, rc 2 = startup failed (abort), rc 1 = still starting (retry).
       until: health_check.rc != 1
       failed_when: health_check.rc == 2
       retries: 90
