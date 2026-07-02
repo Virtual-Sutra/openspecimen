@@ -56,18 +56,15 @@
 
 # Preseed debconf so mysql-community-server installs non-interactively with an
 # empty root password (root is normalised to auth_socket after start, below).
+# Use debconf-set-selections directly: the ansible.builtin.debconf module needs
+# debconf-utils, which isn't installed on a fresh box.
 - name: Preseed MySQL debconf for non-interactive install (Debian)
-  ansible.builtin.debconf:
-    name: mysql-community-server
-    question: "{{ item.question }}"
-    vtype: password
-    value: ""
-  loop:
-    - { question: "mysql-community-server/root-pass" }
-    - { question: "mysql-community-server/re-root-pass" }
-  loop_control:
-    label: "{{ item.question }}"
-  no_log: true
+  ansible.builtin.shell: >-
+    printf '%s\n%s\n'
+    'mysql-community-server mysql-community-server/root-pass password'
+    'mysql-community-server mysql-community-server/re-root-pass password'
+    | debconf-set-selections
+  changed_when: false
   when: ansible_facts['os_family'] == 'Debian'
 
 # ── Write config before install ───────────────────────────────────────────────
