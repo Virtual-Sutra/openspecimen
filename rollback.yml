@@ -1,41 +1,10 @@
 ---
-# Day-2: Roll back OpenSpecimen to a previous timestamped backup.
-#
-# This is a thin wrapper around roles/openspecimen/tasks/rollback.yml so that
-# the same tasks are usable as both:
-#   1. A standalone playbook (operator CLI - this file), and
-#   2. An included task list (site.yml when a downgrade is detected
-#      automatically - see roles/openspecimen/tasks/direction.yml).
-#
-# Backup selection (in order of precedence):
-#   1. backup_timestamp   : restore from this specific timestamped directory
-#   2. target_version     : restore from the backup whose .release matches this
-#   3. (neither)          : restore from the most recent backup (by mtime)
-#
-# Rollback restores the prior deploy backup END TO END - WAR, config, plugins,
-# and (for local MySQL) the database dump together - so the schema is always
-# brought back with the app. Discards data written after the backup, which is
-# inherent to a full rollback.
-#
-# Usage:
-#   # Roll back to the most recent backup (default)
-#   ansible-playbook -i inventory/customers/<name>/ rollback.yml \
-#     -e @secrets/<name>.yml --vault-password-file .vault-pass
-#
-#   # Roll back to a specific timestamped backup
-#   ansible-playbook -i inventory/customers/<name>/ rollback.yml \
-#     -e backup_timestamp=15062026_103247 \
-#     -e @secrets/<name>.yml --vault-password-file .vault-pass
-#
-#   # Roll back to whichever backup matches a specific OpenSpecimen version
-#   ansible-playbook -i inventory/customers/<name>/ rollback.yml \
-#     -e target_version=openspecimen_v12.1.RC8 \
-#     -e @secrets/<name>.yml --vault-password-file .vault-pass
-#
-#   # Dry run (no service stop, no file moves)
-#   ansible-playbook -i inventory/customers/<name>/ rollback.yml --check
-#
-# Target: ≤ 5 minutes total.
+# Day-2: roll back OpenSpecimen to a previous timestamped backup. Thin wrapper
+# around roles/openspecimen/tasks/rollback.yml (also included by site.yml on an
+# auto-downgrade). Backup selection: backup_timestamp > target_version (.release
+# match) > most recent. Restores WAR + config + plugins + (local MySQL) DB dump
+# END TO END, discarding data written after the backup. Usage examples +
+# -e options in docs/DEPLOY-UPGRADE.md. Target: <= 5 minutes.
 
 - name: Roll back OpenSpecimen
   hosts: openspecimen
