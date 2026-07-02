@@ -23,3 +23,9 @@ tomcat_download_url: >-
 # For an air-gapped mirror, override tomcat_download_url and set a literal
 # "sha512:<hash>" (or "sha256:<hash>") here.
 tomcat_download_checksum: "sha512:{{ tomcat_download_url }}.sha512"
+
+# Download resilience: archive.apache.org is slow for archived versions, so the
+# fetch uses a generous read timeout and retries. Override for a fast local mirror.
+tomcat_download_timeout: 60   # seconds per attempt
+tomcat_download_retries: 5
+tomcat_download_delay:   10    # seconds between retries
