@@ -1,21 +1,10 @@
 ---
-# Rollback flow - included from two places:
-#
-#   1. Top-level rollback.yml  (operator runs explicitly)
-#   2. site.yml pre_task - when the requested release is older
-#      than the installed release (downgrade direction detected)
-#
-# Backup selection (in order of precedence):
-#   1. backup_timestamp   : restore from this specific timestamped directory
-#   2. target_version     : restore from the backup whose .release matches this
-#                           (used by the auto-rollback path - pass the requested
-#                           openspecimen_release as target_version)
-#   3. (neither)          : restore from the most recent backup (mtime)
-#
-# Rollback restores the prior deploy backup END TO END - WAR, config, plugins,
-# and (for local MySQL) the database dump together - so the schema is always
-# brought back with the app. There is no separate schema-drift concern and no
-# allow_downgrade override.
+# Rollback flow - included from top-level rollback.yml (explicit) or site.yml
+# (auto, when the requested release is older than installed).
+# Backup selection (precedence): backup_timestamp > target_version (.release match,
+# used by auto-rollback) > most recent (mtime).
+# Restores the prior backup END TO END - WAR, config, plugins, and (local MySQL) the
+# DB dump together - so schema comes back with the app (no schema-drift concern).
 
 # ── 1. Resolve which backup to restore ───────────────────────────────────────
 
@@ -158,10 +147,8 @@
       - "Backup mtime  : {{ '%Y-%m-%d %H:%M:%S' | strftime(_restore_stat.stat.mtime) }}"
       - "WAR size      : {{ (_war_stat.stat.size / 1024 / 1024) | round(1) }} MB"
 
-# Probe the DB dump in the backup. Rollback restores it as part of the
-# end-to-end revert (local MySQL). RDS / Oracle / large-DB manual-backup
-# upgrades have no local dump - those warn below and need an RDS-snapshot /
-# manual DB restore to complete the rollback.
+# Probe the backup's DB dump (local MySQL). RDS/Oracle/large-DB upgrades have no
+# local dump - those warn below and need a snapshot/manual DB restore.
 - name: Probe database dump in backup
   ansible.builtin.find:
     paths:    "{{ _restore_path }}/db"
@@ -179,12 +166,9 @@
     state: stopped
 
 # ── 3b. Restore database (end-to-end rollback) ───────────────────────────────
-# Always part of the rollback: brings WAR + schema + data back to the backup
-# point together so the rolled-back app runs against its matching schema.
-# Discards data written after the backup - inherent to a full rollback. Local
-# MySQL only; the dump used --add-drop-database so it drops+recreates the schema
-# cleanly (the DB user needs CREATE/DROP on its own schema - true for the local
-# :ALL grant). RDS/Oracle have no local dump - see the warning below.
+# Brings WAR + schema + data back to the backup point together (discards data
+# written after it - inherent to a full rollback). Local MySQL only; the dump used
+# --add-drop-database (drops+recreates cleanly). RDS/Oracle have no local dump.
 - name: Restore database from backup dump
   ansible.builtin.shell: |
     set -o pipefail

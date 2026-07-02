@@ -8,11 +8,8 @@ apache_https_port:  443
 # openspecimen-<name>.conf - each instance owns its own vhost.
 apache_vhost_name: "{{ openspecimen_service_name | default('openspecimen') }}"
 
-# Enable the Apache reverse-proxy front-end. Defaults to "on when
-# openspecimen_app_url is set" - a customer with a public hostname is fronted
-# by Apache; a bare Tomcat (AWS/ALB path) is not. Override explicitly here, or
-# via -e apache_enabled=... on the playbook / Jenkins job, which takes
-# precedence over group_vars (native Ansible extra-vars precedence).
+# Enable the Apache reverse-proxy front-end. Defaults on when openspecimen_app_url
+# is set (public hostname → fronted; bare Tomcat/ALB → not). Override via -e.
 apache_enabled: "{{ (openspecimen_app_url | default('') | trim | length) > 0 }}"
 
 # VirtualHost ServerName - derived from openspecimen_app_url (scheme and path
@@ -23,12 +20,9 @@ apache_server_name: >-
      if (openspecimen_app_url | default('') | trim | length) > 0
      else (ansible_fqdn | default(ansible_hostname)) }}
 
-# Proxy protocol to the local Tomcat backend: 'http' (default) or 'ajp'.
-#   http → http://localhost:<openspecimen_port>/openspecimen/ - no AJP exposure,
-#          avoids Ghostcat (CVE-2020-1938). Safe default for upstream.
-#   ajp  → ajp://127.0.0.1:<apache_ajp_port>/openspecimen/ - matches operator
-#          sample configs. The Tomcat AJP connector is bound to 127.0.0.1 by the
-#          tomcat role, so it is never reachable off-box (Ghostcat mitigation).
+# Proxy protocol to the local Tomcat: 'http' (default, no AJP exposure) or 'ajp'
+# (matches operator samples; the tomcat role binds AJP to 127.0.0.1, so it's never
+# reachable off-box - Ghostcat CVE-2020-1938 mitigation).
 apache_proxy_protocol: http
 # Explicit AJP backend port override. Normally leave unset - the backend below
 # proxies to THIS instance's Tomcat AJP port (openspecimen_ajp_port) so each
