@@ -24,8 +24,8 @@
     path: "{{ item }}"
     state: absent
   loop:
-    - "{{ _instance.catalina_base }}/webapps/openspecimen.war"
-    - "{{ _instance.catalina_base }}/webapps/openspecimen"
+    - "{{ _instance.catalina_base }}/webapps/{{ _instance.war_name }}.war"
+    - "{{ _instance.catalina_base }}/webapps/{{ _instance.war_name }}"
 
 # Remove ONLY this instance's Apache front-end - never the whole config. Covers both
 # routing modes: the domain-mode vhost (sites-available + sites-enabled link on Debian,

@@ -266,9 +266,10 @@
   ansible.builtin.shell: |
     WEBAPPS="{{ catalina_base }}/webapps"
     DEST="{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}"
-    if [ -f "$WEBAPPS/openspecimen.war" ]; then
-      mv "$WEBAPPS/openspecimen.war" "$DEST/"
-      rm -rf "$WEBAPPS/openspecimen"
+    WAR="{{ openspecimen_war_name }}"
+    if [ -f "$WEBAPPS/$WAR.war" ]; then
+      mv "$WEBAPPS/$WAR.war" "$DEST/"
+      rm -rf "$WEBAPPS/$WAR"
     fi
   when:
     - openspecimen_install_type == 'upgrade'
@@ -422,6 +423,9 @@
 - name: Deploy openspecimen.war
   block:
     - name: Extract openspecimen.war from release zip
+      # The zip always contains openspecimen.war; deploy it under the instance's
+      # context filename (webapps/<war_name>.war) so Tomcat serves it at the
+      # matching context path (default openspecimen.war → /openspecimen).
       ansible.builtin.shell: |
         set -eo pipefail
         WAR=$(echo "{{ _zip_contents.stdout }}" \
@@ -431,10 +435,10 @@
           exit 1
         fi
         unzip -p /tmp/{{ openspecimen_release }}.zip "$WAR" \
-          > {{ catalina_base }}/webapps/openspecimen.war
+          > {{ catalina_base }}/webapps/{{ openspecimen_war_name }}.war
       args:
         executable: /bin/bash
-        creates: "{{ catalina_base }}/webapps/openspecimen.war"
+        creates: "{{ catalina_base }}/webapps/{{ openspecimen_war_name }}.war"
       notify: restart openspecimen
   rescue:
     - name: Fail with operator guidance for WAR extraction error
@@ -443,7 +447,7 @@
           ✗ Could not extract openspecimen.war from the release zip.
 
           Release zip:    /tmp/{{ openspecimen_release }}.zip
-          Target path:    {{ catalina_base }}/webapps/openspecimen.war
+          Target path:    {{ catalina_base }}/webapps/{{ openspecimen_war_name }}.war
           Customer:       {{ inventory_hostname }}
 
           What likely happened:
@@ -464,7 +468,7 @@
 
 - name: Set WAR ownership
   ansible.builtin.file:
-    path: "{{ catalina_base }}/webapps/openspecimen.war"
+    path: "{{ catalina_base }}/webapps/{{ openspecimen_war_name }}.war"
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
     mode: '0644'

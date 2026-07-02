@@ -1,0 +1,10 @@
+---
+# WAR filename → Tomcat context. The release zip always contains openspecimen.war;
+# it is deployed to webapps/<war_name>.war so Tomcat derives the context from the
+# filename ('#' encodes nested paths). Default context /openspecimen → openspecimen.war
+# (unchanged). A co-located instance with context_path /openspecimen-test deploys
+# openspecimen-test.war → context /openspecimen-test, so path-mode Apache routing
+# proxies 1:1 and OpenSpecimen's context-relative base href resolves under that path.
+# Lazily evaluated, so it picks up the per-instance openspecimen_context_path (shimmed
+# in deploy-instance.yml, or the flat customer var in rollback/cleanup).
+openspecimen_war_name: "{{ (openspecimen_context_path | default('/openspecimen')) | regex_replace('/+$', '') | regex_replace('^/', '') | regex_replace('/', '#') }}"
