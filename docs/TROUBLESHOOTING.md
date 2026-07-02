@@ -94,8 +94,16 @@ the target node.
 
 ## Health check times out after deploy
 
-**Symptom:** The `openspecimen` role waits for the health check URL and times
-out with "Condition check failed".
+**Symptom:** The post-restart readiness gate ("Wait until OpenSpecimen serves the
+app") times out with "Condition check failed".
+
+**How the gate probes** (so you know what "up" means): when the instance is
+Apache-fronted (`apache_enabled`, typically AJP), a direct `localhost:<port>` hit
+answers `302/403` because the request `Host` ≠ `app.url` - so the gate instead
+probes `app_url/ui-app/` through the **local** Apache (`curl --resolve <host>:<port>:127.0.0.1`,
+`-k` since it's a liveness probe). Otherwise (direct Tomcat, or ALB-direct) it
+probes `localhost:<port>` and accepts `200|302|401|403`. So a timeout means the
+app truly isn't serving through that path - not a code/URL mismatch.
 
 **Common causes:**
 

@@ -107,10 +107,8 @@
     state: started
     enabled: true
 
-# A fresh install (or the Debian reinit path) applies mysqld.cnf at data-dir init,
-# so no restart is needed there. But when the config changes on an ALREADY-installed
-# server (e.g. adding mysql_native_password=ON on a re-run), the running server
-# still has the old settings - restart it so the new options take effect before
+# A fresh install applies mysqld.cnf at data-dir init; an already-installed server
+# needs a restart to pick up config changes (e.g. mysql_native_password=ON) before
 # any DB user is created.
 - name: Restart MySQL to apply config changes on an existing install
   ansible.builtin.service:
@@ -156,12 +154,10 @@
     - _mysql_tmp_pass.stdout | length > 0
 
 # ── Debian/Ubuntu: normalise root to auth_socket ─────────────────────────────
-# MySQL community-server installs non-interactively with an empty root password
-# (preseeded above) and, unlike Ubuntu's own package, does not pre-configure
-# auth_socket. If root socket auth is broken instead (e.g. a re-used instance
-# with an unknown password), wipe + re-init to a clean empty-password data dir.
-# Either path ends by normalising root to auth_socket so create_db.yml can
-# connect over the socket with no password.
+# community-server installs with an empty (preseeded) root password and no
+# auth_socket. If root socket auth is broken (re-used instance), wipe + re-init a
+# clean data dir. Either path ends with root on auth_socket so create_db.yml
+# connects over the socket with no password.
 
 - name: Check MySQL root socket connectivity (Debian)
   ansible.builtin.command:
@@ -171,10 +167,8 @@
   changed_when: false
   when: ansible_facts['os_family'] == 'Debian'
 
-# Before any reinit, positively confirm there is no user data to lose. The wipe
-# below is only ever safe when the data dir holds nothing but the system schemas
-# (mysql/sys/performance_schema) - i.e. a genuinely fresh box. Any other database
-# directory (e.g. openspecimen / os_*) means live data: refuse to wipe.
+# Data-safety guard: only wipe when the data dir holds nothing but the system
+# schemas (mysql/sys/performance_schema). Any other database dir = live data → fail.
 - name: Scan for existing user databases before reinit (Debian)
   ansible.builtin.find:
     paths: /var/lib/mysql
