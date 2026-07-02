@@ -132,6 +132,15 @@
           loop_control:
             label: "{{ item.path }}"
 
+        # path-mode drop-in dirs (openspecimen.d/) sit outside the vhost dirs above.
+        - name: Remove the path-mode Apache drop-in directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /etc/apache2/openspecimen.d
+            - /etc/httpd/openspecimen.d
+
         - name: Remove the OpenSpecimen tree (Tomcat binary + all instances)
           ansible.builtin.file:
             path: /usr/local/openspecimen

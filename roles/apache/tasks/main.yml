@@ -88,7 +88,8 @@
     - downtime.html
     - OS_LOGO_BANNER.png
 
-- name: Deploy OpenSpecimen VirtualHost config
+# ── DOMAIN mode (default): one full vhost per instance on its own ServerName ──
+- name: Deploy OpenSpecimen VirtualHost config (domain mode)
   ansible.builtin.template:
     src: openspecimen.conf.j2
     dest: "{{ _apache_conf_dir }}/{{ apache_vhost_name }}.conf"
@@ -100,15 +101,72 @@
   # is never loaded - `apache2ctl -t -f <vhost>` fails with "No MPM loaded". The
   # full configtest below validates the real config (base + MPM + this vhost)
   # once the site is enabled.
+  when: apache_routing_mode != 'path'
   notify: reload apache
 
-- name: Enable site (Debian)
+- name: Enable site (Debian, domain mode)
   ansible.builtin.file:
     src: "{{ _apache_conf_dir }}/{{ apache_vhost_name }}.conf"
     dest: "{{ _apache_conf_link | dirname }}/{{ apache_vhost_name }}.conf"
     state: link
-  when: ansible_os_family == 'Debian'
+  when:
+    - apache_routing_mode != 'path'
+    - ansible_os_family == 'Debian'
   notify: reload apache
+
+- name: Remove this instance's path-mode snippet (not in path mode)
+  ansible.builtin.file:
+    path: "{{ _apache_dropin_dir }}/{{ apache_vhost_name }}.conf"
+    state: absent
+  when: apache_routing_mode != 'path'
+  notify: reload apache
+
+# ── PATH mode: shared vhost on one ServerName + one Include'd snippet per instance ──
+- name: Path mode - render shared vhost and this instance's mount snippet
+  when: apache_routing_mode == 'path'
+  block:
+    - name: Remove this instance's domain-mode vhost (switching to path mode)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ _apache_conf_dir }}/{{ apache_vhost_name }}.conf"
+        - "{{ _apache_conf_link | dirname }}/{{ apache_vhost_name }}.conf"
+      notify: reload apache
+
+    - name: Create the path-mode drop-in directory
+      ansible.builtin.file:
+        path: "{{ _apache_dropin_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Deploy the shared base vhost (instance-agnostic)
+      ansible.builtin.template:
+        src: openspecimen-shared.conf.j2
+        dest: "{{ _apache_conf_dir }}/{{ apache_shared_vhost_name }}.conf"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload apache
+
+    - name: Enable the shared vhost (Debian)
+      ansible.builtin.file:
+        src: "{{ _apache_conf_dir }}/{{ apache_shared_vhost_name }}.conf"
+        dest: "{{ _apache_conf_link | dirname }}/{{ apache_shared_vhost_name }}.conf"
+        state: link
+      when: ansible_os_family == 'Debian'
+      notify: reload apache
+
+    - name: Deploy this instance's path mount snippet
+      ansible.builtin.template:
+        src: openspecimen-path-snippet.conf.j2
+        dest: "{{ _apache_dropin_dir }}/{{ apache_vhost_name }}.conf"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload apache
 
 # Validate the FULL Apache config (base + MPM + the now-enabled vhost) before
 # (re)starting. apachectl/apache2ctl source the distro env (APACHE_* vars on

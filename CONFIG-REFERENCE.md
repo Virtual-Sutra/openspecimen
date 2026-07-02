@@ -215,14 +215,22 @@ leave it disabled - the ALB terminates TLS instead.
 | Variable | Default | What it sets |
 |----------|---------|--------------|
 | `apache_enabled` | `true` when `openspecimen_app_url` is set, else `false` | Whether the role runs. Override explicitly, or via `-e apache_enabled=...` (Jenkins job / playbook), which takes precedence over inventory. |
-| `apache_proxy_protocol` | `http` | Backend to Tomcat: `http` (`http://localhost:<openspecimen_port>/openspecimen/`, avoids Ghostcat) or `ajp` (`ajp://127.0.0.1:<apache_ajp_port>/openspecimen/`). |
+| `apache_routing_mode` | `domain` | How co-located instances are exposed. `domain`: each instance on its OWN `ServerName`, mounted at its context path (one vhost per instance). `path`: instances SHARE one `ServerName`, each at its OWN context path (a shared base vhost that `Include`s one drop-in snippet per instance). Both mount at the context path, so `app.url` is identical either way. See MULTI-INSTANCE.md. |
+| `apache_shared_server_name` | `apache_server_name` | `path` mode only: the shared `ServerName` every path-mounted instance answers on. All co-located instances must resolve the same host. |
+| `apache_path_prefix` | `openspecimen_context_path` (`/openspecimen`) | URL path this instance mounts at (both modes). Proxied 1:1 to the same Tomcat context (trailing-slash mount, so sibling paths never overlap). Set `app.url` to `<scheme>://<host><context_path>`. |
+| `apache_shared_vhost_name` | `openspecimen-shared` | `path` mode only: filename of the shared base vhost (instance-agnostic; every co-located deploy renders it identically). |
+| `apache_proxy_protocol` | `http` | Backend to Tomcat: `http` (`http://localhost:<openspecimen_port>`, avoids Ghostcat) or `ajp` (`ajp://127.0.0.1:<apache_ajp_port>`). The context path is appended, so the proxy is 1:1. |
 | `apache_ajp_port` | `8009` | Tomcat AJP connector port (used when `apache_proxy_protocol: ajp`). The tomcat role binds this connector to `127.0.0.1`. |
-| `apache_enable_ssl` | `false` | Terminate TLS at Apache (adds an 80→443 redirect + HSTS). Requires the cert/key below. |
+| `apache_enable_ssl` | `false` | Terminate TLS at Apache (adds an 80→443 redirect + HSTS). Requires the cert/key below. In `path` mode all co-located instances share the one cert (same host). |
 | `apache_ssl_self_signed` | `false` | When SSL is on and no cert exists, generate a self-signed cert at the paths below (internal/test only - browsers warn). |
 | `apache_ssl_cert_file` / `apache_ssl_key_file` | `""` | Cert/key paths. Stage a CA-issued cert here, or let `apache_ssl_self_signed` create one. |
-| `apache_server_name` | derived from `openspecimen_app_url` (scheme/path stripped), else host FQDN | VirtualHost `ServerName`. |
+| `apache_server_name` | derived from `openspecimen_app_url` (scheme/path stripped), else host FQDN | VirtualHost `ServerName` in `domain` mode. |
 | `apache_http_port` / `apache_https_port` | `80` / `443` | Listen ports. |
 | `apache_security_headers` | `true` | Emit X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy (and HSTS when SSL). |
+
+> **Mount path:** both modes proxy the app at its **context path** (e.g. `https://host/openspecimen`),
+> 1:1 to Tomcat - the bare domain root redirects there. (Earlier builds served `domain` mode at `/`;
+> set `app.url` to include the context path.)
 
 > **RHEL note:** `mod_proxy*` / `mod_headers` are auto-loaded from the base `httpd` package, but
 > `mod_ssl` is a separate package - the role installs it automatically when `apache_enable_ssl` is set.

@@ -80,6 +80,32 @@ Override any derived field by setting it explicitly on the instance. Ports are
 asserted unique across the host at the start of the run (set explicit `*_port`
 values or space the instances out if the derived ports would collide).
 
+## Public routing: domain vs path (`apache_routing_mode`)
+
+When the Apache front-end is enabled, two co-located instances can be published
+either on **separate domains** or on **separate paths of one domain**. Both modes
+mount each instance at its **context path** and proxy 1:1 to its Tomcat, so `app.url`
+is the same in either mode and switching modes needs no app-side change. Pick per
+deployment (default `domain`):
+
+| | `apache_routing_mode: domain` (default) | `apache_routing_mode: path` |
+|---|---|---|
+| Domain | **different** per instance (`apache_server_name` from each `app.url`) | **one shared** (`apache_shared_server_name`) |
+| Path | **common** context path across the domains | **distinct** context path per instance |
+| Example | `https://prod.example.com/openspecimen`  ·  `https://test.example.com/openspecimen` | `https://example.com/openspecimen`  ·  `https://example.com/openspecimen-test` |
+| Apache | one full vhost per instance | one shared base vhost that `Include`s one drop-in snippet per instance (`<dropin>/<service>.conf`) |
+
+**Path mode setup:** give each instance a distinct `context_path` (e.g. `/openspecimen`
+and `/openspecimen-test`), set each `app.url` to `https://<shared-host><context_path>`,
+and set `apache_routing_mode: path`. The shared base vhost (`openspecimen-shared.conf`)
+is instance-agnostic — every co-located deploy renders it identically — and each deploy
+manages only its own path snippet. Trailing-slash mounts keep sibling paths from
+overlapping, so Include order is irrelevant. In path mode all instances share one TLS
+cert (same host).
+
+**Switching modes** for an instance is clean: a `domain`-mode deploy removes that
+instance's stale path snippet, and a `path`-mode deploy removes its stale domain vhost.
+
 ## Per-instance Tomcat runtime
 
 One shared Tomcat binary (`CATALINA_HOME` = `tomcat_home`, installed host-level)

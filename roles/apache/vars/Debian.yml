@@ -7,3 +7,6 @@ _apache_log_dir:  /var/log/apache2
 _apache_webroot:  /var/www/html
 _apache_modules:  [proxy, proxy_http, proxy_ajp, headers, expires]
 _apache_ssl_modules: [ssl]
+# path mode: per-instance proxy snippets Include'd by the shared vhost. NOT under
+# sites-enabled/ - only the shared vhost pulls them in (inside its <VirtualHost>).
+_apache_dropin_dir: /etc/apache2/openspecimen.d

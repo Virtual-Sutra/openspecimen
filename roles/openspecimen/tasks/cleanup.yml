@@ -27,10 +27,12 @@
     - "{{ _instance.catalina_base }}/webapps/openspecimen.war"
     - "{{ _instance.catalina_base }}/webapps/openspecimen"
 
-# Remove ONLY this instance's Apache vhost (sites-available + sites-enabled link on
-# Debian, conf.d on RedHat) - never the whole Apache config. A co-located instance
-# owns openspecimen-<name>.conf; the default instance owns openspecimen.conf.
-- name: "[{{ _instance.name }}] Remove this instance's Apache vhost"
+# Remove ONLY this instance's Apache front-end - never the whole config. Covers both
+# routing modes: the domain-mode vhost (sites-available + sites-enabled link on Debian,
+# conf.d on RedHat) AND the path-mode proxy snippet under openspecimen.d/. The shared
+# path-mode base vhost is intentionally left (other instances may still use it); it is
+# removed by full_wipe.
+- name: "[{{ _instance.name }}] Remove this instance's Apache vhost + path snippet"
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
@@ -38,6 +40,8 @@
     - "/etc/apache2/sites-available/{{ _instance.apache_vhost_name }}.conf"
     - "/etc/apache2/sites-enabled/{{ _instance.apache_vhost_name }}.conf"
     - "/etc/httpd/conf.d/{{ _instance.apache_vhost_name }}.conf"
+    - "/etc/apache2/openspecimen.d/{{ _instance.apache_vhost_name }}.conf"
+    - "/etc/httpd/openspecimen.d/{{ _instance.apache_vhost_name }}.conf"
 
 # Best-effort reload so the running proxy stops serving the removed instance.
 # Skipped on full_wipe (Apache is removed there) and harmless if Apache is absent

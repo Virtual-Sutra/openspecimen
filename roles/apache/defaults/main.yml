@@ -39,13 +39,41 @@ apache_ssl_key_file:  ""
 # (browsers will warn on the untrusted cert). Set the cert/key paths when true.
 apache_ssl_self_signed: false
 
-# Proxy backend URL - per instance: AJP/HTTP to THIS instance's Tomcat port.
-# openspecimen_ajp_port / openspecimen_port are shimmed per instance; apache_ajp_port
-# is an optional explicit override of the AJP port only.
-apache_proxy_backend: >-
-  {{ ('ajp://127.0.0.1:' ~ (openspecimen_ajp_port | default(apache_ajp_port)) ~ '/openspecimen/')
+# ── Multi-instance public routing (ADR-007) ───────────────────────────────────
+# How co-located instances are exposed behind Apache. BOTH modes mount each instance at
+# its context path (apache_path_prefix) and proxy 1:1 - so app.url is identical either
+# way and switching modes needs no app change. The modes differ only in the axis that
+# distinguishes instances:
+#   domain - each instance answers on its OWN ServerName (apache_server_name); the path
+#            (context) is common across the domains. e.g.
+#            https://prod.example.com/openspecimen + https://test.example.com/openspecimen
+#            One full vhost per instance. (default)
+#   path   - instances SHARE one ServerName (apache_shared_server_name); each is mounted
+#            at its OWN path (context). e.g.
+#            https://example.com/openspecimen (prod) + https://example.com/openspecimen-test
+#            Rendered as a shared base vhost that Includes one drop-in proxy snippet per
+#            instance, so each single-instance deploy manages only its own path snippet.
+apache_routing_mode: domain
+
+# path mode: the shared ServerName every path-mounted instance answers on. Defaults to
+# apache_server_name, so all co-located instances must resolve the same public host.
+apache_shared_server_name: "{{ apache_server_name }}"
+
+# The URL path this instance mounts at (both modes). Defaults to its context_path so the
+# proxy is 1:1; set app.url to <scheme>://<host>{{ '<context_path>' }}.
+apache_path_prefix: "{{ openspecimen_context_path | default('/openspecimen') }}"
+
+# Backend base (no context suffix) - AJP/HTTP to THIS instance's Tomcat port. The mount
+# appends apache_path_prefix so the proxy is 1:1 to the same Tomcat context.
+# openspecimen_ajp_port / openspecimen_port are shimmed per instance; apache_ajp_port is
+# an optional explicit override of the AJP port only.
+apache_path_backend: >-
+  {{ ('ajp://127.0.0.1:' ~ (openspecimen_ajp_port | default(apache_ajp_port)))
      if apache_proxy_protocol == 'ajp'
-     else ('http://localhost:' ~ openspecimen_port ~ '/openspecimen/') }}
+     else ('http://localhost:' ~ openspecimen_port) }}
+
+# path mode: fixed vhost name for the shared base vhost (one per host, instance-agnostic).
+apache_shared_vhost_name: openspecimen-shared
 
 # Add defensive response headers (incl. HSTS when SSL is terminated here).
 apache_security_headers: true

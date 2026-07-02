@@ -1,7 +1,10 @@
 # Managed by Ansible - do not edit by hand.
-# Backend: {{ apache_proxy_protocol | upper }} ({{ apache_proxy_backend }}). AJP is
-# bound to 127.0.0.1 (mitigates CVE-2020-1938 Ghostcat). Instances route by distinct
-# ServerName on 80/443, not custom ports (ADR-007).
+# DOMAIN routing mode (ADR-007): this instance answers on its OWN ServerName and is
+# mounted at its context path ({{ apache_path_prefix }}), proxied 1:1 to its Tomcat
+# ({{ apache_proxy_protocol | upper }} backend {{ apache_path_backend }}). Same mount
+# path as path mode - the modes differ only in domain-vs-path, so app.url is identical
+# either way. AJP is bound to 127.0.0.1 (mitigates CVE-2020-1938 Ghostcat). Instances
+# route by distinct ServerName on 80/443, not custom ports.
 {% if apache_enable_ssl %}
 <VirtualHost *:{{ apache_http_port }}>
     ServerName {{ apache_server_name }}
@@ -23,14 +26,19 @@
     ServerName {{ apache_server_name }}
 
 {% endif %}
-    # Serve static error pages directly - exclusions must precede the catch-all ProxyPass
+    # Serve static error pages directly - exclusions must precede the ProxyPass.
     ProxyPass /downtime.html    !
     ProxyPass /OS_LOGO_BANNER.png !
 
+    # Send the bare domain root and the bare context (no trailing slash) to the app.
+    RedirectMatch ^/$ {{ apache_path_prefix }}/
+    RedirectMatch ^{{ apache_path_prefix }}$ {{ apache_path_prefix }}/
+
     ProxyPreserveHost On
-    ProxyPass        / {{ apache_proxy_backend }}
-    ProxyPassReverse / {{ apache_proxy_backend }}
-    ProxyPassReverseCookiePath /openspecimen/ /
+    # 1:1 mount at the context path (no cookie/path rewrite - path == Tomcat context).
+    # Trailing slashes keep the mount from overlapping a sibling prefix.
+    ProxyPass        {{ apache_path_prefix }}/ {{ apache_path_backend }}{{ apache_path_prefix }}/
+    ProxyPassReverse {{ apache_path_prefix }}/ {{ apache_path_backend }}{{ apache_path_prefix }}/
 
 {% if apache_security_headers %}
     Header always set X-Frame-Options        "SAMEORIGIN"
