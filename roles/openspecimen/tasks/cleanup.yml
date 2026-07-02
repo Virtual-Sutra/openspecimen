@@ -27,10 +27,51 @@
     - "{{ _instance.catalina_base }}/webapps/openspecimen.war"
     - "{{ _instance.catalina_base }}/webapps/openspecimen"
 
-# Only when the instance has its OWN base (multi-instance). For the single
-# default, catalina_base == the shared CATALINA_HOME, so removing it here would
-# delete the Tomcat binary - that is left to full_wipe instead.
-- name: "[{{ _instance.name }}] Remove the isolated CATALINA_BASE (multi-instance)"
+# Remove ONLY this instance's Apache vhost (sites-available + sites-enabled link on
+# Debian, conf.d on RedHat) - never the whole Apache config. A co-located instance
+# owns openspecimen-<name>.conf; the default instance owns openspecimen.conf.
+- name: "[{{ _instance.name }}] Remove this instance's Apache vhost"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/etc/apache2/sites-available/{{ _instance.apache_vhost_name }}.conf"
+    - "/etc/apache2/sites-enabled/{{ _instance.apache_vhost_name }}.conf"
+    - "/etc/httpd/conf.d/{{ _instance.apache_vhost_name }}.conf"
+
+# Best-effort reload so the running proxy stops serving the removed instance.
+# Skipped on full_wipe (Apache is removed there) and harmless if Apache is absent
+# (bare Tomcat / ALB front-end).
+- name: "[{{ _instance.name }}] Reload Apache after removing the vhost"
+  ansible.builtin.systemd:
+    name: "{{ (ansible_facts['os_family'] == 'RedHat') | ternary('httpd', 'apache2') }}"
+    state: reloaded
+  failed_when: false
+  when: not (full_wipe | default(false) | bool)
+
+# Remove the instance's ENTIRE directory tree (catalina_base + data/plugins/backup
+# all live under it for a co-located instance). Guarded so it can only ever remove a
+# strict subdirectory of the shared root - never /usr/local/openspecimen itself (the
+# legacy single instance resolves instance_dir to the shared root; that is full_wipe's
+# job), and never a path outside the openspecimen tree.
+- name: "[{{ _instance.name }}] Compute instance-dir safety bounds"
+  ansible.builtin.set_fact:
+    _inst_dir:    "{{ _instance.instance_dir | default('') | regex_replace('/+$', '') }}"
+    _shared_root: "{{ (_instance.catalina_home | default(catalina_home | default(tomcat_home))) | dirname | regex_replace('/+$', '') }}"
+
+- name: "[{{ _instance.name }}] Remove the complete instance directory ({{ _inst_dir }})"
+  ansible.builtin.file:
+    path: "{{ _inst_dir }}"
+    state: absent
+  when:
+    - _inst_dir | length > 0
+    - _inst_dir != _shared_root
+    - _inst_dir.startswith(_shared_root ~ '/')
+
+# Fallback for the legacy single instance (instance_dir == shared root, so the
+# wholesale removal above is skipped): drop the instance's own CATALINA_BASE when it
+# is a dedicated base, leaving the shared Tomcat binary for full_wipe.
+- name: "[{{ _instance.name }}] Remove the isolated CATALINA_BASE (legacy fallback)"
   ansible.builtin.file:
     path: "{{ _instance.catalina_base }}"
     state: absent

@@ -1,10 +1,13 @@
 ---
-# Tear down OpenSpecimen so a (test) VM can be reused (ADR-006). DESTRUCTIVE -
-# requires -e cleanup_confirm=true. Default: per-instance teardown (service, webapp,
-# data/plugins/backups/markers, local-MySQL DB+user), leaving the shared Tomcat/
-# MySQL/Java for a fast re-deploy; -e instance=<name> limits to one.
-# -e full_wipe=true ALSO removes the shared bits (whole /usr/local/openspecimen,
-# MySQL server+data, OpenJDK, Apache+vhost) for a from-scratch host reset.
+# Tear down OpenSpecimen so a VM can be reused (ADR-006/009). DESTRUCTIVE -
+# requires -e cleanup_confirm=true. Runs against ONE customer folder = ONE instance.
+# Default: tear down THIS instance only - its service+unit, its complete instance
+# directory (/usr/local/openspecimen/<name>/ for a co-located instance), only its
+# own Apache vhost, and its local-MySQL DB+user - leaving the shared Tomcat/MySQL/
+# Java and any co-located instance untouched.
+# -e full_wipe=true is HOST-WIDE: it removes EVERY instance (all openspecimen*
+# services/units, the whole /usr/local/openspecimen tree, all openspecimen*.conf
+# vhosts) plus the shared Tomcat, Java and MySQL server+data - a from-scratch reset.
 
 - name: Clean up OpenSpecimen
   hosts: openspecimen
@@ -17,10 +20,35 @@
     - name: Require explicit confirmation (destructive)
       ansible.builtin.fail:
         msg: |
-          Refusing to clean up without confirmation. This REMOVES OpenSpecimen
-          {{ 'and WIPES the host (Tomcat, MySQL + data, Java)' if (full_wipe | default(false) | bool) else 'instance(s): ' ~ (_instances | map(attribute='name') | list) }}.
-          Re-run with -e cleanup_confirm=true.
+          Refusing to clean up without confirmation. Re-run with -e cleanup_confirm=true.
+          {% if full_wipe | default(false) | bool %}
+          ⚠  FULL WIPE requested. This is HOST-WIDE, not scoped to one instance:
+             it removes ALL OpenSpecimen instances on this host (every service +
+             systemd unit, the whole /usr/local/openspecimen tree, and every
+             openspecimen*.conf Apache vhost) AND the shared Tomcat, Java, and the
+             MySQL server INCLUDING /var/lib/mysql - every database on the box.
+             A co-located prod instance WILL be destroyed too.
+          {% else %}
+          This removes OpenSpecimen instance(s): {{ _instances | map(attribute='name') | list }}
+          (service, webapp, instance directory, local DB+user). Shared Tomcat/MySQL/
+          Java and other instances are left intact.
+          {% endif %}
       when: not (cleanup_confirm | default(false) | bool)
+
+    - name: Warn before host-wide full wipe
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "  ⚠  FULL WIPE - HOST-WIDE, ALL INSTANCES"
+          - "============================================================"
+          - "  Removing EVERY OpenSpecimen instance on {{ inventory_hostname }}:"
+          - "    - all openspecimen* systemd services + units"
+          - "    - the entire /usr/local/openspecimen tree (all instances)"
+          - "    - all openspecimen*.conf Apache vhosts"
+          - "  plus shared Tomcat, Java, and MySQL server + /var/lib/mysql"
+          - "  (ALL databases). A co-located prod instance is destroyed too."
+          - "============================================================"
+      when: full_wipe | default(false) | bool
 
   tasks:
     - name: Tear down each instance
@@ -54,14 +82,55 @@
             enabled: false
           failed_when: false
 
-        - name: Remove the OpenSpecimen Apache vhost
+        # Full wipe is host-wide: the per-instance loop above only tore down the
+        # resolved instance, so find and remove EVERY OpenSpecimen instance's
+        # systemd unit + Apache vhost (a co-located prod instance would otherwise
+        # leave an orphaned unit/vhost pointing at the now-deleted tree).
+        - name: Find all OpenSpecimen systemd units
+          ansible.builtin.find:
+            paths: /etc/systemd/system
+            patterns: "openspecimen*.service"
+          register: _all_units
+
+        - name: Stop and disable every OpenSpecimen service
+          ansible.builtin.systemd:
+            name: "{{ item.path | basename }}"
+            state: stopped
+            enabled: false
+          loop: "{{ _all_units.files }}"
+          loop_control:
+            label: "{{ item.path | basename }}"
+          failed_when: false
+
+        - name: Remove every OpenSpecimen systemd unit
           ansible.builtin.file:
-            path: "{{ item }}"
+            path: "{{ item.path }}"
             state: absent
-          loop:
-            - /etc/apache2/sites-available/openspecimen.conf
-            - /etc/apache2/sites-enabled/openspecimen.conf
-            - /etc/httpd/conf.d/openspecimen.conf
+          loop: "{{ _all_units.files }}"
+          loop_control:
+            label: "{{ item.path | basename }}"
+
+        - name: Reload systemd after removing all units
+          ansible.builtin.systemd:
+            daemon_reload: true
+
+        - name: Find all OpenSpecimen Apache vhosts
+          ansible.builtin.find:
+            paths:
+              - /etc/apache2/sites-available
+              - /etc/apache2/sites-enabled
+              - /etc/httpd/conf.d
+            patterns: "openspecimen*.conf"
+          register: _all_vhosts
+          failed_when: false
+
+        - name: Remove every OpenSpecimen Apache vhost
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ _all_vhosts.files }}"
+          loop_control:
+            label: "{{ item.path }}"
 
         - name: Remove the OpenSpecimen tree (Tomcat binary + all instances)
           ansible.builtin.file:
