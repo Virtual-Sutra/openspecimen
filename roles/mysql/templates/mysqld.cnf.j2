@@ -19,29 +19,15 @@ bind-address = {{ mysql_bind_address }}
 default-storage-engine = INNODB
 
 # ── Character set ─────────────────────────────────────────────────────────────
-# CONFLICT WITH OFFICIAL DOCS - REVIEW BEFORE UPGRADING
-#
-# Official MySQL prerequisites page recommends utf8mb4:
-#   character-set-server = utf8mb4
-#   collation-server     = utf8mb4_unicode_ci
-#   init_connect         = 'SET NAMES utf8mb4'
-#   init_connect         = 'SET collation_connection = utf8mb4_unicode_ci'
-#
-# We cannot use utf8mb4 on MySQL 8.x because OpenSpecimen's Liquibase changelog
-# (db.changelog-11.2.xml) creates a full-column index on VARCHAR(1000):
-#   utf8mb4 (4 bytes/char): 1000 × 4 = 4000 bytes > InnoDB 3072-byte key limit
-#              → "Specified key was too long; max key length is 3072 bytes"
-#   utf8    (3 bytes/char): 1000 × 3 = 3000 bytes - within the limit ✓
-#
-# TODO: Switch to utf8mb4 block below once upstream schema uses prefix indexes.
-#       Track at: https://openspecimen.atlassian.net/wiki/spaces/CAT/pages/1115772
-#
-# -- utf8mb4 (official recommendation - blocked by schema, do not enable yet) --
+# utf8 (NOT the official utf8mb4): OpenSpecimen's Liquibase indexes a VARCHAR(1000)
+# full-column - utf8mb4 = 4000 bytes > InnoDB's 3072-byte key limit; utf8 = 3000 fits.
+# TODO: switch to the commented utf8mb4 block below once upstream uses prefix indexes.
+#       https://openspecimen.atlassian.net/wiki/spaces/CAT/pages/1115772
+# -- utf8mb4 (blocked by schema, do not enable yet) --
 # character-set-server  = utf8mb4
 # collation-server      = utf8mb4_unicode_ci
 # init_connect          = 'SET NAMES utf8mb4'
 # init_connect          = 'SET collation_connection = utf8mb4_unicode_ci'
-# ---------------------------------------------------------------------------------
 character-set-server  = utf8
 collation-server      = utf8_unicode_ci
 
