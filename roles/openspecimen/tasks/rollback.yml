@@ -359,7 +359,7 @@
 - name: Wait for the app to respond
   ansible.builtin.shell: >
     curl -sf -o /dev/null -w "%{http_code}"
-    http://localhost:{{ openspecimen_port }}/openspecimen/rest/ng/config-settings/app-props
+    http://localhost:{{ openspecimen_port }}{{ openspecimen_context_path | default('/openspecimen') }}/rest/ng/config-settings/app-props
     | grep -qE '^(200|401)$'
   register: _rollback_health
   until: _rollback_health.rc == 0
