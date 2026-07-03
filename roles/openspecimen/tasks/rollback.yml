@@ -21,7 +21,9 @@
     msg: |
       ✗ No timestamped backups found under {{ openspecimen_backup_dir }}.
 
-      Customer:  {{ inventory_hostname }}
+      Customer:       {{ inventory_hostname }}
+      Last deployed:  {{ _installed_release | default('(unknown)', true) }}
+      Requested:      {{ target_version | default(openspecimen_release | default(''), true) | default('(unknown)', true) }}
 
       What likely happened:
         - This is the first deploy and no upgrade has occurred yet, OR
@@ -88,6 +90,8 @@
   ansible.builtin.fail:
     msg: |
       ✗ No backup found for version {{ target_version }} on {{ inventory_hostname }}.
+
+      Last deployed:  {{ _installed_release | default('(unknown)', true) }}
 
       Available backups (most recent first):
       {% for f in (_backup_dirs.files | sort(attribute='mtime', reverse=true)) %}
