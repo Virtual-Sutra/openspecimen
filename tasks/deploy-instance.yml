@@ -305,10 +305,11 @@
           ✗ Deploy of {{ openspecimen_release }} FAILED on instance '{{ _instance.name }}'.
           {% if _rolled_back | default(false) %}
           ✓ Rolled back to the prior version from backup {{ backup_ts.stdout | trim }}
-            (WAR + config + plugins{{ ' + database' if (db_managed | default(true) | bool and db_type | default('mysql') == 'mysql') else '' }}). The instance is running the previous version.
-          {% if not (db_managed | default(true) | bool and db_type | default('mysql') == 'mysql') %}
-            NOTE: the database was NOT restored (RDS/Oracle) - restore the DB snapshot
-            taken before this deploy to complete the rollback.
+            (WAR + config + plugins{{ ' + database' if (_db_restored | default(false)) else '' }}). The instance is running the previous version.
+          {% if not (_db_restored | default(false)) %}
+            NOTE: the database was NOT restored (RDS/Oracle, or DB backup was
+            disabled/manual) - restore your DB snapshot or manual backup taken
+            before this deploy to complete the rollback.
           {% endif %}
           {% elif _rollback_error is defined %}
           ✗ Auto-rollback ALSO failed: {{ _rollback_error }}
