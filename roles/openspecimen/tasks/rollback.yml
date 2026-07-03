@@ -198,6 +198,17 @@
     - db_type | default('mysql') == 'mysql'
     - (_db_dump.matched | default(0)) == 0
 
+# Whether the database was actually restored (a dump was present + applied), so a
+# caller (e.g. auto-rollback-on-failure) can message accurately instead of guessing
+# from db topology - managed MySQL with db_backup_enabled=false or a large-DB manual
+# upgrade has no dump, so this is false there too.
+- name: Record whether the database was restored from the backup
+  ansible.builtin.set_fact:
+    _db_restored: >-
+      {{ (db_managed | default(true) | bool)
+         and (db_type | default('mysql') == 'mysql')
+         and ((_db_dump.matched | default(0)) > 0) }}
+
 # ── 4. Restore WAR (replace the live one) ────────────────────────────────────
 
 - name: Remove current WAR + expanded webapp directory

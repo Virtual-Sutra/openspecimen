@@ -370,9 +370,21 @@ Each timestamped directory holds a complete snapshot:
 
 ## Day-2: Rollback
 
-Rollback has two paths - both backed by the same `roles/openspecimen/tasks/rollback.yml`:
+Rollback has three paths - all backed by the same `roles/openspecimen/tasks/rollback.yml`:
 
-### A. Automatic (via deploy job - recommended)
+### A0. On a failed upgrade (automatic, default on)
+
+If an **upgrade** deploy fails for any reason *after* the pre-upgrade backup was taken
+(WAR/plugin extract, startup gate, readiness, or the public-URL verify), the instance is
+automatically restored to the prior version from that backup (WAR + config + plugins,
+plus the DB dump for managed MySQL; RDS/Oracle restore artifacts and warn you to restore a
+snapshot), and the deploy still reports **FAILED** - so a broken upgrade leaves you on the
+previous working version instead of a wedged instance. Controlled by
+`openspecimen_rollback_on_failure` (default `true`); set `-e openspecimen_rollback_on_failure=false`
+to leave a failed deploy in place for debugging. Fresh installs have no prior backup, so
+nothing is rolled back there.
+
+### A. Automatic downgrade (via deploy job - recommended)
 
 Just pick a lower release in `site.yml` (or in the Jenkins
 deploy job). Per-instance direction detection notices the requested version is
