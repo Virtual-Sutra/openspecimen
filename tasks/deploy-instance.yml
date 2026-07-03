@@ -250,3 +250,72 @@
       ansible.builtin.include_role:
         name: openspecimen
         tasks_from: verify-public-url
+
+  # ── Graceful auto-rollback on a failed upgrade ──────────────────────────────
+  # Any failure above (WAR/plugin extract, startup gate, readiness, public-URL
+  # verify) after the pre-upgrade backup was taken lands here. Restore the prior
+  # version from that exact backup (WAR + config + plugins, plus the DB dump for
+  # managed MySQL; RDS/Oracle restore artifacts + warn to restore a snapshot), then
+  # re-fail so the deploy is still reported unsuccessful. Opt out with
+  # -e openspecimen_rollback_on_failure=false. Fresh installs / an incomplete backup
+  # roll back nothing (there is no prior version to restore).
+  rescue:
+    - name: "[{{ _instance.name }}] Deploy failed - record the error"
+      ansible.builtin.set_fact:
+        _deploy_error: "{{ ansible_failed_result.msg | default('see the failed task output above') }}"
+
+    - name: "[{{ _instance.name }}] Probe the pre-deploy backup WAR (is a restore possible?)"
+      ansible.builtin.stat:
+        path: "{{ openspecimen_backup_dir }}/{{ backup_ts.stdout | default('') | trim }}/{{ openspecimen_war_name }}.war"
+      register: _rb_war
+      when:
+        - openspecimen_rollback_on_failure | default(true) | bool
+        - backup_ts is defined
+        - backup_ts.stdout is defined
+        - backup_ts.stdout | default('') | trim | length > 0
+
+    - name: "[{{ _instance.name }}] Decide whether an auto-rollback can run"
+      ansible.builtin.set_fact:
+        _can_rollback: "{{ _rb_war.stat.exists | default(false) | bool }}"
+
+    - name: "[{{ _instance.name }}] Announce the auto-rollback decision"
+      ansible.builtin.debug:
+        msg: >-
+          ✗ Deploy of {{ openspecimen_release }} failed on instance '{{ _instance.name }}'.
+          {% if _can_rollback %}Restoring the prior version from backup {{ backup_ts.stdout | trim }} ...{% else %}No complete pre-deploy backup to restore (fresh install, backup not taken, or rollback-on-failure disabled) - leaving the current state for inspection.{% endif %}
+
+    - name: "[{{ _instance.name }}] Auto-rollback to the prior version"
+      when: _can_rollback | bool
+      block:
+        - name: "[{{ _instance.name }}] Restore from pre-deploy backup {{ backup_ts.stdout | trim }}"
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/roles/openspecimen/tasks/rollback.yml"
+          vars:
+            backup_timestamp: "{{ backup_ts.stdout | trim }}"
+        - name: "[{{ _instance.name }}] Mark instance rolled back"
+          ansible.builtin.set_fact:
+            _rolled_back: true
+      rescue:
+        - name: "[{{ _instance.name }}] Auto-rollback ITSELF failed - record it"
+          ansible.builtin.set_fact:
+            _rollback_error: "{{ ansible_failed_result.msg | default('see the rollback output above') }}"
+
+    - name: "[{{ _instance.name }}] Fail - deploy unsuccessful"
+      ansible.builtin.fail:
+        msg: |
+          ✗ Deploy of {{ openspecimen_release }} FAILED on instance '{{ _instance.name }}'.
+          {% if _rolled_back | default(false) %}
+          ✓ Rolled back to the prior version from backup {{ backup_ts.stdout | trim }}
+            (WAR + config + plugins{{ ' + database' if (db_managed | default(true) | bool and db_type | default('mysql') == 'mysql') else '' }}). The instance is running the previous version.
+          {% if not (db_managed | default(true) | bool and db_type | default('mysql') == 'mysql') %}
+            NOTE: the database was NOT restored (RDS/Oracle) - restore the DB snapshot
+            taken before this deploy to complete the rollback.
+          {% endif %}
+          {% elif _rollback_error is defined %}
+          ✗ Auto-rollback ALSO failed: {{ _rollback_error }}
+            The instance may be in a partial state - restore manually:
+              ansible-playbook -i inventory/customers/{{ inventory_hostname }}/ rollback.yml -e backup_timestamp={{ backup_ts.stdout | default('<ts>') | trim }}
+          {% else %}
+          No auto-rollback was performed (fresh install, no complete backup, or
+          openspecimen_rollback_on_failure=false) - the current state is left as-is.
+          {% endif %}
+          Original deploy error: {{ _deploy_error | default('see above') }}

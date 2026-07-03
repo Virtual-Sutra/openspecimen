@@ -80,6 +80,15 @@ openspecimen_deploy_success_marker: /usr/local/openspecimen/.deploy_success
 # inventory/host_vars/<customer>.yml when you need a longer retention window.
 openspecimen_backup_retention: 3
 
+# Gracefully restore the prior version when an UPGRADE deploy fails (any step after
+# the pre-upgrade backup: WAR/plugin extract, startup, readiness, public-URL verify).
+# On failure the pre-deploy backup is restored end-to-end (WAR + config + plugins,
+# plus the DB dump for managed MySQL; RDS/Oracle restore artifacts and warn to restore
+# a snapshot), then the deploy still reports FAILED. Set to false to leave a failed
+# deploy in place for debugging (-e openspecimen_rollback_on_failure=false). Fresh
+# installs have no prior backup, so nothing is rolled back there.
+openspecimen_rollback_on_failure: true
+
 # ── High Availability (optional) ──────────────────────────────────────────────
 # openspecimen_node_name defaults to 'openspecimen' above. When running multiple
 # OpenSpecimen nodes behind a load balancer, OVERRIDE it per customer folder with
