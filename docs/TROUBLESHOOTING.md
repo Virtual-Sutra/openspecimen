@@ -139,6 +139,12 @@ the rollback flow for that instance: it restores the backup whose `.release`
 matches the requested version. There is no "Downgrade is not supported" hard-stop
 (it was removed - see ADR-004).
 
+A downgrade also covers `master` builds: `master` → any tagged release, and
+`master` → an older `master` snapshot (compared by the `-DD-MM-YYYY` date, since
+day-first dates misrank under `sort -V`) both route to rollback. So a deploy that
+fails with "No backup found" can mean you asked to move off a `master` build to an
+older release with no matching backup on the node.
+
 Two things can still halt a downgrade, both with operator guidance:
 
 - **No matching backup** for the requested version (e.g. it was pruned by

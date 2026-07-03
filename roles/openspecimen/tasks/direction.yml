@@ -43,10 +43,9 @@
 # Rollback restores the backup whose .release matches the requested version, so a
 # downgrade with no matching backup FAILS with guidance rather than laying an older
 # WAR over a newer schema. semver -> master and any undated/unparseable master pair
-# deploy forward. Requested/installed values come via environment: (not inline
-# Jinja), and every quote in the body is balanced - the shell action still scans
-# _raw_params with split_args, which chokes on inline {{ }} or an UNBALANCED
-# apostrophe (the #92 startup-wait break); balanced quotes are fine.
+# deploy forward. Values pass via environment: (not inline Jinja) and every quote in
+# the body is balanced, because the shell action scans _raw_params with split_args,
+# which chokes on inline {{ }} or an UNBALANCED apostrophe (the #92 startup-wait break).
 - name: Detect direction (deploy / rollback)
   ansible.builtin.shell: |
     # Classify a release: semver (openspecimen_vX.Y...), master snapshot, or unknown.
@@ -209,11 +208,10 @@
     - _last_deploy_success_release == openspecimen_release
 
 # ── Config drift detection ────────────────────────────────────────────────────
-# Probe-render openspecimen.properties to a temp location and SHA-256 compare
-# with the live file. Tells us whether re-templating would actually change
-# anything - without writing to the live file yet. The role's main.yml runs
-# the real template task later; if config differs, main.yml's task writes the
-# new content and the config-only fast path skips every WAR/plugin step.
+# Probe-render openspecimen.properties to a temp file and SHA-256 compare with the
+# live file - tells us whether re-templating would change anything without writing
+# the live file yet. main.yml runs the real template later; if config differs the
+# config-only fast path skips every WAR/plugin step.
 - name: Render openspecimen.properties to probe location
   ansible.builtin.template:
     src: openspecimen.properties.j2
@@ -262,10 +260,9 @@
     - _last_deploy_success_release == openspecimen_release
 
 # ── Fast-path selection ──────────────────────────────────────────────────────
-# Plugins-only and config-only are independent - both can be true on the same
-# run (plugin list AND properties both changed), and both share the
-# "WAR is already at requested release, skip the WAR redeploy" optimisation.
-# The combined `_skip_war_redeploy` is what main.yml gates WAR/default-plugin
+# Plugins-only and config-only are independent - both can be true on one run
+# (plugin list AND properties changed) and both share the "WAR already at requested
+# release, skip the WAR redeploy" optimisation that main.yml gates WAR/default-plugin
 # tasks on.
 - name: Detect plugins-only change
   ansible.builtin.set_fact:

@@ -115,7 +115,7 @@ each resolves under that instance's `$CATALINA_BASE` and per-instance dirs.
 | `$PLUGIN_DIR/default/*.jar` | _(from release zip)_ | Common plugin JARs | Yes (Tomcat re-scans on startup) |
 | `$PLUGIN_DIR/paid/*.jar` | `openspecimen_paid_plugins` | Licensed enterprise plugin JARs | Yes (Tomcat re-scans on startup) |
 | `$PLUGIN_DIR/zustomer/*.jar` | `openspecimen_customer_plugins` | Customer-specific plugin JARs | Yes (Tomcat re-scans on startup) |
-| `/usr/local/openspecimen/.release` | `openspecimen_release` | Deployed version marker (per instance) - drives downgrade/no-op detection | No |
+| `/usr/local/openspecimen/.release` | `openspecimen_release` | Deployed version marker (per instance) - drives downgrade/no-op detection. Downgrade = an older tagged release, `master` → any tag, or `master` → an older `master` snapshot (by its `-DD-MM-YYYY` date); all route to rollback and need a matching backup. | No |
 | `/usr/local/openspecimen/.deploy_success` | _(written by the role)_ | Records the last fully-successful deploy (release + plugins). The no-op fast path requires this to match the requested release. | No |
 | `/usr/local/openspecimen/scripts/update-config[-<service>].sh` | _(templated per instance)_ | On-box helper for heap / db-pool / app-url changes; one per instance (default keeps `update-config.sh`) | No |
 
@@ -140,6 +140,7 @@ each resolves under that instance's `$CATALINA_BASE` and per-instance dirs.
 | `openspecimen_paid_plugins` | `[]` | Plugin names (no version, no extension). Role looks for `<name>-<version>.zip` in the release directory. JARs deployed to `$PLUGIN_DIR/paid/`. |
 | `openspecimen_customer_plugins` | `[]` | Plugin names. Role looks for `<name>-<version>.zip`. JARs deployed to `$PLUGIN_DIR/zustomer/`. |
 | `openspecimen_release_file` | _(unset)_ | When set (Jenkins pipeline passes this), used to derive the plugin search directory as `dirname(openspecimen_release_file)`. Otherwise the role searches recursively under `openspecimen_builds_dir`. |
+| `deploy_report_dir` | _(unset)_ | Jenkins deploy job passes `WORKSPACE`. When set, each instance writes `.prior-release-<instance>` (version installed before this run, any direction) and `.component-versions-<instance>.json` (resolved tomcat/java/mysql/apache, deploy path only) on the control node for the completion email. No-op for CLI runs. |
 
 The version is derived from `openspecimen_release` by stripping the `openspecimen_` prefix
 (e.g. `openspecimen_v12.2.RC12` → plugin filename suffix `-v12.2.RC12.zip`). The same release
