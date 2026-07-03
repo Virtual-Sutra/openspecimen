@@ -49,6 +49,20 @@
     name: openspecimen
     tasks_from: direction
 
+# Record the version that was installed BEFORE this run so the CI (Jenkins) email
+# can show 'last deployed version'. Written on the control node (delegate_to
+# localhost) into deploy_report_dir when the caller passes it; a no-op for plain
+# CLI runs. Written now (before the WAR deploy) so it survives a later failure.
+- name: "[{{ _instance.name }}] Record prior installed version for the CI email"
+  ansible.builtin.copy:
+    content: "{{ _installed_release | default('') }}\n"
+    dest: "{{ deploy_report_dir }}/.prior-release"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  when: deploy_report_dir | default('') | trim | length > 0
+
 - name: "[{{ _instance.name }}] Deploy (skipped when rollback/noop)"
   when: _instance_direction == 'deploy'
   block:
