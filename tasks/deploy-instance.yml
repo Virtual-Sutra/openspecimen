@@ -73,6 +73,21 @@
       vars:
         _spec_release: "{{ openspecimen_release }}"
 
+    # Record the resolved component versions (os_versions: tomcat/java/mysql/apache,
+    # spec + customer overrides) so the CI email can attach them for the deployed
+    # release. Written on the control node into deploy_report_dir when the caller
+    # passes it; a no-op for plain CLI runs. Only the deploy path writes it, so a
+    # rollback/noop leaves no stale file and the email simply omits the section.
+    - name: "[{{ _instance.name }}] Record deployed component versions for the CI email"
+      ansible.builtin.copy:
+        content: "{{ {'release': openspecimen_release, 'instance': _instance.name, 'components': os_versions} | to_nice_json }}\n"
+        dest: "{{ deploy_report_dir }}/.component-versions.json"
+        mode: '0644'
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      when: deploy_report_dir | default('') | trim | length > 0
+
     # Resolve THIS instance's release zip. If the configured openspecimen_zip_path
     # exists (a global -e override, or a flat builds_dir layout) use it as-is;
     # otherwise search builds_dir recursively for <release>.zip (Jenkins nests zips
