@@ -1,7 +1,8 @@
 ---
 # Detect direction from openspecimen_release vs the on-target .release marker and
 # the installed plugin JARs. Outcomes:
-#   rollback - requested < installed (semver only) -> restore backup, end play
+#   rollback - requested is older than installed (semver order, master snapshot
+#              date, or master -> tagged release) -> restore backup, end play
 #   no-op    - requested == installed, .deploy_success matches, plugins present
 #   deploy   - fresh, upgrade, a re-run after a failed deploy, or a plugin change
 # Called as the FIRST pre_task from site.yml.
@@ -33,23 +34,61 @@
       {{ (_direction_marker.content | b64decode | trim)
          if _direction_marker.content is defined else '' }}
 
-# Auto-rollback only between ORDERED semver releases (openspecimen_vX.Y[.Z]) where
-# sort -V ranks RC12 > RC8. Master/date snapshots (openspecimen_master-DD-MM-YYYY)
-# aren't version-ordered (day-first date misranks under sort -V), so rollback is
-# considered only when BOTH sides are _v<digit>; everything else deploys forward.
+# Downgrade (rollback) detection covers three cases; anything else deploys forward:
+#   semver -> semver : sort -V ranks the requested lower (RC12 > RC8) -> rollback.
+#   master -> master : compare the DD-MM-YYYY snapshot dates (day-first misranks
+#                      under sort -V, so parse to YYYYMMDD); requested earlier -> rollback.
+#   master -> semver : leaving the development HEAD for a tagged release is a
+#                      downgrade (schema on master is ahead) -> rollback.
+# Rollback restores the backup whose .release matches the requested version, so a
+# downgrade with no matching backup FAILS with guidance rather than laying an older
+# WAR over a newer schema. semver -> master and any undated/unparseable master pair
+# deploy forward. Values come via environment: to keep the body free of Jinja and
+# apostrophes (shell free-form split_args is fragile with either).
 - name: Detect direction (deploy / rollback)
   ansible.builtin.shell: |
-    INSTALLED="{{ _installed_release }}"
-    REQUESTED="{{ openspecimen_release }}"
+    # Classify a release: semver (openspecimen_vX.Y...), master snapshot, or unknown.
+    kind() {
+      case "$1" in
+        *_v[0-9]*)         echo semver ;;
+        *master-*|*master) echo master ;;
+        *)                 echo unknown ;;
+      esac
+    }
+    # Master snapshot trailing DD-MM-YYYY -> sortable YYYYMMDD (empty if none).
+    # 10# forces base-10 so 08/09 are not misread as invalid octal.
+    mdate() {
+      d=$(printf '%s' "$1" | grep -oE '[0-9]{1,2}-[0-9]{1,2}-[0-9]{4}$') || d=""
+      [ -n "$d" ] || { echo ""; return; }
+      dd=${d%%-*}; rest=${d#*-}; mm=${rest%%-*}; yy=${rest##*-}
+      printf '%04d%02d%02d' "$((10#$yy))" "$((10#$mm))" "$((10#$dd))"
+    }
+    IK=$(kind "$INSTALLED"); RK=$(kind "$REQUESTED")
     if [ -z "$INSTALLED" ] || [ "$INSTALLED" = "$REQUESTED" ]; then
       echo deploy
-    elif echo "$INSTALLED" | grep -Eq '_v[0-9]' \
-         && echo "$REQUESTED" | grep -Eq '_v[0-9]' \
-         && [ "$(printf '%s\n%s\n' "$INSTALLED" "$REQUESTED" | sort -V | head -1)" = "$REQUESTED" ]; then
+    elif [ "$IK" = semver ] && [ "$RK" = semver ]; then
+      if [ "$(printf '%s\n%s\n' "$INSTALLED" "$REQUESTED" | sort -V | head -1)" = "$REQUESTED" ]; then
+        echo rollback
+      else
+        echo deploy
+      fi
+    elif [ "$IK" = master ] && [ "$RK" = semver ]; then
       echo rollback
+    elif [ "$IK" = master ] && [ "$RK" = master ]; then
+      ID=$(mdate "$INSTALLED"); RD=$(mdate "$REQUESTED")
+      if [ -n "$ID" ] && [ -n "$RD" ] && [ "$RD" -lt "$ID" ]; then
+        echo rollback
+      else
+        echo deploy
+      fi
     else
       echo deploy
     fi
+  args:
+    executable: /bin/bash
+  environment:
+    INSTALLED: "{{ _installed_release }}"
+    REQUESTED: "{{ openspecimen_release }}"
   register: _direction
   changed_when: false
 
