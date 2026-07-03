@@ -78,10 +78,12 @@
     # release. Written on the control node into deploy_report_dir when the caller
     # passes it; a no-op for plain CLI runs. Only the deploy path writes it, so a
     # rollback/noop leaves no stale file and the email simply omits the section.
+    # Named per instance so a multi-instance deploy writes one file each (the
+    # email globs .component-versions-*.json) instead of overwriting a single file.
     - name: "[{{ _instance.name }}] Record deployed component versions for the CI email"
       ansible.builtin.copy:
         content: "{{ {'release': openspecimen_release, 'instance': _instance.name, 'components': os_versions} | to_nice_json }}\n"
-        dest: "{{ deploy_report_dir }}/.component-versions.json"
+        dest: "{{ deploy_report_dir }}/.component-versions-{{ _instance.name }}.json"
         mode: '0644'
       delegate_to: localhost
       become: false
