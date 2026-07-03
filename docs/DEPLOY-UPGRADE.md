@@ -48,8 +48,14 @@ sort (`sort -V`):
   skips all WAR and plugin steps.
 - **Marker present, requested > installed** → upgrade (pre-upgrade backup → deploy
   → restart).
-- **Marker present, requested < installed** → automatic rollback for that instance
-  (see "Rollback" below) - the requested version's backup is restored.
+- **Marker present, requested is a downgrade** → automatic rollback for that instance
+  (see "Rollback" below) - the requested version's backup is restored. A downgrade is
+  any of: an older tagged release (`sort -V`), **`master` → any tagged release** (leaving
+  the development HEAD for a tag), or **`master` → an older `master` snapshot** (compared
+  by the `openspecimen_master-DD-MM-YYYY` date, since day-first dates misrank under
+  `sort -V`). Moving from a `master` build to an older release therefore requires a
+  matching backup. A tagged release → `master`, or `master` → a newer `master`, deploys
+  forward.
 
 Because direction is per instance, one instance rolling back or being already-current
 does **not** stop the others - each instance's outcome is independent.
@@ -381,6 +387,11 @@ ansible-playbook -i inventory/customers/<name>/ site.yml \
   -e @secrets/<name>.yml --vault-password-file .vault-pass
 ```
 
+Downgrade detection also covers `master` builds: `master` → any tagged release, and
+`master` → an older `master` snapshot (by its `-DD-MM-YYYY` date), both route to
+rollback, so you cannot move off a `master` build to an older release without a
+matching backup.
+
 If no backup of the requested version exists, the play fails with a list of
 available backups and the operator can either pick a version that does have
 one or override with `-e allow_downgrade=true`.
@@ -537,3 +548,4 @@ via `-e mysql_db_password=<password>` (or your CI/CD secrets manager).
 | `openspecimen_paid_plugins` | `[]` | List of paid plugin names (no version, no extension) - see [Plugin deployment](#plugin-deployment) |
 | `openspecimen_customer_plugins` | `[]` | List of customer plugin names |
 | `openspecimen_release_file` | _(unset)_ | Set by the Jenkins pipeline. When set, plugin search dir = `dirname(openspecimen_release_file)`. Otherwise the role searches recursively under `openspecimen_builds_dir`. |
+| `deploy_report_dir` | _(unset)_ | Set by the Jenkins deploy job to `WORKSPACE`. When set, each instance writes `.prior-release-<instance>` (the version installed before this run, any direction) and `.component-versions-<instance>.json` (resolved tomcat/java/mysql/apache versions, deploy path only) on the control node for the completion email. A no-op for plain CLI runs. |
