@@ -137,12 +137,45 @@ per instance. Liquibase state is per-database, so upgrades, rollbacks and
 downgrades are independent per instance. For RDS/Oracle (`db_managed: false`),
 the DBA pre-creates one database/schema + user per instance.
 
-## Resource sizing
+## Resource sizing (memory)
 
-Tomcat **heap is per-instance** (set `heap_max`/`heap_min`; do not rely on the
-single-tenant 50%-of-RAM default with multiple instances). The InnoDB **buffer
-pool is host-level** (sized once for the whole box). Together these keep N
-instances from over-subscribing memory.
+Tomcat **heap is per-instance** and there is **no auto-split**: the default
+`tomcat_heap_max` is `max(2048 MB, 50% of the whole host's RAM)`, computed
+independently per instance. So **two instances left at the default each grab 50%
+of total RAM → 100% for heap alone**, plus MySQL and the OS → over-commit / OOM.
+
+**With more than one instance you must size each explicitly.** Under the
+one-folder-per-instance model (ADR-009) the lever is per customer folder, in its
+`group_vars/all/20-customer.yml`:
+
+```yaml
+tomcat_heap_max_override: "6144"   # -Xmx6144m for THIS instance (integer MB)
+tomcat_heap_min_override: "1024"   # -Xms1024m
+```
+
+Budget the host RAM:
+
+```
+host RAM
+  − OS + per-JVM off-heap    (~1 GB OS; each JVM uses ~0.5 GB beyond -Xmx for
+                              metaspace / threads / direct buffers)
+  − MySQL InnoDB buffer pool  (HOST-LEVEL, one mysqld for the box; default 25% of
+                              RAM, via mysql_innodb_buffer_pool_size_override, MB)
+  = split between the Tomcat heaps (each -Xmx ≥ 2048 — OpenSpecimen's floor)
+```
+
+Example — 16 GB host, prod + test co-located: MySQL ~4 GB (25%), OS + 2× off-heap
+~3 GB, leaving ~9 GB → prod `tomcat_heap_max_override: "6144"`, test `"2048"`.
+
+The **InnoDB buffer pool is host-level** (sized once; keep any
+`mysql_innodb_buffer_pool_size_override` equal in both folders, since both
+re-template `my.cnf`).
+
+**Guardrail:** each deploy sums the `-Xmx` of every instance's `setenv.sh` on the
+host + the MySQL buffer + an OS reserve + a per-JVM off-heap estimate, and **fails**
+if the total exceeds RAM (so a mis-sized instance is caught before it OOMs — and,
+inside the deploy, triggers auto-rollback). Tune with `openspecimen_memory_guardrail`
+(`fail` | `warn` | `off`), `openspecimen_mem_os_reserve_mb`, `openspecimen_mem_jvm_offheap_mb`.
 
 ## Deploying / upgrading one instance
 

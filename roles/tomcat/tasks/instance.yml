@@ -191,6 +191,102 @@
     mode: '0750'
   notify: restart openspecimen
 
+# ── Co-location memory guardrail ─────────────────────────────────────────────
+# Sum the -Xmx of EVERY OpenSpecimen instance's setenv.sh on this host (this
+# instance's freshly-written one + any co-located ones), add the host-level MySQL
+# InnoDB buffer + an OS reserve + a per-JVM off-heap estimate, and compare to RAM.
+# Runs after setenv.sh is written but before the restart handler, so an
+# over-subscribed second instance is caught before it can OOM/thrash - and (inside
+# the deploy block) triggers auto-rollback. Body reads env vars only (no inline
+# Jinja - split_args). Backups live under */config/setenv.sh, not */bin/, so the
+# */bin/setenv.sh glob only matches live instances.
+- name: "[tomcat:{{ openspecimen_service_name }}] Memory guardrail - co-located heaps must fit in RAM"
+  ansible.builtin.shell: |
+    python3 << 'PYEOF'
+    import os, re, glob, sys
+    ram     = int(os.environ['RAM_MB'])
+    reserve = int(os.environ['OS_RESERVE_MB'])
+    offheap = int(os.environ['JVM_OFFHEAP_MB'])
+    mysql   = int(os.environ['MYSQL_BUFFER_MB'])
+    root    = os.environ['OSP_ROOT']
+
+    def to_mb(tok):
+        m = re.match(r'(\d+)\s*([kKmMgG]?)', tok or '')
+        if not m:
+            return 0
+        n, u = int(m.group(1)), m.group(2).lower()
+        if u == 'g':
+            return n * 1024
+        if u == 'k':
+            return n // 1024
+        return n  # m or bare (Xmx defaults to bytes if bare, but our template writes m)
+
+    heaps = []
+    for se in sorted(glob.glob(root + '/**/bin/setenv.sh', recursive=True)):
+        m = re.search(r'-Xmx(\d+[kKmMgG]?)', open(se, errors='replace').read())
+        if m:
+            heaps.append((se, to_mb(m.group(1))))
+    total_heap = sum(mb for _, mb in heaps)
+    n = max(1, len(heaps))
+    projected = total_heap + mysql + reserve + offheap * n
+    print("Instances (live setenv.sh): %d" % len(heaps))
+    for se, mb in heaps:
+        print("  -Xmx %5d MB  %s" % (mb, se))
+    print("Heaps total : %d MB" % total_heap)
+    print("MySQL buffer: %d MB   OS reserve: %d MB   JVM off-heap: %d MB x %d" % (mysql, reserve, offheap, n))
+    print("Projected   : %d MB   /   Host RAM: %d MB" % (projected, ram))
+    # This guardrail is about CO-LOCATION. A single instance keeps the established
+    # single-tenant 50%-of-RAM default (which is fine even on a small host), so
+    # never fail there - only enforce once a 2nd instance shares the box.
+    if len(heaps) < 2:
+        print("Single instance - co-location guardrail not applied.")
+        sys.exit(0)
+    sys.exit(2 if projected > ram else 0)
+    PYEOF
+  args:
+    executable: /bin/bash
+  environment:
+    OSP_ROOT:         "{{ openspecimen_root | default('/usr/local/openspecimen') }}"
+    RAM_MB:           "{{ ansible_facts['memtotal_mb'] }}"
+    OS_RESERVE_MB:    "{{ openspecimen_mem_os_reserve_mb | default(1024) }}"
+    JVM_OFFHEAP_MB:   "{{ openspecimen_mem_jvm_offheap_mb | default(512) }}"
+    MYSQL_BUFFER_MB:  "{{ (mysql_innodb_buffer_pool_size | regex_replace('[^0-9]', '') | int) if (db_managed | default(true) | bool and db_type | default('mysql') == 'mysql') else 0 }}"
+  become: true
+  register: _mem_guardrail
+  changed_when: false
+  failed_when: false
+
+- name: "[tomcat:{{ openspecimen_service_name }}] Memory allocation across instances"
+  ansible.builtin.debug:
+    var: _mem_guardrail.stdout_lines
+
+- name: "[tomcat:{{ openspecimen_service_name }}] Fail - co-located instances over-subscribe RAM"
+  ansible.builtin.fail:
+    msg: |
+      ✗ Co-located OpenSpecimen instances over-subscribe host memory:
+      {{ _mem_guardrail.stdout }}
+
+      The combined Tomcat heaps + MySQL InnoDB buffer + OS reserve exceed host RAM.
+      Set tomcat_heap_max_override (integer MB) per customer folder so the total fits:
+        heap budget ≈ RAM - MySQL buffer - OS reserve - (off-heap x instances)
+      Each instance's -Xmx must stay >= 2048 (OpenSpecimen's floor). See
+      docs/MULTI-INSTANCE.md - Resource sizing.
+
+      To proceed anyway, downgrade the guardrail:
+        -e openspecimen_memory_guardrail=warn   (log only)   or   =off (skip)
+  when:
+    - _mem_guardrail.rc == 2
+    - (openspecimen_memory_guardrail | default('fail')) == 'fail'
+
+- name: "[tomcat:{{ openspecimen_service_name }}] WARN - instances over-subscribe RAM (guardrail=warn)"
+  ansible.builtin.debug:
+    msg: >-
+      ⚠ WARNING: co-located instances over-subscribe RAM (projected usage exceeds host
+      RAM - see the allocation above). Set tomcat_heap_max_override (MB) per folder.
+  when:
+    - _mem_guardrail.rc == 2
+    - (openspecimen_memory_guardrail | default('fail')) == 'warn'
+
 - name: "[tomcat:{{ openspecimen_service_name }}] Install systemd unit"
   ansible.builtin.template:
     src: openspecimen.service.j2

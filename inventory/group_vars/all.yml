@@ -130,6 +130,16 @@ tomcat_user: openspecimen
 # tomcat_heap_max and tomcat_heap_min are auto-sized from instance RAM in
 # roles/tomcat/defaults/main.yml - see CONFIG-REFERENCE.md for the formula.
 # Override per customer with tomcat_heap_max_override / tomcat_heap_min_override (MB).
+#
+# Co-location memory guardrail: on each deploy, the tomcat role sums the -Xmx of
+# every OpenSpecimen instance's setenv.sh on the host + the MySQL InnoDB buffer +
+# an OS reserve + a per-JVM off-heap estimate, and compares to RAM. The default
+# 50%-of-RAM heap is NOT multi-instance-aware, so with a 2nd instance you MUST set
+# tomcat_heap_max_override per folder (see docs/MULTI-INSTANCE.md). Action on
+# over-subscription: fail | warn | off.
+openspecimen_memory_guardrail:  fail
+openspecimen_mem_os_reserve_mb: 1024   # RAM reserved for the OS + page cache
+openspecimen_mem_jvm_offheap_mb: 512   # off-heap (metaspace/threads/direct) per JVM
 
 # ── Tomcat JDBC Connection Pool ───────────────────────────────────────────────
 # Ref: https://openspecimen.atlassian.net/wiki/spaces/CAT/pages/4191944759
