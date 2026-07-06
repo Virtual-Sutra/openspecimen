@@ -18,12 +18,12 @@ EnvironmentFile=/etc/environment
 {% if openspecimen_java_home is defined and openspecimen_java_home | trim %}
 Environment=JAVA_HOME={{ openspecimen_java_home }}
 {% endif %}
-Environment=CATALINA_HOME={{ tomcat_home }}
+Environment=CATALINA_HOME={{ catalina_home | default(tomcat_home) }}
 Environment=CATALINA_BASE={{ catalina_base }}
 Environment=CATALINA_PID={{ catalina_base }}/bin/pid.txt
 
-ExecStart={{ tomcat_home }}/bin/startup.sh
-ExecStop={{ tomcat_home }}/bin/shutdown.sh -force
+ExecStart={{ catalina_home | default(tomcat_home) }}/bin/startup.sh
+ExecStop={{ catalina_home | default(tomcat_home) }}/bin/shutdown.sh -force
 
 SuccessExitStatus=143
 TimeoutStartSec=120
