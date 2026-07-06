@@ -60,7 +60,11 @@ openspecimen_release_marker: /usr/local/openspecimen/.release
 # folder sets openspecimen_port: 8090, openspecimen_context_path: /openspecimen-test,
 # openspecimen_service_name: openspecimen-test, catalina_base + mysql_db_name. See
 # ADR-009 (supersedes ADR-006/007).
-catalina_home:              "{{ tomcat_home }}"
+#
+# tomcat_home is the Tomcat install (CATALINA_HOME). catalina_base is this
+# instance's runtime dir (conf/logs/webapps); it defaults to tomcat_home for the
+# single default instance and is overridden only by a co-located 2nd customer.
+# There is no separate catalina_home var - CATALINA_HOME is always tomcat_home.
 catalina_base:              "{{ tomcat_home }}"
 openspecimen_service_name:  openspecimen
 openspecimen_context_path:  /openspecimen
