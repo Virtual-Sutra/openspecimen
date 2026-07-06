@@ -259,6 +259,39 @@
     - _installed_release == openspecimen_release
     - _last_deploy_success_release == openspecimen_release
 
+# ── Tomcat heap (setenv.sh) drift detection ──────────────────────────────────
+# A heap change (tomcat_heap_max_override / tomcat_heap_min_override, or a RAM
+# change moving the 50% default) must NOT be a no-op: on a same-version run compare
+# the DESIRED -Xmx/-Xms against the live setenv.sh. A difference triggers a
+# config-only redeploy - the tomcat runtime re-templates setenv.sh and restarts the
+# instance (resize), and the memory guardrail re-checks the new sizing. The desired
+# values mirror the tomcat role's heap formula (roles/tomcat/defaults/main.yml);
+# keep them in sync.
+- name: Read live setenv.sh for heap-drift detection
+  ansible.builtin.slurp:
+    src: "{{ catalina_base }}/bin/setenv.sh"
+  register: _setenv_live
+  failed_when: false
+  changed_when: false
+  when:
+    - _direction.stdout == 'deploy'
+    - _installed_release == openspecimen_release
+    - _last_deploy_success_release == openspecimen_release
+
+- name: Set heap-drift fact
+  ansible.builtin.set_fact:
+    _setenv_changed: >-
+      {{ ('-Xmx' ~ _desired_xmx ~ 'm') not in _live_setenv
+         or ('-Xms' ~ _desired_xms ~ 'm') not in _live_setenv }}
+  vars:
+    _live_setenv: "{{ (_setenv_live.content | b64decode) if (_setenv_live.content is defined) else '' }}"
+    _desired_xmx: "{{ (tomcat_heap_max_override | default([2048, (ansible_facts['memtotal_mb'] * 0.5) | int] | max) | int) | string }}"
+    _desired_xms: "{{ (tomcat_heap_min_override | default(512) | int) | string }}"
+  when:
+    - _direction.stdout == 'deploy'
+    - _installed_release == openspecimen_release
+    - _last_deploy_success_release == openspecimen_release
+
 # ── Fast-path selection ──────────────────────────────────────────────────────
 # Plugins-only and config-only are independent - both can be true on one run
 # (plugin list AND properties changed) and both share the "WAR already at requested
@@ -284,7 +317,7 @@
       {{ _direction.stdout == 'deploy'
          and _installed_release == openspecimen_release
          and _last_deploy_success_release == openspecimen_release
-         and (_config_changed | default(false))
+         and (_config_changed | default(false) or _setenv_changed | default(false))
          and not (_plugins_only_change | default(false)) }}
   when:
     - _direction.stdout == 'deploy'
@@ -309,8 +342,8 @@
       ⚡ Config-only deploy - WAR is already at {{ openspecimen_release }} and
       every plugin matches inventory. Skipping zip upload, WAR backup, WAR
       extraction, default-plugin extraction, and ALL paid/customer plugin
-      uploads + extractions. Re-templating openspecimen.properties and
-      restarting Tomcat only.
+      uploads + extractions. Re-applying config and restarting Tomcat only
+      ({% if _config_changed | default(false) %}openspecimen.properties drifted{% endif %}{% if (_config_changed | default(false)) and (_setenv_changed | default(false)) %}; {% endif %}{% if _setenv_changed | default(false) %}JVM heap (setenv.sh) changed - the instance will be resized{% endif %}).
   when: _config_only_change | default(false)
 
 - name: Show no-op summary
@@ -328,6 +361,7 @@
     - _all_customer_current | default(false)
     - _no_orphans | default(false)
     - not (_config_changed | default(false))
+    - not (_setenv_changed | default(false))
 
 - name: Mark instance direction = noop (nothing to deploy for this instance)
   ansible.builtin.set_fact:
@@ -340,6 +374,7 @@
     - _all_customer_current | default(false)
     - _no_orphans | default(false)
     - not (_config_changed | default(false))
+    - not (_setenv_changed | default(false))
 
 - name: Announce why deploy will continue (mismatched or orphan plugins) on a same-version run
   ansible.builtin.debug:
