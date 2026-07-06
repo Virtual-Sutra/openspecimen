@@ -68,12 +68,10 @@ shared Tomcat; with multiple instances each has its own copy.
 | `$CATALINA_BASE/conf/server.xml` | `openspecimen_port`, `openspecimen_ajp_port`, `openspecimen_shutdown_port` (per instance) | HTTP / AJP / shutdown ports; AJP `secretRequired=false`, bound to `127.0.0.1`. **Patched in place** (seeded from the golden conf), not templated. | Yes |
 | `$CATALINA_HOME/lib/mysql-connector*.jar` | _(from release zip)_ | MySQL JDBC driver (shared, host-level) | Yes (redeploy) |
 | `$CATALINA_HOME/lib/ojdbc*.jar` | _(from release zip)_ | Oracle JDBC driver (shared, host-level) | Yes (redeploy) |
-| `/etc/systemd/system/<service_name>.service` | `tomcat_user`, `tomcat_home`, `catalina_base`, `db_managed`, `openspecimen_service_name` | systemd unit (one per instance; `openspecimen` for the default) | Yes - `systemctl daemon-reload` |
+| `/etc/systemd/system/<service_name>.service` | `tomcat_user`, `catalina_home`, `catalina_base`, `db_managed`, `openspecimen_service_name` | systemd unit (one per instance; `openspecimen` for the default) | Yes - `systemctl daemon-reload` |
 
-`$CATALINA_HOME` = `tomcat_home` = `/usr/local/openspecimen/tomcat-as` (the Tomcat
-install; there is no separate `catalina_home` var). `$CATALINA_BASE` = `catalina_base`,
-the runtime dir, which defaults to `tomcat_home`; a co-located 2nd customer sets its
-own `catalina_base` explicitly (ADR-009).
+`$CATALINA_HOME` = `tomcat_home` = `/usr/local/openspecimen/tomcat-as`.
+A co-located 2nd customer sets its own `catalina_base` explicitly (ADR-009).
 
 **Tomcat install source** (#90/#91): the binary comes from a pinned Apache download
 (`tomcat_version` from the component spec, default `9.0.59`), not an OS package;
