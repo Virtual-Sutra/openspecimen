@@ -266,9 +266,13 @@
     #
     # The local probe MUST target Apache's REAL local listener, NOT the public URL's
     # scheme/port: when TLS is terminated upstream (ALB - ADR-008, apache_enable_ssl
-    # false) the public URL is https:443 but Apache locally serves http:80, so a
-    # --resolve to :443 hits a dead port and the gate loops for the full retry budget
-    # even though the app is up. Derive scheme+port from apache_enable_ssl instead.
+    # false) the public URL is https:443 but Apache locally serves http:80; conversely
+    # when Apache terminates TLS itself the app is on :443 and :80 just 301->https.
+    # So we (a) start at the apache_enable_ssl-derived scheme/port, but (b) follow
+    # redirects (-L) with BOTH the http and https ports --resolve'd to loopback, so a
+    # mis-set apache_enable_ssl (probe lands on :80 -> 301 -> :443, or vice-versa) is
+    # followed to the port Apache actually serves instead of looping the full retry
+    # budget. %{http_code} reports the FINAL code after redirects. See TROUBLESHOOTING.md.
     - name: "[{{ _instance.name }}] Build the readiness-check command"
       ansible.builtin.set_fact:
         _ready_cmd: >-
@@ -278,8 +282,10 @@
           {% set _path = _app | regex_replace('^https?://[^/]+', '') | regex_replace('/+$', '') -%}
           {% set _ssl = apache_enable_ssl | default(false) | bool -%}
           {% set _scheme = 'https' if _ssl else 'http' -%}
-          {% set _lport = (apache_https_port | default(443)) if _ssl else (apache_http_port | default(80)) -%}
-          curl -sf -k -o /dev/null -w "%{http_code}" --resolve {{ _h }}:{{ _lport }}:127.0.0.1 {{ _scheme }}://{{ _h }}:{{ _lport }}{{ _path }}/ui-app/ | grep -qE '^200$'
+          {% set _hport = apache_http_port | default(80) -%}
+          {% set _sport = apache_https_port | default(443) -%}
+          {% set _lport = _sport if _ssl else _hport -%}
+          curl -sfL -k -o /dev/null -w "%{http_code}" --resolve {{ _h }}:{{ _hport }}:127.0.0.1 --resolve {{ _h }}:{{ _sport }}:127.0.0.1 {{ _scheme }}://{{ _h }}:{{ _lport }}{{ _path }}/ui-app/ | grep -qE '^200$'
           {%- else -%}
           curl -sf -o /dev/null -w "%{http_code}" http://localhost:{{ openspecimen_port }}{{ openspecimen_context_path | default('/openspecimen') }}/rest/ng/config-settings/app-props | grep -qE '^(200|302|401|403)$'
           {%- endif %}
