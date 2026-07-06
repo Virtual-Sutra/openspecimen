@@ -5,18 +5,21 @@
 # `base`-tagged: --skip-tags base / --tags base to force). See docs/DEPLOY-UPGRADE.md.
 #
 # ── db_managed=false (external RDS/Oracle) - interim "app-only" behaviour ──────
-# When db_managed=false the deploy touches NOTHING database-related, regardless of
-# db_type. Skipped: the mysql role, the connectivity/schema probe (install type is
-# assumed 'upgrade'), the context.xml JNDI datasource render, DB backups/dumps,
-# and the Liquibase stale-lock clear. Only java/tomcat/war/plugins/apache are
-# refreshed, and no db_password is required. The external DB is assumed already
-# provisioned and its credentials already present in the host's context.xml.
+# When db_managed=false the deploy is APP-ONLY: it refreshes java, the Tomcat
+# binary, the WAR, plugins and apache, and REUSES all existing on-host config -
+# it renders none of it and the customer inventory need not (re)declare any of it.
+# Reused as-is: context.xml (DB/JNDI datasource), server.xml (ports/AJP),
+# setenv.sh (heap), and openspecimen.properties. Also skipped: the mysql role,
+# the connectivity/schema probe (install type assumed 'upgrade'), DB backups/dumps,
+# the Liquibase stale-lock clear, and the config-only fast path. No db_password is
+# required. The host is assumed already provisioned (config seeded at onboarding);
+# the tomcat role fails fast if context.xml has no datasource.
 #
-# REVISIT (tracked): this interim model gives no connectivity verification, no
-# fresh-external-DB detection, and no datasource/pool-config updates for external
-# DBs. A first-time external-DB install must be seeded out of band (or once with
-# db_managed=true). Revisit to add a read-only connectivity check and a safe,
-# credential-free datasource refresh path.
+# REVISIT (tracked): interim model. No connectivity verification, no fresh-external
+# -DB detection, no config refresh for external DBs. A first-time external-DB host
+# must be seeded out of band (or once with db_managed=true). Edge case: a Tomcat
+# *version change* on a default (base==home) instance re-unpacks the stock
+# server.xml, which will NOT be re-patched here - re-onboard such a host.
 
 - name: Deploy OpenSpecimen
   hosts: openspecimen

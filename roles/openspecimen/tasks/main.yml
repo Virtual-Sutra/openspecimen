@@ -194,6 +194,9 @@
 
 # Named after the webapp/context (<war_name>.properties) so OpenSpecimen's
 # config/<context> JNDI lookup + conf/<context>.properties fallback both resolve.
+# db_managed=false: app-only deploy - reuse the existing openspecimen.properties on
+# the host (seeded once at onboarding, alongside context.xml). The db_managed=false
+# datasource guard in the tomcat role already fails fast on an unseeded host.
 - name: Template openspecimen.properties
   ansible.builtin.template:
     src: openspecimen.properties.j2
@@ -201,6 +204,7 @@
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
     mode: '0640'
+  when: db_managed | default(true) | bool
 
 # ── Backup WAR and plugins on upgrade ────────────────────────────────────────
 

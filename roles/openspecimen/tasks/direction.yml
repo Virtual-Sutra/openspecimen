@@ -321,8 +321,12 @@
 
 - name: Detect config-only change
   ansible.builtin.set_fact:
+    # db_managed=false is app-only and reuses existing config, so the config-only
+    # fast path (which re-renders config and skips the WAR) must never trigger -
+    # a same-version external-DB re-run still deploys the WAR + reuses config.
     _config_only_change: >-
       {{ _direction.stdout == 'deploy'
+         and (db_managed | default(true) | bool)
          and _installed_release == openspecimen_release
          and _last_deploy_success_release == openspecimen_release
          and (_config_changed | default(false) or _setenv_changed | default(false))
