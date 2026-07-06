@@ -550,7 +550,7 @@ via `-e mysql_db_password=<password>` (or your CI/CD secrets manager).
 | `openspecimen_app_url` | _(unset)_ | Required for ALB / reverse proxy setup |
 | `openspecimen_node_name` | _(unset)_ | Required for multi-node HA |
 | `db_type` | `mysql` | `mysql` or `oracle` |
-| `db_managed` | `true` | `false` skips MySQL role (RDS / external Oracle) |
+| `db_managed` | `true` | `false` = external DB (RDS / Oracle): skips ALL DB work — MySQL role, connectivity/schema probe, `context.xml` datasource render, backups, Liquibase lock clear — and needs no `mysql_db_password`. App-only (java/tomcat/war/plugins/apache). Assumes `context.xml` already provisioned; see the interim note in `site.yml`. |
 | `mysql_db_host` | `127.0.0.1` | Set to RDS endpoint for external database |
 | `tomcat_heap_min` | `512m` | JVM `-Xms` |
 | `tomcat_heap_max` | auto (RAM × 0.5, min 2048 MB) | Override with `tomcat_heap_max_override` (integer MB) |
