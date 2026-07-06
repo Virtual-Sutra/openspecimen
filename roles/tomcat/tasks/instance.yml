@@ -41,6 +41,16 @@
     recurse: true
   when: catalina_base != catalina_home
 
+# db_managed=false (external RDS/Oracle): app-only deploy - the tomcat runtime
+# config (server.xml ports/AJP + setenv.sh heap) is left exactly as it is on the
+# host, so all four server.xml-patch tasks and the setenv.sh render below are
+# skipped. Only java/tomcat-binary/WAR/plugins/apache are refreshed.
+# REVISIT: server.xml lives in CATALINA_BASE. For a co-located instance
+# (catalina_base != catalina_home) it survives a Tomcat binary re-unpack. For the
+# default instance (base == home) a Tomcat *version change* re-unpacks the stock
+# server.xml into the shared dir and it will NOT be re-patched here - such a host
+# must be re-onboarded (or deployed once with db_managed=true) to re-apply ports.
+#
 # Set this instance's HTTP / AJP / shutdown ports in its own server.xml. The
 # golden conf ships stock 8080/8009/8005; for the default instance these match
 # (changed=0). A co-located 2nd customer sets its own ports explicitly (ADR-009).
@@ -68,6 +78,7 @@
   register: _port_patch
   changed_when: "'changed' in _port_patch.stdout"
   notify: restart openspecimen
+  when: db_managed | default(true) | bool
 
 # Stock Tomcat ships the AJP connector commented out; when proxying via AJP it must
 # be uncommented or Apache gets "Connection refused" and serves the 503 page.
@@ -111,6 +122,7 @@
   changed_when: "'changed' in _ajp_enable.stdout"
   notify: restart openspecimen
   when:
+    - db_managed | default(true) | bool
     - apache_enabled | default(false) | bool
     - (apache_proxy_protocol | default('http')) == 'ajp'
 
@@ -138,6 +150,7 @@
   register: _ajp_patch
   changed_when: "'changed' in _ajp_patch.stdout"
   notify: restart openspecimen
+  when: db_managed | default(true) | bool
 
 - name: "[tomcat:{{ openspecimen_service_name }}] Bind AJP connector to 127.0.0.1"
   ansible.builtin.shell: |
@@ -164,6 +177,7 @@
   register: _ajp_bind
   changed_when: "'changed' in _ajp_bind.stdout"
   notify: restart openspecimen
+  when: db_managed | default(true) | bool
 
 - name: "[tomcat:{{ openspecimen_service_name }}] Log JVM heap sizing"
   ansible.builtin.debug:
@@ -222,6 +236,8 @@
               db_managed=false for subsequent app-only upgrades.
       when: _external_datasource_check.rc != 0
 
+# db_managed=false: reuse the existing heap config - the memory guardrail below
+# still reads the live setenv.sh, so co-located sizing is re-validated either way.
 - name: "[tomcat:{{ openspecimen_service_name }}] Template setenv.sh (JVM heap)"
   ansible.builtin.template:
     src: setenv.sh.j2
@@ -230,6 +246,7 @@
     group: "{{ tomcat_user }}"
     mode: '0750'
   notify: restart openspecimen
+  when: db_managed | default(true) | bool
 
 # ── Co-location memory guardrail ─────────────────────────────────────────────
 # Sum the -Xmx of EVERY OpenSpecimen instance's setenv.sh on this host (this
