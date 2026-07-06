@@ -40,6 +40,7 @@
     _plugins_only_change:  false
     _config_only_change:   false
     _config_changed:       false
+    _setenv_changed:       false
     _inst_zip_find:        {files: []}
     openspecimen_java_home: ""
     openspecimen_java_build: ""

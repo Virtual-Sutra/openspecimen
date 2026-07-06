@@ -285,8 +285,16 @@
          or ('-Xms' ~ _desired_xms ~ 'm') not in _live_setenv }}
   vars:
     _live_setenv: "{{ (_setenv_live.content | b64decode) if (_setenv_live.content is defined) else '' }}"
-    _desired_xmx: "{{ (tomcat_heap_max_override | default([2048, (ansible_facts['memtotal_mb'] * 0.5) | int] | max) | int) | string }}"
-    _desired_xms: "{{ (tomcat_heap_min_override | default(512) | int) | string }}"
+    # Mirror setenv.sh.j2 exactly: per-instance _instance.heap_* wins (MB integer),
+    # else tomcat_heap_*_override, else the max(2048, 50% RAM) / min 512 default.
+    _desired_xmx: >-
+      {{ (_instance.heap_max | int) | string
+         if (_instance is defined and (_instance.heap_max | default('') | string | trim | length > 0))
+         else (tomcat_heap_max_override | default([2048, (ansible_facts['memtotal_mb'] * 0.5) | int] | max) | int) | string }}
+    _desired_xms: >-
+      {{ (_instance.heap_min | int) | string
+         if (_instance is defined and (_instance.heap_min | default('') | string | trim | length > 0))
+         else (tomcat_heap_min_override | default(512) | int) | string }}
   when:
     - _direction.stdout == 'deploy'
     - _installed_release == openspecimen_release

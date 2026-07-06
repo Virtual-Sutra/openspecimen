@@ -3,6 +3,11 @@
 # Usage:
 #   ansible-playbook -i inventory/customers/<name>/ update-heap.yml -e heap_min_mb=512 -e heap_max_mb=4096
 #   # (one OpenSpecimen instance per customer folder - ADR-009)
+#
+# This is a TRANSIENT edit. The next site.yml deploy treats inventory as the source
+# of truth: it detects setenv.sh drift and re-applies the inventory-derived heap
+# (tomcat_heap_max_override, or the 50%-of-RAM default). For a PERSISTENT heap change,
+# set tomcat_heap_max_override / tomcat_heap_min_override in the customer folder.
 - name: Update JVM heap settings
   hosts: openspecimen
   become: true
