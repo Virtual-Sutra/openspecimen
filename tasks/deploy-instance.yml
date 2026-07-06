@@ -44,6 +44,17 @@
     _inst_zip_find:        {files: []}
     openspecimen_java_home: ""
     openspecimen_java_build: ""
+    # 5-stage installation tracker (#…): each app stage is flipped to 'ok' the moment
+    # it completes; mysql is the host-level base role (status from site.yml). Anything
+    # left 'pending' when the deploy fails is a stage that DID NOT run - surfaced in the
+    # end-of-deploy summary and the failure report so nothing missed earlier is ignored.
+    _stage_status:
+      java:         pending
+      tomcat:       pending
+      mysql:        "{{ _mysql_stage | default('unknown') }}"
+      openspecimen: pending
+      apache:       pending
+    _current_stage: "pre-flight (component spec / release zip / artifact check)"
 
 - name: "[{{ _instance.name }}] Detect direction (deploy / rollback / noop)"
   ansible.builtin.include_role:
@@ -143,9 +154,18 @@
     # tomcat runtime below pins into this instance's setenv.sh + systemd unit - so
     # two instances can run on different Java majors. Runs every deploy because the
     # runtime config below is re-templated every deploy and needs openspecimen_java_home.
+    - name: "[{{ _instance.name }}] Stage 1/5 - Java deployment"
+      ansible.builtin.set_fact:
+        _current_stage: "Java deployment (JDK + JAVA_HOME)"
+
     - name: "[{{ _instance.name }}] Per-instance Java (JDK + JAVA_HOME)"
       ansible.builtin.include_role:
         name: java
+
+    - name: "[{{ _instance.name }}] Java stage complete"
+      ansible.builtin.set_fact:
+        _stage_status: "{{ _stage_status | combine({'java': 'ok'}) }}"
+        _current_stage: "Tomcat deployment (binary + runtime)"
 
     # Per-instance Tomcat INSTALL: own CATALINA_HOME (binary at os_versions.tomcat)
     # + golden conf + DB connectors, all from THIS instance's zip. The binary is
@@ -201,6 +221,11 @@
         name: tomcat
         tasks_from: instance
 
+    - name: "[{{ _instance.name }}] Tomcat stage complete"
+      ansible.builtin.set_fact:
+        _stage_status: "{{ _stage_status | combine({'tomcat': 'ok'}) }}"
+        _current_stage: "OpenSpecimen deployment (WAR + config + plugins)"
+
     - name: "[{{ _instance.name }}] OpenSpecimen role (WAR + config + default plugins)"
       ansible.builtin.include_role:
         name: openspecimen
@@ -210,10 +235,23 @@
         name: plugins
       when: customer_plugins | default([]) | length > 0
 
+    - name: "[{{ _instance.name }}] OpenSpecimen stage complete (WAR + config + plugins deployed)"
+      ansible.builtin.set_fact:
+        _stage_status: "{{ _stage_status | combine({'openspecimen': 'ok'}) }}"
+        _current_stage: "Apache deployment (reverse-proxy vhost)"
+
     - name: "[{{ _instance.name }}] Apache reverse proxy"
       ansible.builtin.include_role:
         name: apache
       when: apache_enabled | default(false)
+
+    - name: "[{{ _instance.name }}] Apache stage complete (or skipped when disabled)"
+      ansible.builtin.set_fact:
+        _stage_status: >-
+          {{ _stage_status | combine({'apache':
+             ((apache_enabled | default(false) | bool)
+              | ternary('ok', 'skipped (apache_enabled=false - direct Tomcat)'))}) }}
+        _current_stage: "startup & readiness gate (OpenSpecimen serving)"
 
     # Apply pending restarts BEFORE the readiness gate - a mid-restart Tomcat makes
     # Apache serve the 503 downtime page.
@@ -222,18 +260,26 @@
 
     # Authoritative readiness gate: don't finish until the instance actually SERVES.
     # Apache-fronted instances answer a direct localhost hit with a 302/403 (Host !=
-    # app.url), so probe app_url/ui-app/ through the local Apache (--resolve to
+    # app.url), so probe app_url's Host+path through the local Apache (--resolve to
     # 127.0.0.1); else probe localhost:port accepting 200|302|401|403. Gated on the
     # same apache_enabled as the include above. See docs/TROUBLESHOOTING.md.
+    #
+    # The local probe MUST target Apache's REAL local listener, NOT the public URL's
+    # scheme/port: when TLS is terminated upstream (ALB - ADR-008, apache_enable_ssl
+    # false) the public URL is https:443 but Apache locally serves http:80, so a
+    # --resolve to :443 hits a dead port and the gate loops for the full retry budget
+    # even though the app is up. Derive scheme+port from apache_enable_ssl instead.
     - name: "[{{ _instance.name }}] Build the readiness-check command"
       ansible.builtin.set_fact:
         _ready_cmd: >-
           {% set _app = openspecimen_app_url | default('') | trim -%}
           {% if _app | length > 0 and (apache_enabled | default(false) | bool) -%}
-          {% set _hp = _app | regex_replace('^https?://', '') | regex_replace('/.*$', '') -%}
-          {% set _h = _hp.split(':')[0] -%}
-          {% set _p = _hp.split(':')[1] if ':' in _hp else ('443' if _app.startswith('https') else '80') -%}
-          curl -sf -k -o /dev/null -w "%{http_code}" --resolve {{ _h }}:{{ _p }}:127.0.0.1 {{ _app | regex_replace('/+$', '') }}/ui-app/ | grep -qE '^200$'
+          {% set _h = _app | regex_replace('^https?://', '') | regex_replace('/.*$', '') | regex_replace(':.*$', '') -%}
+          {% set _path = _app | regex_replace('^https?://[^/]+', '') | regex_replace('/+$', '') -%}
+          {% set _ssl = apache_enable_ssl | default(false) | bool -%}
+          {% set _scheme = 'https' if _ssl else 'http' -%}
+          {% set _lport = (apache_https_port | default(443)) if _ssl else (apache_http_port | default(80)) -%}
+          curl -sf -k -o /dev/null -w "%{http_code}" --resolve {{ _h }}:{{ _lport }}:127.0.0.1 {{ _scheme }}://{{ _h }}:{{ _lport }}{{ _path }}/ui-app/ | grep -qE '^200$'
           {%- else -%}
           curl -sf -o /dev/null -w "%{http_code}" http://localhost:{{ openspecimen_port }}{{ openspecimen_context_path | default('/openspecimen') }}/rest/ng/config-settings/app-props | grep -qE '^(200|302|401|403)$'
           {%- endif %}
@@ -247,10 +293,28 @@
       changed_when: false
       become: true
 
+    - name: "[{{ _instance.name }}] Readiness gate passed - move to public-URL verification"
+      ansible.builtin.set_fact:
+        _current_stage: "public URL verification"
+
     - name: "[{{ _instance.name }}] Verify app reachable via public URL (opt-in)"
       ansible.builtin.include_role:
         name: openspecimen
         tasks_from: verify-public-url
+
+    # ── Consolidated 5-stage installation summary (success path) ────────────────
+    # Every stage reached here having flipped to 'ok'/'skipped'. Printed so a
+    # successful deploy explicitly accounts for all five stages (no silent skips).
+    - name: "[{{ _instance.name }}] Installation summary - all 5 stages"
+      ansible.builtin.debug:
+        msg: |-
+          ═══ Installation stages - {{ _instance.name }} ({{ openspecimen_release }}) ═══
+            1. Java deployment .......... {{ _stage_status.java }}
+            2. Tomcat deployment ........ {{ _stage_status.tomcat }}
+            3. MySQL deployment ......... {{ _stage_status.mysql }}
+            4. OpenSpecimen deployment .. {{ _stage_status.openspecimen }}
+            5. Apache deployment ........ {{ _stage_status.apache }}
+          ✓ Deploy successful - all required stages completed and the instance is serving.
 
   # ── Graceful auto-rollback on a failed upgrade ──────────────────────────────
   # Any failure above (WAR/plugin extract, startup gate, readiness, public-URL
@@ -304,6 +368,16 @@
       ansible.builtin.fail:
         msg: |
           ✗ Deploy of {{ openspecimen_release }} FAILED on instance '{{ _instance.name }}'.
+
+          ── Installation stage status (at point of failure) ──
+            1. Java deployment .......... {{ _stage_status.java | default('pending') }}
+            2. Tomcat deployment ........ {{ _stage_status.tomcat | default('pending') }}
+            3. MySQL deployment ......... {{ _stage_status.mysql | default('unknown') }}
+            4. OpenSpecimen deployment .. {{ _stage_status.openspecimen | default('pending') }}
+            5. Apache deployment ........ {{ _stage_status.apache | default('pending') }}
+          Failed during: {{ _current_stage | default('unknown stage') }}
+          (Any stage still 'pending' did NOT run - the failure above stopped the deploy there.)
+
           {% if _rolled_back | default(false) %}
           ✓ Rolled back to the prior version from backup {{ backup_ts.stdout | trim }}
             (WAR + config + plugins{{ ' + database' if (_db_restored | default(false)) else '' }}). The instance is running the previous version.

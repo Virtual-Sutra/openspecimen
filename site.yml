@@ -73,6 +73,19 @@
   # App roles run PER INSTANCE (#72 part 2): each _instances entry gets its own
   # direction detection, WAR/config/plugin deploy, apache vhost, and verify.
   tasks:
+    # Record the host-level MySQL stage outcome for the per-instance 5-stage report.
+    # Reaching here means the mysql role (if it ran) SUCCEEDED - a failing base role
+    # aborts the play before this. So this only distinguishes ran / skipped-why.
+    - name: Record MySQL (host-level base) stage status for the deploy report
+      ansible.builtin.set_fact:
+        _mysql_stage: >-
+          {{ 'ok (installed/updated this run)'
+             if (_full_deploy and (db_managed | default(true)))
+             else ('skipped (external DB - db_managed=false: RDS/Oracle)'
+                   if not (db_managed | default(true))
+                   else 'skipped (already installed - app-only upgrade)') }}
+      tags: [always]
+
     - name: Deploy each OpenSpecimen instance
       ansible.builtin.include_tasks: tasks/deploy-instance.yml
       loop: "{{ _instances }}"
