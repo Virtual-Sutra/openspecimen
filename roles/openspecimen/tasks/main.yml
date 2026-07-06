@@ -18,8 +18,16 @@
 # DB reset) must be treated as fresh - using upgrade mode on an empty DB skips
 # core schema creation and causes Liquibase FK failures.
 # Override with: -e openspecimen_install_type=fresh|upgrade
+#
+# db_managed=false (external RDS/Oracle): the probe is SKIPPED - we make no
+# connection to the externally-managed DB at all (see "Set install type" below,
+# which then assumes 'upgrade'). REVISIT: this means an app-only run against an
+# external DB never verifies connectivity or detects a genuinely fresh schema;
+# a first-time external-DB install must be seeded separately. See the db_managed
+# skip note in site.yml.
 
 - name: Check for existing OpenSpecimen schema in database
+  when: db_managed | default(true) | bool
   block:
     - name: Probe MySQL connectivity and query schema
       ansible.builtin.shell: |
@@ -80,8 +88,18 @@
   # instance under the #72-p2 loop, and set_fact persists across iterations, so a
   # guard would leak instance A's value to B (and skip B's upgrade backup/dump).
   # An operator '-e openspecimen_install_type=...' still wins by var precedence.
+  #
+  # db_managed=false: the schema probe above was skipped, so _schema_check is
+  # undefined - assume 'upgrade' (app-only: refresh java/tomcat/war/plugins/apache,
+  # never touch the external DB). REVISIT: a genuine fresh external-DB install
+  # cannot be auto-detected here; seed it with db_managed=true or seed the schema
+  # out of band for the first run.
   ansible.builtin.set_fact:
-    openspecimen_install_type: "{{ 'upgrade' if (_schema_check.stdout | trim) == '1' else 'fresh' }}"
+    openspecimen_install_type: >-
+      {{ 'upgrade'
+         if (not (db_managed | default(true) | bool))
+            or ((_schema_check.stdout | trim) == '1')
+         else 'fresh' }}
 
 - name: Log deployment plan
   ansible.builtin.debug:
@@ -769,7 +787,11 @@
   changed_when: false
   failed_when: false
   no_log: true
-  when: (db_type | default('mysql')) == 'mysql'
+  # db_managed=false: skip - we never write to an externally-managed DB. A stale
+  # lock on an external DB is the DB owner's responsibility (REVISIT).
+  when:
+    - (db_type | default('mysql')) == 'mysql'
+    - db_managed | default(true) | bool
 
 # ── Start service ─────────────────────────────────────────────────────────────
 

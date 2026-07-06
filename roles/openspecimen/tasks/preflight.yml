@@ -78,7 +78,13 @@
 
         For Jenkins runs, the password comes from the openspecimen-vault-<customer>
         credential and is decrypted from secrets/<customer>.yml at deploy time.
+  # Only required when this deploy manages the DB. db_managed=false (external
+  # RDS/Oracle) never reads the password: the schema probe, backups and the
+  # context.xml datasource render are all skipped, so an app-only run needs no
+  # credential. REVISIT: the external DB's password lives in the pre-existing
+  # context.xml, written once at onboarding.
   when:
+    - db_managed | default(true) | bool
     - db_type | default('mysql') == 'mysql'
     - mysql_db_password is not defined or not mysql_db_password | string | trim
 

@@ -173,6 +173,12 @@
       -Xmx{{ (_instance.heap_max | string ~ 'm') if (_instance.heap_max | default('') | string | trim | length > 0) else tomcat_heap_max }}
       (RAM: {{ ansible_facts['memtotal_mb'] }} MB)
 
+# db_managed=false (external RDS/Oracle): the JNDI datasource is "DB config" and
+# is left exactly as onboarding wrote it - not re-rendered here - so an app-only
+# run touches only java/tomcat/war/plugins/apache. This is why db_managed=false
+# needs no db_password at deploy time. REVISIT: the first-ever deploy of an
+# external-DB customer must still have context.xml provisioned once (onboarding,
+# or a single db_managed=true seed run); an app-only run will NOT create it.
 - name: "[tomcat:{{ openspecimen_service_name }}] Template context.xml (JNDI datasource)"
   ansible.builtin.template:
     src: context.xml.j2
@@ -181,6 +187,40 @@
     group: "{{ tomcat_user }}"
     mode: '0640'
   notify: restart openspecimen
+  when: db_managed | default(true) | bool
+
+# db_managed=false: we deliberately do NOT write context.xml, so fail fast here
+# if the pre-existing datasource is missing - otherwise the app starts, cannot
+# get a JDBC connection, and the deploy only fails ~minutes later at the readiness
+# check with a misleading DB error. This gives the operator an actionable message
+# at the right moment instead. Grep for the jdbc/openspecimen Resource rather than
+# mere file existence: a freshly-unzipped Tomcat already ships a stock context.xml
+# WITHOUT the datasource, so an existence check would pass on an unseeded host.
+- name: "[tomcat:{{ openspecimen_service_name }}] Require the external-DB datasource in context.xml (db_managed=false)"
+  when: not (db_managed | default(true) | bool)
+  block:
+    - name: "[tomcat:{{ openspecimen_service_name }}] Check context.xml has the jdbc/openspecimen datasource"
+      # rc 0 = present, 1 = file exists but no datasource, 2 = file missing.
+      ansible.builtin.command: "grep -q 'jdbc/openspecimen' {{ catalina_base }}/conf/context.xml"
+      register: _external_datasource_check
+      failed_when: false
+      changed_when: false
+
+    - name: "[tomcat:{{ openspecimen_service_name }}] Fail if the external-DB datasource is missing"
+      ansible.builtin.fail:
+        msg: |
+          ✗ db_managed=false but no jdbc/openspecimen datasource was found at
+            {{ catalina_base }}/conf/context.xml
+
+          db_managed=false deploys are app-only and never write DB config, so the
+          external-DB datasource must already be present on this host.
+
+          What to do (first-time external-DB setup):
+            - Provision context.xml during onboarding, OR
+            - Run one deploy with db_managed=true (plus mysql_db_password / the
+              relevant oracle_* vars) to seed the datasource, then switch to
+              db_managed=false for subsequent app-only upgrades.
+      when: _external_datasource_check.rc != 0
 
 - name: "[tomcat:{{ openspecimen_service_name }}] Template setenv.sh (JVM heap)"
   ansible.builtin.template:

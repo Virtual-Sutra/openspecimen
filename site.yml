@@ -3,6 +3,20 @@
 # deploy/rollback/no-op; scope is automatic - a fresh install runs the base roles
 # (common, mysql) then the app roles, an upgrade skips the base roles (also
 # `base`-tagged: --skip-tags base / --tags base to force). See docs/DEPLOY-UPGRADE.md.
+#
+# ── db_managed=false (external RDS/Oracle) - interim "app-only" behaviour ──────
+# When db_managed=false the deploy touches NOTHING database-related, regardless of
+# db_type. Skipped: the mysql role, the connectivity/schema probe (install type is
+# assumed 'upgrade'), the context.xml JNDI datasource render, DB backups/dumps,
+# and the Liquibase stale-lock clear. Only java/tomcat/war/plugins/apache are
+# refreshed, and no db_password is required. The external DB is assumed already
+# provisioned and its credentials already present in the host's context.xml.
+#
+# REVISIT (tracked): this interim model gives no connectivity verification, no
+# fresh-external-DB detection, and no datasource/pool-config updates for external
+# DBs. A first-time external-DB install must be seeded out of band (or once with
+# db_managed=true). Revisit to add a read-only connectivity check and a safe,
+# credential-free datasource refresh path.
 
 - name: Deploy OpenSpecimen
   hosts: openspecimen
