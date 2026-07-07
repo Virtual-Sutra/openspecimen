@@ -105,15 +105,24 @@ openspecimen_rollback_on_failure: true
 # openspecimen_app_url: "https://openspecimen.yourdomain.com"
 
 # ── Post-deploy health check ──────────────────────────────────────────────────
-# The primary readiness check is Phase 1 (Tomcat startup) in the openspecimen
-# role - it always runs, is local, and needs no DNS.
+# The primary readiness check is Phase 1 (Tomcat startup / catalina.out) in the
+# openspecimen role - it always runs, is local, and needs no DNS.
+#
+# The local HTTP readiness gate (curls the app-props REST endpoint until the app
+# serves) runs by default. On a SLOW environment where the app is up but takes too
+# long to answer HTTP within the retry budget, disable it with
+# openspecimen_readiness_http_check: false - the deploy then relies on the Tomcat
+# startup wait plus the optional public-URL check below. Its retry budget is
+# openspecimen_health_retries x openspecimen_health_delay, each curl capped at
+# openspecimen_health_timeout seconds.
+openspecimen_readiness_http_check: true
+openspecimen_health_timeout: 30
 #
 # The optional public-URL check below curls openspecimen_app_url from the control
 # node to validate the front-end proxy / ALB / DNS path. It is OFF by default;
 # enable it (openspecimen_verify_app_url: true) only once the public hostname
 # resolves. It also requires openspecimen_app_url to be set, is non-fatal unless
-# openspecimen_app_url_check_fatal=true, and retries
-# openspecimen_health_retries x openspecimen_health_delay seconds.
+# openspecimen_app_url_check_fatal=true.
 openspecimen_verify_app_url: false
 openspecimen_health_retries: 5
 openspecimen_health_delay:   10

@@ -272,6 +272,11 @@
     # https:443 but Apache locally serves http:80, so a --resolve to :443 hits a dead
     # port. Derive scheme+port from apache_enable_ssl. Else probe localhost:port +
     # context directly on Tomcat. --max-time covers a slow app-props load.
+    #
+    # Opt-out: set openspecimen_readiness_http_check=false for a slow environment where
+    # the app is up but takes too long to answer HTTP within the retry budget. The
+    # deploy then relies on the catalina.out "Server startup in" wait (openspecimen
+    # role) plus the opt-in public-URL check below.
     - name: "[{{ _instance.name }}] Build the readiness-check command"
       ansible.builtin.set_fact:
         _ready_cmd: >-
@@ -286,6 +291,7 @@
           {%- else -%}
           curl -sf --max-time {{ _to }} -o /dev/null -w "%{http_code}" http://localhost:{{ openspecimen_port }}{{ openspecimen_context_path | default('/openspecimen') }}/rest/ng/config-settings/app-props | grep -qE '^(200|302|401|403)$'
           {%- endif %}
+      when: openspecimen_readiness_http_check | default(true) | bool
 
     - name: "[{{ _instance.name }}] Wait until OpenSpecimen serves the app (post-restart)"
       ansible.builtin.shell: "{{ _ready_cmd }}"
@@ -295,6 +301,15 @@
       delay: "{{ openspecimen_health_delay | default(10) | int }}"
       changed_when: false
       become: true
+      when: openspecimen_readiness_http_check | default(true) | bool
+
+    - name: "[{{ _instance.name }}] Local HTTP readiness gate DISABLED (openspecimen_readiness_http_check=false)"
+      ansible.builtin.debug:
+        msg: >-
+          Skipped the local HTTP readiness probe. App startup was already confirmed via
+          catalina.out ("Server startup in"). Enable openspecimen_verify_app_url to still
+          validate serving over the public URL below.
+      when: not (openspecimen_readiness_http_check | default(true) | bool)
 
     - name: "[{{ _instance.name }}] Readiness gate passed - move to public-URL verification"
       ansible.builtin.set_fact:
