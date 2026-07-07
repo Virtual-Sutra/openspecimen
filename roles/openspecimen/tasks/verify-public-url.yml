@@ -1,15 +1,12 @@
 ---
-# External public-URL health check: curl the REST endpoint
-# <scheme>://<host>/rest/ng/config-settings/app-props from the control node
-# (validates the full public path - proxy/ALB/DNS/cert). We probe this REST API
-# (not the /ui-app/ Angular shell) because it actually exercises the running
-# back-end - the SPA's static index.html can 200 even when the app context failed
-# to start, whereas app-props only answers 200 when OpenSpecimen is truly serving.
-#
-# The endpoint lives at the HOST ROOT, NOT under the /openspecimen context that
-# openspecimen_app_url carries - so we strip app_url's path and keep scheme://host.
-# app-props can take 10-15s to answer, so curl --max-time is generous
-# (openspecimen_health_timeout, default 30s) and the request retries.
+# External public-URL health check: curl the /ui-app/ front-end over the public URL
+# from the control node (validates the full public path - proxy/ALB/DNS/cert). The
+# UI path is where Apache MOUNTS this instance - apache_path_prefix (ADR-007; both
+# routing modes mount there, default openspecimen_context_path) - NOT app_url's path,
+# so it is correct whether the instance is mounted at /openspecimen (path routing) or
+# the domain root (apache_path_prefix: /, domain routing). We keep app_url's
+# scheme://host[:port] (real cert/DNS) and append the mount prefix + /ui-app/.
+# --max-time is generous (openspecimen_health_timeout, default 30s) and it retries.
 #
 # Runs as a post_task (after apache). OPT-IN via openspecimen_verify_app_url
 # (default false). The always-on local check is in the openspecimen role.
@@ -28,17 +25,23 @@
     - openspecimen_verify_app_url | default(false) | bool
     - openspecimen_app_url is defined
   block:
-    - name: Resolve the public-URL health target (host root + REST app-props)
-      # The REST API is served at scheme://host, NOT under the /openspecimen context
-      # that openspecimen_app_url carries - strip the path, keep scheme://host[:port].
+    - name: Resolve the public-URL health target (scheme://host + Apache mount prefix + /ui-app/)
+      # scheme://host[:port] from app_url (real cert/DNS), then the Apache MOUNT prefix
+      # (apache_path_prefix, default openspecimen_context_path), then /ui-app/ - so a
+      # root-mounted instance (apache_path_prefix: /) is probed at <host>/ui-app/ and a
+      # path-mounted one at <host>/<prefix>/ui-app/. Trailing slash on the prefix is
+      # normalised so '/' does not become '//ui-app/'.
       ansible.builtin.set_fact:
-        _public_health_url: "{{ openspecimen_app_url | regex_replace('^(https?://[^/]+).*$', '\\1') }}/rest/ng/config-settings/app-props"
+        _public_health_url: >-
+          {{ openspecimen_app_url | regex_replace('^(https?://[^/]+).*$', '\\1') }}{{
+             (apache_path_prefix | default(openspecimen_context_path | default('/openspecimen')))
+             | regex_replace('/+$', '') }}/ui-app/
 
     - name: "Health check via public URL ({{ _public_health_url }})"
       # No -f: we need the actual status code so a 4xx/5xx (server answered, app not
       # served) can be told apart from a connection failure (curl prints 000). -k when
-      # openspecimen_app_url_insecure (self-signed cert hosts). --max-time covers the
-      # 10-15s app-props load. Retries let a still-warming app reach 200; failed_when
+      # openspecimen_app_url_insecure (self-signed cert hosts). --max-time covers a
+      # slow /ui-app/ load. Retries let a still-warming app reach 200; failed_when
       # false so we decide the outcome below.
       ansible.builtin.shell: >
         curl -s {{ '-k ' if (openspecimen_app_url_insecure | default(false) | bool) else '' }}--max-time {{ openspecimen_health_timeout | default(30) | int }} -o /dev/null -w "%{http_code}"
@@ -65,8 +68,8 @@
           A 4xx/5xx means the endpoint ANSWERED but OpenSpecimen is not being served there
           - a 404 cannot be treated as a successful deploy. Most likely:
             - the webapp context failed to start (check catalina.out for a startup/Liquibase failure), or
-            - the front-end (Apache / ALB) does not route /rest/ng/... to the
-              OpenSpecimen back-end.
+            - the front-end (Apache / ALB) does not serve /ui-app/ at the mount prefix
+              (apache_path_prefix) for this instance.
       when: _public_code is match('^[45][0-9][0-9]$')
 
     - name: Warn - public URL not reachable (front-end / network); non-fatal unless configured
@@ -76,7 +79,7 @@
           {{ openspecimen_health_retries | default(5) }} attempts. The app passed its startup +
           local health checks; a no-response/redirect result depends on the front-end proxy /
           ALB / DNS / cert / security group. Check:
-            1. ALB / front-end target health (path /rest/ng/config-settings/app-props -> 200)
+            1. ALB / front-end target health ({{ _public_health_url }} -> 200)
             2. DNS: dig +short {{ openspecimen_app_url | regex_replace('^https?://', '') | regex_replace('/.*', '') }}
             3. TLS certificate validity (HTTPS)
             4. Security group allows inbound 443
