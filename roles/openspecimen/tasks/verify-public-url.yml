@@ -33,7 +33,7 @@
       # normalised so '/' does not become '//ui-app/'.
       ansible.builtin.set_fact:
         _public_health_url: >-
-          {{ openspecimen_app_url | regex_replace('^(https?://[^/]+).*$', '\\1') }}{{
+          {{ openspecimen_app_url | regex_replace('^(https?://[^/]+).*$', '\1') }}{{
              (apache_path_prefix | default(openspecimen_context_path | default('/openspecimen')))
              | regex_replace('/+$', '') }}/ui-app/
 
