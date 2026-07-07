@@ -66,10 +66,14 @@
         Or pass at run time:  -e openspecimen_builds_dir=/path/to/builds
   when: openspecimen_builds_dir is not defined or not openspecimen_builds_dir | trim
 
-- name: Validate mysql_db_password is set when MySQL is managed locally
+- name: Validate mysql_db_password is set when the DB config is rendered this run
   ansible.builtin.fail:
     msg: |
-      ✗ mysql_db_password is not set, but db_managed=true.
+      ✗ mysql_db_password is not set, but this deploy renders the DB config.
+
+      This is a MySQL deploy that writes context.xml this run - either db_managed=true
+      (local MySQL), or db_managed=false on a FRESH host (no existing datasource) that
+      must render the datasource from the inventory db_config.
 
       What to do:
         Set in secrets/<customer>.yml (Ansible Vault encrypted):
@@ -78,13 +82,12 @@
 
         For Jenkins runs, the password comes from the openspecimen-vault-<customer>
         credential and is decrypted from secrets/<customer>.yml at deploy time.
-  # Only required when this deploy manages the DB. db_managed=false (external
-  # RDS/Oracle) never reads the password: the schema probe, backups and the
-  # context.xml datasource render are all skipped, so an app-only run needs no
-  # credential. REVISIT: the external DB's password lives in the pre-existing
-  # context.xml, written once at onboarding.
+  # Required whenever the DB config is rendered this run (db_managed=true, OR
+  # db_managed=false on a fresh host). Skipped only when reusing existing on-host
+  # config (db_managed=false with a datasource already present), where the password
+  # already lives in the on-host context.xml and is never read.
   when:
-    - db_managed | default(true) | bool
+    - not (_reuse_existing_config | default(false))
     - db_type | default('mysql') == 'mysql'
     - mysql_db_password is not defined or not mysql_db_password | string | trim
 

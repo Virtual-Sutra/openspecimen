@@ -4,22 +4,26 @@
 # (common, mysql) then the app roles, an upgrade skips the base roles (also
 # `base`-tagged: --skip-tags base / --tags base to force). See docs/DEPLOY-UPGRADE.md.
 #
-# ── db_managed=false (external RDS/Oracle) - interim "app-only" behaviour ──────
-# When db_managed=false the deploy is APP-ONLY: it refreshes java, the Tomcat
-# binary, the WAR, plugins and apache, and REUSES all existing on-host config -
-# it renders none of it and the customer inventory need not (re)declare any of it.
-# Reused as-is: context.xml (DB/JNDI datasource), server.xml (ports/AJP),
-# setenv.sh (heap), and openspecimen.properties. Also skipped: the mysql role,
-# the connectivity/schema probe (install type assumed 'upgrade'), DB backups/dumps,
-# the Liquibase stale-lock clear, and the config-only fast path. No db_password is
-# required. The host is assumed already provisioned (config seeded at onboarding);
-# the tomcat role fails fast if context.xml has no datasource.
+# ── db_managed=false (external RDS/Oracle) - fresh vs existing ─────────────────
+# db_managed=false never manages the DB server (mysql role, connectivity/schema
+# probe, DB backups/dumps and the Liquibase lock clear are always skipped). Whether
+# it RENDERS or REUSES the app config depends on whether the DB config already
+# exists on the host - detected by probing context.xml for the jdbc/openspecimen
+# datasource (direction.yml), NOT the .release marker (existing non-Ansible installs
+# have no marker):
+#   EXISTING (datasource present) → app-only UPGRADE: refresh java/tomcat-binary/
+#     WAR/plugins/apache and REUSE all on-host config (context.xml, server.xml,
+#     setenv.sh, openspecimen.properties). No db_password needed. The config-only
+#     fast path is disabled. A reuse safety-net re-checks the datasource survived.
+#   FRESH (no datasource) → RENDER all config from the inventory db_config, exactly
+#     like a managed install (but still no mysql role - the external DB + user must
+#     already exist; the app creates its schema). Preflight FAILS if the db_config
+#     (e.g. mysql_db_password) is missing.
 #
-# REVISIT (tracked): interim model. No connectivity verification, no fresh-external
-# -DB detection, no config refresh for external DBs. A first-time external-DB host
-# must be seeded out of band (or once with db_managed=true). Edge case: a Tomcat
-# *version change* on a default (base==home) instance re-unpacks the stock
-# server.xml, which will NOT be re-patched here - re-onboard such a host.
+# REVISIT (tracked): no connectivity verification for external DBs. Edge case: a
+# Tomcat *version change* on a default (base==home) instance re-unpacks the stock
+# server.xml/context.xml over the shared conf - the reuse safety-net catches the
+# lost datasource and fails with guidance; re-onboard such a host.
 
 - name: Deploy OpenSpecimen
   hosts: openspecimen

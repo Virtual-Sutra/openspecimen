@@ -99,7 +99,7 @@ target modification** - if the operator's inputs are wrong. Checks include:
 
 - `openspecimen_release` is set and matches the expected `openspecimen_<version>` format
 - `openspecimen_builds_dir` is set
-- `mysql_db_password` is set when `db_managed=true`
+- `mysql_db_password` is set when the DB config is rendered this run (`db_managed=true`, or `db_managed=false` on a fresh host with no existing datasource)
 - The release zip exists at `openspecimen_zip_path` on the control node
 - Every plugin name in `openspecimen_paid_plugins` and `openspecimen_customer_plugins`
   has a matching `<name>-<version>.zip` file under `openspecimen_builds_dir`
@@ -550,7 +550,7 @@ via `-e mysql_db_password=<password>` (or your CI/CD secrets manager).
 | `openspecimen_app_url` | _(unset)_ | Required for ALB / reverse proxy setup |
 | `openspecimen_node_name` | _(unset)_ | Required for multi-node HA |
 | `db_type` | `mysql` | `mysql` or `oracle` |
-| `db_managed` | `true` | `false` = external DB (RDS / Oracle): **app-only** deploy. Refreshes only java/tomcat-binary/WAR/plugins/apache and **reuses all existing on-host config** (`context.xml`, `server.xml`, `setenv.sh`, `openspecimen.properties`) — renders none of it, so the customer inventory needs no DB/tomcat/openspecimen config and no `mysql_db_password`. Also skips the MySQL role, connectivity/schema probe, backups, Liquibase lock clear, and the config-only fast path. Assumes the host was seeded at onboarding (the tomcat role fails fast if `context.xml` has no datasource). See the interim note in `site.yml`. |
+| `db_managed` | `true` | `false` = external DB (RDS / Oracle): never manages the DB server (skips the MySQL role, connectivity/schema probe, backups, Liquibase lock clear). Config behaviour depends on whether the DB config already exists on the host (probed via `context.xml`'s `jdbc/openspecimen` datasource, **not** the `.release` marker): **existing** → app-only upgrade that **reuses** all on-host config (`context.xml`, `server.xml`, `setenv.sh`, `openspecimen.properties`) and needs no `mysql_db_password`; **fresh** (no datasource) → **renders** config from the inventory db_config like a managed install (preflight fails if `mysql_db_password`/db_config is missing; the external DB + user must already exist, the app creates its schema). See the note in `site.yml`. |
 | `mysql_db_host` | `127.0.0.1` | Set to RDS endpoint for external database |
 | `tomcat_heap_min` | `512m` | JVM `-Xms` |
 | `tomcat_heap_max` | auto (RAM × 0.5, min 2048 MB) | Override with `tomcat_heap_max_override` (integer MB) |

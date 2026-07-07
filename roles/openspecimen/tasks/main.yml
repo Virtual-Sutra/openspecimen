@@ -89,17 +89,17 @@
   # guard would leak instance A's value to B (and skip B's upgrade backup/dump).
   # An operator '-e openspecimen_install_type=...' still wins by var precedence.
   #
-  # db_managed=false: the schema probe above was skipped, so _schema_check is
-  # undefined - assume 'upgrade' (app-only: refresh java/tomcat/war/plugins/apache,
-  # never touch the external DB). REVISIT: a genuine fresh external-DB install
-  # cannot be auto-detected here; seed it with db_managed=true or seed the schema
-  # out of band for the first run.
+  # db_managed=true: derive from the schema probe above (schema present = upgrade).
+  # db_managed=false: the schema probe was skipped (never touch the external DB), so
+  # derive fresh/upgrade from whether the DB config already exists on the host
+  # (_reuse_existing_config, from the context.xml datasource probe in direction.yml).
+  # An existing (non-Ansible or prior) install has the datasource → upgrade (reuse
+  # config); a truly fresh host has none → fresh (render config from inventory).
   ansible.builtin.set_fact:
     openspecimen_install_type: >-
-      {{ 'upgrade'
-         if (not (db_managed | default(true) | bool))
-            or ((_schema_check.stdout | trim) == '1')
-         else 'fresh' }}
+      {{ ('upgrade' if (_schema_check.stdout | trim) == '1' else 'fresh')
+         if (db_managed | default(true) | bool)
+         else ('upgrade' if (_reuse_existing_config | default(false)) else 'fresh') }}
 
 - name: Log deployment plan
   ansible.builtin.debug:
@@ -194,9 +194,10 @@
 
 # Named after the webapp/context (<war_name>.properties) so OpenSpecimen's
 # config/<context> JNDI lookup + conf/<context>.properties fallback both resolve.
-# db_managed=false: app-only deploy - reuse the existing openspecimen.properties on
-# the host (seeded once at onboarding, alongside context.xml). The db_managed=false
-# datasource guard in the tomcat role already fails fast on an unseeded host.
+# Rendered on every deploy EXCEPT a db_managed=false upgrade, which reuses the
+# existing openspecimen.properties on the host (a db_managed=false FRESH install
+# still renders it from inventory). The tomcat datasource guard fails fast on an
+# unseeded upgrade host.
 - name: Template openspecimen.properties
   ansible.builtin.template:
     src: openspecimen.properties.j2
@@ -204,7 +205,7 @@
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
     mode: '0640'
-  when: db_managed | default(true) | bool
+  when: not (_reuse_existing_config | default(false))
 
 # ── Backup WAR and plugins on upgrade ────────────────────────────────────────
 
