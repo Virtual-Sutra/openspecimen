@@ -259,24 +259,20 @@
       ansible.builtin.meta: flush_handlers
 
     # Authoritative readiness gate: don't finish until the instance actually SERVES.
-    # Probe the REST app-props endpoint (NOT the heavy /ui-app/ Angular shell, which
-    # can lag or 302 on a slow VM even when the back-end is serving). app-props answers
-    # as soon as OpenSpecimen is up. Accept 200|302|401|403 - any is proof the app
-    # answered. The full public path (Apache/ALB/DNS/cert) is validated separately by
-    # the opt-in public-URL check below.
+    # This is the FRONT-END check - Apache-fronted instances probe /ui-app/ (the SPA)
+    # through the local Apache (--resolve to 127.0.0.1) at app_url's path. It answers
+    # 200 once the front-end is served. (The back-end REST is validated separately by
+    # the app-props public-URL check below.) On a SLOW VM where the app is up but
+    # /ui-app/ is slow to load, disable this gate with openspecimen_readiness_http_check
+    # =false - the deploy then relies on the catalina.out "Server startup in" wait plus
+    # the opt-in public-URL check.
     #
-    # Apache-fronted: probe app-props at the HOST ROOT through the local Apache
-    # (--resolve to 127.0.0.1), matching the public check's URL. The local probe MUST
-    # target Apache's REAL local listener, NOT the public URL's scheme/port: when TLS
-    # is terminated upstream (ALB - ADR-008, apache_enable_ssl false) the public URL is
-    # https:443 but Apache locally serves http:80, so a --resolve to :443 hits a dead
-    # port. Derive scheme+port from apache_enable_ssl. Else probe localhost:port +
-    # context directly on Tomcat. --max-time covers a slow app-props load.
-    #
-    # Opt-out: set openspecimen_readiness_http_check=false for a slow environment where
-    # the app is up but takes too long to answer HTTP within the retry budget. The
-    # deploy then relies on the catalina.out "Server startup in" wait (openspecimen
-    # role) plus the opt-in public-URL check below.
+    # The local probe MUST target Apache's REAL local listener, NOT the public URL's
+    # scheme/port: when TLS is terminated upstream (ALB - ADR-008, apache_enable_ssl
+    # false) the public URL is https:443 but Apache locally serves http:80, so a
+    # --resolve to :443 hits a dead port. Derive scheme+port from apache_enable_ssl.
+    # Else (no Apache) probe app-props on localhost:port + context directly on Tomcat.
+    # --max-time bounds a slow response.
     - name: "[{{ _instance.name }}] Build the readiness-check command"
       ansible.builtin.set_fact:
         _ready_cmd: >-
@@ -284,10 +280,11 @@
           {% set _to = openspecimen_health_timeout | default(30) | int -%}
           {% if _app | length > 0 and (apache_enabled | default(false) | bool) -%}
           {% set _h = _app | regex_replace('^https?://', '') | regex_replace('/.*$', '') | regex_replace(':.*$', '') -%}
+          {% set _path = _app | regex_replace('^https?://[^/]+', '') | regex_replace('/+$', '') -%}
           {% set _ssl = apache_enable_ssl | default(false) | bool -%}
           {% set _scheme = 'https' if _ssl else 'http' -%}
           {% set _lport = (apache_https_port | default(443)) if _ssl else (apache_http_port | default(80)) -%}
-          curl -sf -k --max-time {{ _to }} -o /dev/null -w "%{http_code}" --resolve {{ _h }}:{{ _lport }}:127.0.0.1 {{ _scheme }}://{{ _h }}:{{ _lport }}/rest/ng/config-settings/app-props | grep -qE '^(200|302|401|403)$'
+          curl -sf -k --max-time {{ _to }} -o /dev/null -w "%{http_code}" --resolve {{ _h }}:{{ _lport }}:127.0.0.1 {{ _scheme }}://{{ _h }}:{{ _lport }}{{ _path }}/ui-app/ | grep -qE '^200$'
           {%- else -%}
           curl -sf --max-time {{ _to }} -o /dev/null -w "%{http_code}" http://localhost:{{ openspecimen_port }}{{ openspecimen_context_path | default('/openspecimen') }}/rest/ng/config-settings/app-props | grep -qE '^(200|302|401|403)$'
           {%- endif %}
