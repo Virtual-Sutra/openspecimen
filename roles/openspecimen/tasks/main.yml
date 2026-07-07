@@ -751,27 +751,12 @@
     state: absent
 
 # ── Prune old backups ────────────────────────────────────────────────────────
-# Keeps the most recent N timestamped backup subdirectories; older ones are
-# deleted. Retention is set by openspecimen_backup_retention (default 3 in
-# inventory/group_vars/all.yml). config-changes/ is excluded - it's a flat
-# log directory for the update-config.sh operator script, not a snapshot.
-# Sort by mtime so retention is robust to timestamp filename format.
-
-- name: List existing timestamped backup directories
-  ansible.builtin.find:
-    paths:       "{{ openspecimen_backup_dir }}"
-    file_type:   directory
-    excludes:    "config-changes"
-    recurse:     false
-  register: _backup_dirs
-  changed_when: false
-
-- name: Prune backups beyond openspecimen_backup_retention ({{ openspecimen_backup_retention }})
-  ansible.builtin.file:
-    path:  "{{ item.path }}"
-    state: absent
-  loop: "{{ (_backup_dirs.files | sort(attribute='mtime', reverse=true))[openspecimen_backup_retention | int :] }}"
-  when: _backup_dirs.files | length > (openspecimen_backup_retention | int)
+# Backup RETENTION is deliberately NOT applied here. The pre-upgrade backup was
+# just taken above; pruning older backups mid-deploy would destroy rollback history
+# before the new version is proven good. Retention runs at the very end of a
+# SUCCESSFUL deploy - after the readiness gate AND the public-URL verify - in
+# tasks/deploy-instance.yml. A failed deploy hits the rescue/auto-rollback instead
+# and keeps every existing backup.
 
 # ── Release stale Liquibase lock ──────────────────────────────────────────────
 # OpenSpecimen runs Liquibase at boot, taking a row-lock in DATABASECHANGELOGLOCK.

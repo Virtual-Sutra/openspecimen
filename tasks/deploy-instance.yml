@@ -302,6 +302,31 @@
         name: openspecimen
         tasks_from: verify-public-url
 
+    # ── Prune old backups (only after a fully successful deploy) ────────────────
+    # Retention runs HERE - after startup readiness AND the public-URL verify - not
+    # during the deploy: pruning older backups before the new version is proven good
+    # would destroy rollback history. A failure anywhere above lands in the rescue
+    # (auto-rollback) below and never reaches this, so every backup is preserved.
+    # Keep the most recent N timestamped backup dirs; config-changes/ (the flat
+    # update-config.sh log) is excluded. Sort by mtime - robust to filename format.
+    - name: "[{{ _instance.name }}] List existing timestamped backup directories"
+      ansible.builtin.find:
+        paths:     "{{ openspecimen_backup_dir }}"
+        file_type: directory
+        excludes:  "config-changes"
+        recurse:   false
+      register: _backup_dirs
+      changed_when: false
+
+    - name: "[{{ _instance.name }}] Prune backups beyond openspecimen_backup_retention ({{ openspecimen_backup_retention }})"
+      ansible.builtin.file:
+        path:  "{{ item.path }}"
+        state: absent
+      loop: "{{ (_backup_dirs.files | sort(attribute='mtime', reverse=true))[openspecimen_backup_retention | int :] }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: _backup_dirs.files | length > (openspecimen_backup_retention | int)
+
     # ── Consolidated 5-stage installation summary (success path) ────────────────
     # Every stage reached here having flipped to 'ok'/'skipped'. Printed so a
     # successful deploy explicitly accounts for all five stages (no silent skips).
