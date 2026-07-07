@@ -34,6 +34,29 @@
       {{ (_direction_marker.content | b64decode | trim)
          if _direction_marker.content is defined else '' }}
 
+# Single switch for the db_managed=false model (external / non-managed DB). The
+# fresh-vs-existing signal is whether the DB config is ALREADY on the host, NOT the
+# .release marker - existing deployments not installed by Ansible have no marker but
+# do have a live context.xml, and must be treated as existing (reuse), not fresh.
+#   existing (context.xml already has the jdbc/openspecimen datasource) → REUSE the
+#            on-host config: render nothing (app-only).
+#   fresh    (no datasource on the host) → RENDER config from the inventory db_config;
+#            preflight FAILS if that db_config is missing.
+# db_managed=true is never "reuse" (renders config as usual, and skips this probe).
+- name: Probe existing DB datasource (db_managed=false fresh vs existing)
+  # rc 0 = datasource present (existing install), 1/2 = absent/no file (fresh).
+  ansible.builtin.command: "grep -q 'jdbc/openspecimen' {{ catalina_base }}/conf/context.xml"
+  register: _external_ds_probe
+  failed_when: false
+  changed_when: false
+  when: not (db_managed | default(true) | bool)
+
+- name: Set config-reuse flag (db_managed=false with existing on-host config)
+  ansible.builtin.set_fact:
+    _reuse_existing_config: >-
+      {{ (not (db_managed | default(true) | bool))
+         and (_external_ds_probe.rc | default(1)) == 0 }}
+
 # Downgrade (rollback) detection covers three cases; anything else deploys forward:
 #   semver -> semver : sort -V ranks the requested lower (RC12 > RC8) -> rollback.
 #   master -> master : compare the DD-MM-YYYY snapshot dates (day-first misranks
@@ -321,12 +344,12 @@
 
 - name: Detect config-only change
   ansible.builtin.set_fact:
-    # db_managed=false is app-only and reuses existing config, so the config-only
-    # fast path (which re-renders config and skips the WAR) must never trigger -
-    # a same-version external-DB re-run still deploys the WAR + reuses config.
+    # When reusing existing config (db_managed=false upgrade), the config-only fast
+    # path (which re-renders config and skips the WAR) must never trigger - a
+    # same-version external-DB re-run still deploys the WAR and reuses config.
     _config_only_change: >-
       {{ _direction.stdout == 'deploy'
-         and (db_managed | default(true) | bool)
+         and not (_reuse_existing_config | default(false))
          and _installed_release == openspecimen_release
          and _last_deploy_success_release == openspecimen_release
          and (_config_changed | default(false) or _setenv_changed | default(false))
