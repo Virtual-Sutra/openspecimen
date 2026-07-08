@@ -41,17 +41,12 @@
     recurse: true
   when: catalina_base != catalina_home
 
-# _reuse_existing_config (db_managed=false with existing on-host config): app-only
-# deploy - the tomcat runtime config (server.xml ports/AJP + setenv.sh heap) is left
-# exactly as it is on the host, so all four server.xml-patch tasks and the setenv.sh
-# render below are skipped. Only java/tomcat-binary/WAR/plugins/apache are refreshed.
-# (A db_managed=false FRESH host - no existing datasource - is NOT reuse: it renders
-# everything from inventory like a managed install.)
-# REVISIT: server.xml lives in CATALINA_BASE. For a co-located instance
-# (catalina_base != catalina_home) it survives a Tomcat binary re-unpack. For the
-# default instance (base == home) a Tomcat *version change* re-unpacks the stock
-# server.xml into the shared dir and it will NOT be re-patched here - such a host
-# must be re-onboarded (or deployed once with db_managed=true) to re-apply ports.
+# _reuse_existing_config (db_managed=false with existing on-host config, see site.yml):
+# the tomcat runtime config (server.xml ports/AJP + setenv.sh) is left as-is, so the
+# four server.xml patches and the setenv.sh render below are skipped. A db_managed=false
+# FRESH host is NOT reuse - it renders everything from inventory. REVISIT: on a default
+# (base==home) instance a Tomcat *version change* re-unpacks the stock server.xml and it
+# will NOT be re-patched (the reuse safety-net catches a lost datasource); re-onboard.
 #
 # Set this instance's HTTP / AJP / shutdown ports in its own server.xml. The
 # golden conf ships stock 8080/8009/8005; for the default instance these match

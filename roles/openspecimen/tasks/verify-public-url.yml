@@ -1,12 +1,9 @@
 ---
-# External public-URL health check: curl the /ui-app/ front-end over the public URL
-# from the control node (validates the full public path - proxy/ALB/DNS/cert). The
-# UI path is where Apache MOUNTS this instance - apache_path_prefix (ADR-007; both
-# routing modes mount there, default openspecimen_context_path) - NOT app_url's path,
-# so it is correct whether the instance is mounted at /openspecimen (path routing) or
-# the domain root (apache_path_prefix: /, domain routing). We keep app_url's
-# scheme://host[:port] (real cert/DNS) and append the mount prefix + /ui-app/.
-# --max-time is generous (openspecimen_health_timeout, default 30s) and it retries.
+# External public-URL /ui-app/ health check from the control node (validates the full
+# public path - proxy/ALB/DNS/cert). Like the local readiness gate, the UI path is
+# app_url's scheme://host[:port] + the Apache mount prefix (apache_path_prefix, default
+# openspecimen_context_path) + /ui-app/ - correct for path and domain-root routing.
+# --max-time = openspecimen_health_timeout (default 30s) and it retries.
 #
 # Runs as a post_task (after apache). OPT-IN via openspecimen_verify_app_url
 # (default false). The always-on local check is in the openspecimen role.
