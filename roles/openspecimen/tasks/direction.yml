@@ -34,15 +34,10 @@
       {{ (_direction_marker.content | b64decode | trim)
          if _direction_marker.content is defined else '' }}
 
-# Single switch for the db_managed=false model (external / non-managed DB). The
-# fresh-vs-existing signal is whether the DB config is ALREADY on the host, NOT the
-# .release marker - existing deployments not installed by Ansible have no marker but
-# do have a live context.xml, and must be treated as existing (reuse), not fresh.
-#   existing (context.xml already has the jdbc/openspecimen datasource) → REUSE the
-#            on-host config: render nothing (app-only).
-#   fresh    (no datasource on the host) → RENDER config from the inventory db_config;
-#            preflight FAILS if that db_config is missing.
-# db_managed=true is never "reuse" (renders config as usual, and skips this probe).
+# db_managed=false single switch (see the full model in site.yml): fresh-vs-existing
+# is the presence of the DB config on the host, NOT the .release marker (non-Ansible
+# installs have no marker but do have a live context.xml). datasource present = reuse;
+# absent = fresh. db_managed=true is never reuse and skips this probe.
 - name: Probe existing DB datasource (db_managed=false fresh vs existing)
   # rc 0 = datasource present (existing install), 1/2 = absent/no file (fresh).
   ansible.builtin.command: "grep -q 'jdbc/openspecimen' {{ catalina_base }}/conf/context.xml"

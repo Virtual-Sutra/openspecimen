@@ -258,24 +258,20 @@
     - name: "[{{ _instance.name }}] Apply pending restarts for this instance"
       ansible.builtin.meta: flush_handlers
 
-    # Authoritative readiness gate: don't finish until the instance actually SERVES.
-    # This is the FRONT-END check - Apache-fronted instances probe /ui-app/ (the SPA)
-    # through the local Apache (--resolve to 127.0.0.1). The UI path is where Apache
-    # MOUNTS this instance - apache_path_prefix (ADR-007; both routing modes mount at
-    # this prefix, default openspecimen_context_path) - NOT app_url's path, so a
-    # customer mounted at the domain root (apache_path_prefix: /) is probed at
-    # <host>/ui-app/, and one at /openspecimen at <host>/openspecimen/ui-app/. It
-    # answers 200 once the front-end is served. (The back-end REST is validated
-    # separately by the app-props public-URL check below.) On a SLOW VM where the app
-    # is up but /ui-app/ is slow to load, disable this gate with
-    # openspecimen_readiness_http_check=false - the deploy then relies on the
-    # catalina.out "Server startup in" wait plus the opt-in public-URL check.
+    # Authoritative front-end readiness gate: don't finish until the instance SERVES.
+    # Apache-fronted instances probe /ui-app/ through the local Apache (--resolve to
+    # 127.0.0.1) at apache_path_prefix - where Apache MOUNTS this instance (ADR-007;
+    # default openspecimen_context_path), NOT app_url's path - so a root mount
+    # (apache_path_prefix: /) hits <host>/ui-app/ and a /openspecimen mount hits
+    # <host>/openspecimen/ui-app/. Disable on a slow VM with
+    # openspecimen_readiness_http_check=false (falls back to the catalina.out startup
+    # wait + the opt-in public-URL check).
     #
-    # The local probe MUST target Apache's REAL local listener, NOT the public URL's
-    # scheme/port: when TLS is terminated upstream (ALB - ADR-008, apache_enable_ssl
-    # false) the public URL is https:443 but Apache locally serves http:80, so a
-    # --resolve to :443 hits a dead port. Derive scheme+port from apache_enable_ssl.
-    # Else (no Apache) probe app-props on localhost:port + context directly on Tomcat.
+    # The probe MUST target Apache's REAL local listener, not the public URL's
+    # scheme/port: with TLS terminated upstream (ALB, apache_enable_ssl false) the
+    # public URL is https:443 but Apache locally serves http:80, so a --resolve to
+    # :443 hits a dead port - derive scheme+port from apache_enable_ssl. Else (no
+    # Apache) probe app-props on localhost:port+context directly on Tomcat.
     # --max-time bounds a slow response.
     - name: "[{{ _instance.name }}] Build the readiness-check command"
       ansible.builtin.set_fact:

@@ -19,12 +19,9 @@
 # core schema creation and causes Liquibase FK failures.
 # Override with: -e openspecimen_install_type=fresh|upgrade
 #
-# db_managed=false (external RDS/Oracle): the probe is SKIPPED - we make no
-# connection to the externally-managed DB at all (see "Set install type" below,
-# which then assumes 'upgrade'). REVISIT: this means an app-only run against an
-# external DB never verifies connectivity or detects a genuinely fresh schema;
-# a first-time external-DB install must be seeded separately. See the db_managed
-# skip note in site.yml.
+# db_managed=false (external RDS/Oracle): this probe is SKIPPED - we make no
+# connection to the externally-managed DB. Fresh-vs-upgrade is derived instead from
+# the on-host datasource (see "Set install type" below and the site.yml db_managed note).
 
 - name: Check for existing OpenSpecimen schema in database
   when: db_managed | default(true) | bool
