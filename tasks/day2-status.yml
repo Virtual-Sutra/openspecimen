@@ -13,9 +13,14 @@
   changed_when: false
   failed_when: false
 
+# Shared Tomcat: context.xml holds one <Resource> per co-tenant, so scope the read to
+# THIS app's OSP-MANAGED marker block; otherwise (single Resource) read the whole file.
 - name: "[{{ _instance.name }}] Read pool maxActive"
-  ansible.builtin.command:
-    cmd: "grep -oP 'maxActive=\"\\K[^\"]+' {{ _instance.catalina_base }}/conf/context.xml"
+  ansible.builtin.shell:
+    cmd: >-
+      {{ ('sed -n "/BEGIN OSP-MANAGED datasource: ' ~ _instance.war_name ~ ' -->/,/END OSP-MANAGED datasource: ' ~ _instance.war_name ~ ' -->/p" '
+          if (openspecimen_shared_tomcat | default(false) | bool)
+          else 'cat ') }} {{ _instance.catalina_base }}/conf/context.xml | grep -oP 'maxActive="\K[^"]+' | head -1
   register: _pool
   changed_when: false
   failed_when: false

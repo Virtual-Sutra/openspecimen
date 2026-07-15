@@ -51,6 +51,67 @@
 # Set this instance's HTTP / AJP / shutdown ports in its own server.xml. The
 # golden conf ships stock 8080/8009/8005; for the default instance these match
 # (changed=0). A co-located 2nd customer sets its own ports explicitly (ADR-009).
+# Shared Tomcat has ONE set of connectors, so every co-tenant MUST declare identical
+# ports. A run only sees one customer folder (ADR-009), so we can't compare folders;
+# instead inspect the host: if a co-tenant is ALREADY deployed (its WAR is in the shared
+# webapps/) and the live server.xml HTTP port differs from this folder's, the two would
+# flip-flop the shared server.xml on every deploy (and collide at runtime). Fail fast.
+# Gated on a co-tenant actually existing - not on the stock port - so a first co-tenant
+# on a freshly-seeded (stock 8080) conf still claims its port, and a solo app freely
+# changes its own port (its own WAR is excluded from the co-tenant set).
+- name: "[tomcat:{{ openspecimen_service_name }}] Guard - co-tenant port conflict on shared server.xml"
+  when:
+    - openspecimen_shared_tomcat | default(false) | bool
+    - not (_reuse_existing_config | default(false))
+  block:
+    - name: "[tomcat:{{ openspecimen_service_name }}] Read current HTTP connector port"
+      ansible.builtin.shell: |
+        python3 -c "
+        import re
+        try:
+            c = open('{{ catalina_base }}/conf/server.xml').read()
+        except Exception:
+            print(''); raise SystemExit
+        m = re.search(r'<Connector\b[^>]*?protocol=\"HTTP/1\.1\"[^>]*?/>', c, re.DOTALL)
+        p = re.search(r'\bport=\"(\d+)\"', m.group(0)) if m else None
+        print(p.group(1) if p else '')
+        "
+      args:
+        executable: /bin/bash
+      register: _cur_http_port
+      changed_when: false
+      failed_when: false
+
+    - name: "[tomcat:{{ openspecimen_service_name }}] Probe shared webapps for an already-deployed co-tenant"
+      ansible.builtin.find:
+        paths: "{{ catalina_base }}/webapps"
+        patterns: "*.war"
+        file_type: file
+      register: _cotenant_war_scan
+      changed_when: false
+
+    - name: "[tomcat:{{ openspecimen_service_name }}] Fail on co-tenant port mismatch"
+      ansible.builtin.fail:
+        msg: |
+          ✗ Shared-Tomcat port conflict on {{ catalina_base }}/conf/server.xml
+              live HTTP port : {{ _cur_http_port.stdout | trim }}
+              this folder    : {{ openspecimen_port }}
+              co-tenant WARs : {{ _other_wars | join(', ') }}
+
+          A shared Tomcat has ONE HTTP connector, so every co-tenant customer folder MUST
+          set identical openspecimen_port / openspecimen_ajp_port / openspecimen_shutdown_port.
+          Align this folder's ports with the co-tenant's (or vice versa) and redeploy.
+      vars:
+        # Existing app WARs excluding this app (its own re-deploy) and stock Tomcat webapps.
+        _other_wars: >-
+          {{ (_cotenant_war_scan.files | map(attribute='path') | map('basename')
+              | map('regex_replace', '\.war$', '') | list)
+              | difference([openspecimen_war_name, 'ROOT', 'manager', 'host-manager', 'docs', 'examples']) }}
+      when:
+        - _cur_http_port.stdout | trim | length > 0
+        - _other_wars | length > 0
+        - _cur_http_port.stdout | trim != (openspecimen_port | string)
+
 - name: "[tomcat:{{ openspecimen_service_name }}] Set HTTP/AJP/shutdown ports in server.xml"
   # Match each connector block by protocol (any attribute order) then set its own
   # port - stock Tomcat 9 ships the AJP connector as protocol-before-port, so an

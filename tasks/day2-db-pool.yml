@@ -34,8 +34,8 @@
 - name: "[{{ _instance.name }}] Set pool maxActive (scoped to this app's datasource block)"
   ansible.builtin.replace:
     path: "{{ _instance.catalina_base }}/conf/context.xml"
-    after: 'BEGIN OSP-MANAGED datasource: {{ _instance.war_name }}'
-    before: 'END OSP-MANAGED datasource: {{ _instance.war_name }}'
+    after: 'BEGIN OSP-MANAGED datasource: {{ _instance.war_name }} -->'
+    before: 'END OSP-MANAGED datasource: {{ _instance.war_name }} -->'
     regexp: 'maxActive="[^"]*"'
     replace: 'maxActive="{{ pool_max_active }}"'
   when: openspecimen_shared_tomcat | default(false) | bool
@@ -43,8 +43,8 @@
 - name: "[{{ _instance.name }}] Set pool minIdle (scoped, when provided)"
   ansible.builtin.replace:
     path: "{{ _instance.catalina_base }}/conf/context.xml"
-    after: 'BEGIN OSP-MANAGED datasource: {{ _instance.war_name }}'
-    before: 'END OSP-MANAGED datasource: {{ _instance.war_name }}'
+    after: 'BEGIN OSP-MANAGED datasource: {{ _instance.war_name }} -->'
+    before: 'END OSP-MANAGED datasource: {{ _instance.war_name }} -->'
     regexp: 'minIdle="[^"]*"'
     replace: 'minIdle="{{ pool_min_idle }}"'
   when:
@@ -73,7 +73,7 @@
 - name: "[{{ _instance.name }}] Confirm pool"
   ansible.builtin.shell:
     cmd: >-
-      {{ ('sed -n "/BEGIN OSP-MANAGED datasource: ' ~ _instance.war_name ~ '/,/END OSP-MANAGED datasource: ' ~ _instance.war_name ~ '/p" '
+      {{ ('sed -n "/BEGIN OSP-MANAGED datasource: ' ~ _instance.war_name ~ ' -->/,/END OSP-MANAGED datasource: ' ~ _instance.war_name ~ ' -->/p" '
           if (openspecimen_shared_tomcat | default(false) | bool)
           else 'cat ') }} {{ _instance.catalina_base }}/conf/context.xml | grep -oP 'maxActive="\K[^"]+' | head -1
   register: _pool
