@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Managed by Ansible - PER-WEBAPP context descriptor for '{{ openspecimen_war_name }}'.
+     Deployed to {{ catalina_base }}/conf/Catalina/{{ openspecimen_tomcat_host | default('localhost') }}/{{ _osp_descriptor_name }}.xml
+     so multiple named OpenSpecimen apps can share ONE Tomcat (one CATALINA_BASE /
+     service / JVM), each with its OWN datasource + config, isolated per webapp.
+     The descriptor filename sets the context path (ROOT -> '/', name -> '/name',
+     a#b -> '/a/b'), decoupled from the war filename. docBase points at the war in
+     {{ catalina_base }}/wars/ (OUTSIDE the autoDeploy webapps/ dir) so a named war
+     (darpan.war) can serve at root '/' without being renamed ROOT.war. -->
+<Context docBase="{{ _osp_war_path }}" notFoundClassResourceCacheSize="0">
+
+    <WatchedResource>WEB-INF/web.xml</WatchedResource>
+    <WatchedResource>WEB-INF/tomcat-web.xml</WatchedResource>
+    <WatchedResource>${catalina.base}/conf/web.xml</WatchedResource>
+
+    <!--
+      JDBC connection pool - parameters from OpenSpecimen official deployment guide.
+      Scoped to THIS webapp's private JNDI (java:comp/env), so co-tenant apps in one
+      Tomcat keep isolated pools/DBs even though the resource name is shared.
+      Ref: https://openspecimen.atlassian.net/wiki/spaces/CAT/pages/4191944759/Tomcat+Pool+Configurations
+    -->
+{% if db_type == 'oracle' %}
+    <Resource name="{{ openspecimen_datasource_name | default('jdbc/openspecimen') }}"
+              auth="Container"
+              type="javax.sql.DataSource"
+              factory="org.apache.tomcat.jdbc.pool.DataSourceFactory"
+
+              driverClassName="oracle.jdbc.OracleDriver"
+{% if oracle_db_sid is defined and oracle_db_sid %}
+              url="jdbc:oracle:thin:@{{ oracle_db_host }}:{{ oracle_db_port }}:{{ oracle_db_sid }}"
+{% else %}
+              url="jdbc:oracle:thin:@//{{ oracle_db_host }}:{{ oracle_db_port }}/{{ oracle_db_service }}"
+{% endif %}
+              username="{{ oracle_db_user }}"
+              password="{{ oracle_db_password }}"
+
+              maxActive="{{ tomcat_pool_max_active }}"
+              minIdle="{{ tomcat_pool_min_idle }}"
+              initialSize="{{ tomcat_pool_initial_size }}"
+              maxWait="{{ tomcat_pool_max_wait_ms }}"
+
+              testWhileIdle="true"
+              testOnBorrow="true"
+              validationQuery="select 1 from dual"
+              validationInterval="{{ tomcat_pool_validation_interval_ms }}"
+
+              timeBetweenEvictionRunsMillis="{{ tomcat_pool_eviction_interval_ms }}"
+              minEvictableIdleTimeMillis="{{ tomcat_pool_min_evictable_idle_ms }}"
+
+              removeAbandoned="true"
+              removeAbandonedTimeout="{{ tomcat_pool_abandoned_timeout_s }}"
+              logAbandoned="true"
+              abandonWhenPercentageFull="{{ tomcat_pool_abandon_pct }}"
+
+              jmxEnabled="true"
+              jdbcInterceptors="org.apache.tomcat.jdbc.pool.interceptor.ConnectionState;org.apache.tomcat.jdbc.pool.interceptor.StatementFinalizer"
+    />
+{% else %}
+    <Resource name="{{ openspecimen_datasource_name | default('jdbc/openspecimen') }}"
+              auth="Container"
+              type="javax.sql.DataSource"
+              factory="org.apache.tomcat.jdbc.pool.DataSourceFactory"
+
+              driverClassName="com.mysql.cj.jdbc.Driver"
+              url="jdbc:mysql://{{ mysql_db_host }}:3306/{{ mysql_db_name }}?useSSL=false&amp;allowPublicKeyRetrieval=true&amp;serverTimezone=UTC"
+              username="{{ mysql_db_user }}"
+              password="{{ mysql_db_password }}"
+
+              maxActive="{{ tomcat_pool_max_active }}"
+              minIdle="{{ tomcat_pool_min_idle }}"
+              initialSize="{{ tomcat_pool_initial_size }}"
+              maxWait="{{ tomcat_pool_max_wait_ms }}"
+
+              testWhileIdle="true"
+              testOnBorrow="true"
+              validationQuery="select 1"
+              validationInterval="{{ tomcat_pool_validation_interval_ms }}"
+
+              timeBetweenEvictionRunsMillis="{{ tomcat_pool_eviction_interval_ms }}"
+              minEvictableIdleTimeMillis="{{ tomcat_pool_min_evictable_idle_ms }}"
+
+              removeAbandoned="true"
+              removeAbandonedTimeout="{{ tomcat_pool_abandoned_timeout_s }}"
+              logAbandoned="true"
+              abandonWhenPercentageFull="{{ tomcat_pool_abandon_pct }}"
+
+              jmxEnabled="true"
+              jdbcInterceptors="org.apache.tomcat.jdbc.pool.interceptor.ConnectionState;org.apache.tomcat.jdbc.pool.interceptor.StatementFinalizer"
+    />
+{% endif %}
+
+    {# JNDI config key + properties file are keyed to war_name (NOT the context
+       path), so each co-tenant app reads its own conf/<war_name>.properties. #}
+    <Environment name="config/{{ openspecimen_war_name }}"
+                 value="{{ catalina_base }}/conf/{{ openspecimen_war_name }}.properties"
+                 type="java.lang.String"
+    />
+
+</Context>

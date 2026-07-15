@@ -8,3 +8,24 @@
 # Lazily evaluated, so it picks up the per-instance openspecimen_context_path (shimmed
 # in deploy-instance.yml, or the flat customer var in rollback/cleanup).
 openspecimen_war_name: "{{ (openspecimen_context_path | default('/openspecimen')) | regex_replace('/+$', '') | regex_replace('^/', '') | regex_replace('/', '#') }}"
+
+# ── Multi-webapp / shared-Tomcat mode (opt-in) ────────────────────────────────
+# OFF by default: existing single-instance customers keep the global
+# conf/context.xml datasource + webapps/<war_name>.war (unchanged).
+# When true (set per instance in inventory), this instance renders a PER-WEBAPP
+# context descriptor instead, so multiple named OpenSpecimen apps can share ONE
+# Tomcat (one CATALINA_BASE / service), each with its own war + datasource +
+# config, and a named war (e.g. darpan.war) can serve at root context '/'.
+openspecimen_context_descriptor: false
+# Tomcat Engine Host the descriptor is filed under (conf/Catalina/<host>/). Use a
+# distinct hostname per app to give each its own root context on its own vhost.
+openspecimen_tomcat_host: "localhost"
+# JNDI datasource name. Default matches OpenSpecimen's built-in lookup; override
+# only if the webapp is built to resolve a different name.
+openspecimen_datasource_name: "jdbc/openspecimen"
+# Descriptor filename → context path: '' / '/' → ROOT (context '/'), '/darpan' →
+# 'darpan' (/darpan), '/a/b' → 'a#b' (/a/b). Decoupled from the war filename.
+_osp_descriptor_name: "{{ ((openspecimen_context_path | default('/openspecimen')) | regex_replace('/+$', '') | regex_replace('^/', '') | regex_replace('/', '#')) or 'ROOT' }}"
+# War stored OUTSIDE the autoDeploy webapps/ dir so docBase can serve it at any
+# context (incl. root) under its own filename without a second autodeploy.
+_osp_war_path: "{{ catalina_base }}/wars/{{ openspecimen_war_name }}.war"
