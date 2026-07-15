@@ -51,6 +51,49 @@
 # Set this instance's HTTP / AJP / shutdown ports in its own server.xml. The
 # golden conf ships stock 8080/8009/8005; for the default instance these match
 # (changed=0). A co-located 2nd customer sets its own ports explicitly (ADR-009).
+# Shared Tomcat has ONE set of connectors, so every co-tenant MUST declare identical
+# ports. A run only sees one customer folder (ADR-009), so we can't compare folders;
+# instead inspect the LIVE server.xml - if a co-tenant already set a non-stock HTTP port
+# different from this folder's, the two would flip-flop the shared server.xml on every
+# deploy (and collide at runtime). Fail fast with guidance rather than churn silently.
+- name: "[tomcat:{{ openspecimen_service_name }}] Guard - co-tenant port conflict on shared server.xml"
+  when:
+    - openspecimen_shared_tomcat | default(false) | bool
+    - not (_reuse_existing_config | default(false))
+  block:
+    - name: "[tomcat:{{ openspecimen_service_name }}] Read current HTTP connector port"
+      ansible.builtin.shell: |
+        python3 -c "
+        import re
+        try:
+            c = open('{{ catalina_base }}/conf/server.xml').read()
+        except Exception:
+            print(''); raise SystemExit
+        m = re.search(r'<Connector\b[^>]*?protocol=\"HTTP/1\.1\"[^>]*?/>', c, re.DOTALL)
+        p = re.search(r'\bport=\"(\d+)\"', m.group(0)) if m else None
+        print(p.group(1) if p else '')
+        "
+      args:
+        executable: /bin/bash
+      register: _cur_http_port
+      changed_when: false
+      failed_when: false
+
+    - name: "[tomcat:{{ openspecimen_service_name }}] Fail on co-tenant port mismatch"
+      ansible.builtin.fail:
+        msg: |
+          ✗ Shared-Tomcat port conflict on {{ catalina_base }}/conf/server.xml
+              live HTTP port : {{ _cur_http_port.stdout | trim }}
+              this folder    : {{ openspecimen_port }}
+
+          A shared Tomcat has ONE HTTP connector, so every co-tenant customer folder MUST
+          set identical openspecimen_port / openspecimen_ajp_port / openspecimen_shutdown_port.
+          Align this folder's ports with the co-tenant's (or vice versa) and redeploy.
+      when:
+        - _cur_http_port.stdout | trim | length > 0
+        - _cur_http_port.stdout | trim != (openspecimen_port | string)
+        - _cur_http_port.stdout | trim != '8080'
+
 - name: "[tomcat:{{ openspecimen_service_name }}] Set HTTP/AJP/shutdown ports in server.xml"
   # Match each connector block by protocol (any attribute order) then set its own
   # port - stock Tomcat 9 ships the AJP connector as protocol-before-port, so an
