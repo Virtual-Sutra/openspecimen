@@ -9,3 +9,10 @@ mysql_innodb_buffer_pool_size: >-
   {{ (mysql_innodb_buffer_pool_size_override
       | default((ansible_facts['memtotal_mb'] * 0.25) | int)
       | int) | string }}M
+
+# ── Pre-change safety backup (existing installs) ──────────────────────────────
+# Before the role touches an already-installed MySQL, dump every database to a
+# timestamped gzip under this dir. Fresh installs have no data, so the backup
+# tasks are gated on _mysql_install being unchanged (see mysql/tasks/main.yml).
+_mysql_backup_dir: "/var/backups/mysql"
+_mysql_backup_path: "{{ _mysql_backup_dir }}/all-databases-{{ ansible_date_time.iso8601_basic_short }}.sql.gz"
