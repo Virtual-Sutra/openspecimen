@@ -32,7 +32,16 @@
     _cotenants_remain: "{{ (openspecimen_shared_tomcat | default(false) | bool) and (_others | length > 0) }}"
     _is_last_cotenant: "{{ (openspecimen_shared_tomcat | default(false) | bool) and (_others | length == 0) }}"
   vars:
+    # Stock Tomcat webapps are infrastructure, not co-tenant apps - excluding them lets
+    # the LAST real app tear the shared Tomcat down instead of leaving a running service
+    # with only ROOT/manager/docs. A genuine co-tenant (OpenSpecimen OR a legacy
+    # hand-managed app) always deploys under a distinct path-segment war name, never one
+    # of these. We deliberately do NOT key on the OSP-MANAGED datasource markers: a legacy
+    # co-tenant has no marker, so marker-based detection would under-count and wrongly tear
+    # down a Tomcat that legacy app still needs.
+    _stock_wars: ['ROOT', 'manager', 'host-manager', 'docs', 'examples']
     # A skipped find (non-shared) leaves _webapps_scan without .files → default([]).
     _others: >-
       {{ (_webapps_scan.files | default([]) | map(attribute='path') | map('basename')
-          | map('regex_replace', '\.war$', '') | list) | difference([_instance.war_name]) }}
+          | map('regex_replace', '\.war$', '') | list)
+          | difference([_instance.war_name] + _stock_wars) }}
