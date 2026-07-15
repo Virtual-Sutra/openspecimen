@@ -16,3 +16,6 @@ mysql_innodb_buffer_pool_size: >-
 # tasks are gated on _mysql_install being unchanged (see mysql/tasks/main.yml).
 _mysql_backup_dir: "/var/backups/mysql"
 _mysql_backup_path: "{{ _mysql_backup_dir }}/all-databases-{{ ansible_date_time.iso8601_basic_short }}.sql.gz"
+# Retention: keep this many most-recent dumps, prune older ones so timestamped
+# backups don't fill /var over successive deploys.
+_mysql_backup_keep: 7

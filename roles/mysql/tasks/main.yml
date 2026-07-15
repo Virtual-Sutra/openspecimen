@@ -167,13 +167,15 @@
   changed_when: false
   when: ansible_facts['os_family'] == 'Debian'
 
-# ── Pre-change safety backup (Debian, existing install) ──────────────────────
-# Dump every database to a timestamped gzip before the role touches an existing
-# server. Only runs when root is socket-reachable (rc == 0): the same broken root
-# auth that would send us down the reinit branch also blocks a passwordless
-# mysqldump, so there is nothing safe to back up automatically on a broken-auth
-# box - restore auth first. Fresh installs (_mysql_install is changed) have no
-# data to save, so both tasks are gated on the install being unchanged.
+# ── Pre-deploy DB snapshot (Debian, existing install) ────────────────────────
+# Dump every database to a timestamped gzip before a deploy touches an existing
+# server - a rollback point for the schema migrations run later in the play.
+# This is NOT what protects the reinit/wipe path: that path is fail-closed on
+# fresh installs plus the user-DB scan below. The snapshot can't cover the wipe
+# anyway - it only runs when root IS socket-reachable (rc == 0), and a
+# broken-auth box that could reach the wipe can't authenticate a passwordless
+# mysqldump (restore auth there first). Fresh installs (_mysql_install is
+# changed) have no data yet, so it is gated to existing installs only.
 - name: Ensure MySQL backup directory exists (Debian)
   ansible.builtin.file:
     path: "{{ _mysql_backup_dir }}"
@@ -193,13 +195,31 @@
   ansible.builtin.shell:
     cmd: >-
       set -o pipefail &&
-      mysqldump -u root -S {{ _mysql_socket }}
+      mysqldump -u root -S "{{ _mysql_socket }}"
       --all-databases
       --skip-lock-tables --routines --single-transaction
       --set-gtid-purged=OFF --triggers --no-tablespaces
-      | gzip -c > {{ _mysql_backup_path }}
+      | gzip -c > "{{ _mysql_backup_path }}"
     executable: /bin/bash
-  changed_when: true
+  # A snapshot is a read-only artifact, not a change to managed config state -
+  # report ok so a stable re-run stays changed=0 (project idempotency gate).
+  changed_when: false
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - _mysql_install is not changed
+    - _mysql_root_socket_debian.rc == 0
+
+- name: Prune old MySQL backups, keeping the most recent (Debian)
+  # Bounds disk use: timestamped dumps would otherwise accumulate in /var over
+  # every deploy. Keep the newest _mysql_backup_keep, remove the rest.
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      ls -1t "{{ _mysql_backup_dir }}"/all-databases-*.sql.gz 2>/dev/null
+      | tail -n +{{ _mysql_backup_keep + 1 }}
+      | xargs -r rm -f --
+    executable: /bin/bash
+  changed_when: false
   when:
     - ansible_facts['os_family'] == 'Debian'
     - _mysql_install is not changed
