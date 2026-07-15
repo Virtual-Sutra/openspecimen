@@ -18,7 +18,7 @@
       Set oracle_db_service OR oracle_db_sid in inventory vars, not both.
       Ref: https://openspecimen.atlassian.net/wiki/spaces/CAT/pages/4191944759/Tomcat+Pool+Configurations
     -->
-    <Resource name="jdbc/openspecimen"
+    <Resource name="{{ openspecimen_datasource_name | default('jdbc/openspecimen') }}"
               auth="Container"
               type="javax.sql.DataSource"
               factory="org.apache.tomcat.jdbc.pool.DataSourceFactory"
@@ -54,7 +54,7 @@
               jdbcInterceptors="org.apache.tomcat.jdbc.pool.interceptor.ConnectionState;org.apache.tomcat.jdbc.pool.interceptor.StatementFinalizer"
     />
 {% else %}
-    <Resource name="jdbc/openspecimen"
+    <Resource name="{{ openspecimen_datasource_name | default('jdbc/openspecimen') }}"
               auth="Container"
               type="javax.sql.DataSource"
               factory="org.apache.tomcat.jdbc.pool.DataSourceFactory"

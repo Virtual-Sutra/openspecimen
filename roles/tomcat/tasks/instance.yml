@@ -197,7 +197,47 @@
     group: "{{ tomcat_user }}"
     mode: '0640'
   notify: restart openspecimen
-  when: not (_reuse_existing_config | default(false))
+  when:
+    - not (_reuse_existing_config | default(false))
+    - not (openspecimen_shared_tomcat | default(false))
+
+# ── Shared-Tomcat co-tenancy (openspecimen_shared_tomcat) ────────────────────
+# Multiple named apps share ONE conf/context.xml. Instead of rendering the file
+# whole (which would erase every other app's datasource), MERGE only THIS app's
+# <Resource>+<Environment> block, keyed by war_name marker. Preserves co-tenant
+# blocks - including a legacy hand-managed app's inline datasource. Runs even in
+# the _reuse_existing_config path: a NEW co-tenant's datasource must be added
+# while the shared Tomcat runtime (server.xml/setenv) is left untouched.
+- name: "[tomcat:{{ openspecimen_service_name }}] Ensure shared context.xml has a <Context> wrapper"
+  # force:false → create the minimal wrapper only when absent; NEVER clobber an
+  # existing shared context.xml (e.g. one a legacy install.sh already wrote).
+  ansible.builtin.copy:
+    dest: "{{ catalina_base }}/conf/context.xml"
+    content: |
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!-- Managed by Ansible - shared context.xml (co-tenant OpenSpecimen apps) -->
+      <Context notFoundClassResourceCacheSize="0">
+          <WatchedResource>WEB-INF/web.xml</WatchedResource>
+          <WatchedResource>WEB-INF/tomcat-web.xml</WatchedResource>
+          <WatchedResource>${catalina.base}/conf/web.xml</WatchedResource>
+      </Context>
+    force: false
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0640'
+  when: openspecimen_shared_tomcat | default(false)
+
+- name: "[tomcat:{{ openspecimen_service_name }}] Merge this app's datasource block into shared context.xml"
+  ansible.builtin.blockinfile:
+    path: "{{ catalina_base }}/conf/context.xml"
+    marker: "    <!-- {mark} OSP-MANAGED datasource: {{ openspecimen_war_name }} -->"
+    insertbefore: '</Context>'
+    block: "{{ lookup('template', 'context-datasource-block.xml.j2') | indent(8, first=True) }}"
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_user }}"
+    mode: '0640'
+  notify: restart openspecimen
+  when: openspecimen_shared_tomcat | default(false)
 
 # Reuse safety net: when reusing existing config (db_managed=false + existing host
 # config), we deliberately did NOT re-render context.xml. It was present at the
@@ -208,9 +248,11 @@
 - name: "[tomcat:{{ openspecimen_service_name }}] Re-verify the reused datasource survives (db_managed=false upgrade)"
   when: _reuse_existing_config | default(false)
   block:
-    - name: "[tomcat:{{ openspecimen_service_name }}] Check context.xml still has the jdbc/openspecimen datasource"
+    - name: "[tomcat:{{ openspecimen_service_name }}] Check context.xml still has the {{ openspecimen_datasource_name }} datasource"
       # rc 0 = present, 1 = file exists but no datasource, 2 = file missing.
-      ansible.builtin.command: "grep -q 'jdbc/openspecimen' {{ catalina_base }}/conf/context.xml"
+      # Keyed to this app's datasource name so a co-tenant (e.g. jdbc/darpan) in a
+      # shared context.xml is checked correctly, not the default jdbc/openspecimen.
+      ansible.builtin.command: "grep -q '{{ openspecimen_datasource_name }}' {{ catalina_base }}/conf/context.xml"
       register: _external_datasource_check
       failed_when: false
       changed_when: false
@@ -218,7 +260,7 @@
     - name: "[tomcat:{{ openspecimen_service_name }}] Fail if the reused datasource was lost"
       ansible.builtin.fail:
         msg: |
-          ✗ db_managed=false: the jdbc/openspecimen datasource is no longer present at
+          ✗ db_managed=false: the {{ openspecimen_datasource_name }} datasource is no longer present at
             {{ catalina_base }}/conf/context.xml
 
           It existed when the deploy started but is now gone - most likely a Tomcat

@@ -8,3 +8,22 @@
 # Lazily evaluated, so it picks up the per-instance openspecimen_context_path (shimmed
 # in deploy-instance.yml, or the flat customer var in rollback/cleanup).
 openspecimen_war_name: "{{ (openspecimen_context_path | default('/openspecimen')) | regex_replace('/+$', '') | regex_replace('^/', '') | regex_replace('/', '#') }}"
+
+# ── Multi-webapp / shared-Tomcat mode (opt-in) ────────────────────────────────
+# OFF by default: an instance owns its CATALINA_BASE and its conf/context.xml is
+# rendered whole (unchanged for every existing customer, incl. co-located ones on
+# their own Tomcat like k-testvm-test).
+# Set true PER INSTANCE when this app shares ONE Tomcat (one CATALINA_BASE) with
+# other named apps: its datasource + config block is then MERGED into the shared
+# conf/context.xml by war_name marker (blockinfile), never overwriting co-tenant
+# blocks - including a legacy hand-managed app's inline datasource.
+openspecimen_shared_tomcat: false
+
+# ── Multi-webapp / shared-Tomcat: per-app JNDI datasource name ────────────────
+# The global conf/context.xml can hold several named datasources, one per co-tenant
+# app in a shared Tomcat. Each app binds its OWN datasource via datasource.jndi in
+# its <war_name>.properties, so co-located apps reach different DBs. Keyed to
+# war_name → defaults to jdbc/openspecimen for the standard single instance
+# (war_name 'openspecimen'), so existing customers are unchanged. Override only if
+# the webapp resolves a different name.
+openspecimen_datasource_name: "jdbc/{{ openspecimen_war_name }}"
