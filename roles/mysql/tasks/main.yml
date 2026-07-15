@@ -167,6 +167,64 @@
   changed_when: false
   when: ansible_facts['os_family'] == 'Debian'
 
+# ── Pre-deploy DB snapshot (Debian, existing install) ────────────────────────
+# Dump every database to a timestamped gzip before a deploy touches an existing
+# server - a rollback point for the schema migrations run later in the play.
+# This is NOT what protects the reinit/wipe path: that path is fail-closed on
+# fresh installs plus the user-DB scan below. The snapshot can't cover the wipe
+# anyway - it only runs when root IS socket-reachable (rc == 0), and a
+# broken-auth box that could reach the wipe can't authenticate a passwordless
+# mysqldump (restore auth there first). Fresh installs (_mysql_install is
+# changed) have no data yet, so it is gated to existing installs only.
+- name: Ensure MySQL backup directory exists (Debian)
+  ansible.builtin.file:
+    path: "{{ _mysql_backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - _mysql_install is not changed
+    - _mysql_root_socket_debian.rc == 0
+
+- name: Back up all MySQL databases before any change (Debian)
+  # set -o pipefail is required: without it a failed mysqldump still exits 0
+  # because gzip succeeds, leaving a truncated .sql.gz that looks like a good
+  # backup. --all-databases captures every instance schema in one dump.
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      mysqldump -u root -S "{{ _mysql_socket }}"
+      --all-databases
+      --skip-lock-tables --routines --single-transaction
+      --set-gtid-purged=OFF --triggers --no-tablespaces
+      | gzip -c > "{{ _mysql_backup_path }}"
+    executable: /bin/bash
+  # A snapshot is a read-only artifact, not a change to managed config state -
+  # report ok so a stable re-run stays changed=0 (project idempotency gate).
+  changed_when: false
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - _mysql_install is not changed
+    - _mysql_root_socket_debian.rc == 0
+
+- name: Prune old MySQL backups, keeping the most recent (Debian)
+  # Bounds disk use: timestamped dumps would otherwise accumulate in /var over
+  # every deploy. Keep the newest _mysql_backup_keep, remove the rest.
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      ls -1t "{{ _mysql_backup_dir }}"/all-databases-*.sql.gz 2>/dev/null
+      | tail -n +{{ _mysql_backup_keep + 1 }}
+      | xargs -r rm -f --
+    executable: /bin/bash
+  changed_when: false
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - _mysql_install is not changed
+    - _mysql_root_socket_debian.rc == 0
+
 # Data-safety guard: only wipe when the data dir holds nothing but the system
 # schemas (mysql/sys/performance_schema). Any other database dir = live data → fail.
 - name: Scan for existing user databases before reinit (Debian)
@@ -179,27 +237,34 @@
     - ansible_facts['os_family'] == 'Debian'
     - _mysql_root_socket_debian.rc != 0
 
-- name: Refuse to reinit a MySQL data directory that holds user databases (Debian)
+- name: Refuse to reinit an existing MySQL install whose root is not socket-reachable (Debian)
+  # Fail loudly for every unsafe state: an already-installed server (reinit is
+  # fresh-install only) OR a data dir holding user databases. Reinit below can
+  # only fire on the safe complement - a fresh install with no user data.
   ansible.builtin.fail:
     msg: >-
-      MySQL root is not reachable over the socket with no password, but the data
-      directory holds user database(s):
-      {{ _mysql_userdbs.files | map(attribute='path') | map('basename') | join(', ') }}.
-      Refusing to wipe /var/lib/mysql. Restore root auth manually (auth_socket, or
-      the known root password) and re-run.
+      MySQL root is not reachable over the socket with no password. The data
+      directory holds:
+      {{ (_mysql_userdbs.files | map(attribute='path') | map('basename') | join(', '))
+         if (_mysql_userdbs.matched | default(0)) > 0 else 'system schemas only' }}.
+      Refusing to reinitialise /var/lib/mysql (that path is fresh-install only).
+      Restore root auth manually (auth_socket, or the known root password) and re-run.
   when:
     - ansible_facts['os_family'] == 'Debian'
     - _mysql_root_socket_debian.rc != 0
-    - (_mysql_userdbs.matched | default(0)) > 0
+    - (_mysql_install is not changed) or ((_mysql_userdbs.matched | default(0)) > 0)
 
 - name: Reinitialize MySQL data directory (Debian, fresh box with broken root auth)
-  # Only reached when root auth is broken AND the data dir has no user databases
-  # (fresh box, or a preseed miss on first install). Wipe + --initialize-insecure
+  # Only reached when THIS run just installed MySQL (_mysql_install is changed),
+  # root auth is broken, AND the data dir has no user databases - i.e. a genuinely
+  # fresh box or a preseed miss on first install. Wipe + --initialize-insecure
   # re-creates it with an empty-password root, and our mysqld.cnf (written before
-  # install) is applied from first init. A re-used instance with live data fails
-  # the guard above instead of being wiped.
+  # install) is applied from first init. The _mysql_install gate makes it
+  # structurally impossible to wipe a pre-existing install; the user-db scan is a
+  # second belt. Any existing install with broken root auth fails the guard above.
   when:
     - ansible_facts['os_family'] == 'Debian'
+    - _mysql_install is changed
     - _mysql_root_socket_debian.rc != 0
     - (_mysql_userdbs.matched | default(0)) == 0
   block:
