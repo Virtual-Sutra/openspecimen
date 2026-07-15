@@ -1,0 +1,47 @@
+---
+# Host-inspection of co-tenant apps sharing THIS instance's Tomcat.
+#
+# A playbook run resolves exactly ONE customer folder (ADR-009), so it has no
+# inventory knowledge of any co-tenant. When openspecimen_shared_tomcat is set,
+# several named apps share one CATALINA_BASE / service / conf; the ONLY way to know
+# whether OTHER apps are still deployed is to probe the live shared webapps/ dir.
+# Driven entirely by openspecimen_shared_tomcat + the resolved _instance vars - never
+# a hard-coded service name or path (osshared is only an operator-chosen label; the
+# code must work for any catalina_base / service_name a customer overrides to).
+#
+# Sets, in the _instance loop scope:
+#   _cotenant_wars     - war basenames under the shared webapps/ other than this app
+#   _cotenants_remain  - bool: at least one OTHER co-tenant is still deployed
+#   _is_last_cotenant  - bool: shared Tomcat, and THIS is the only app left
+# For a non-shared instance (it owns its Tomcat) both bools are false, so callers
+# keep their exact pre-feature behaviour.
+
+- name: "[{{ _instance.name }}] Probe the shared webapps/ for co-tenant WARs"
+  ansible.builtin.find:
+    paths: "{{ _instance.catalina_base }}/webapps"
+    patterns: "*.war"
+    file_type: file
+  register: _webapps_scan
+  failed_when: false
+  changed_when: false
+  when: openspecimen_shared_tomcat | default(false) | bool
+
+- name: "[{{ _instance.name }}] Derive co-tenant set + flags"
+  ansible.builtin.set_fact:
+    _cotenant_wars: "{{ _others }}"
+    _cotenants_remain: "{{ (openspecimen_shared_tomcat | default(false) | bool) and (_others | length > 0) }}"
+    _is_last_cotenant: "{{ (openspecimen_shared_tomcat | default(false) | bool) and (_others | length == 0) }}"
+  vars:
+    # Stock Tomcat webapps are infrastructure, not co-tenant apps - excluding them lets
+    # the LAST real app tear the shared Tomcat down instead of leaving a running service
+    # with only ROOT/manager/docs. A genuine co-tenant (OpenSpecimen OR a legacy
+    # hand-managed app) always deploys under a distinct path-segment war name, never one
+    # of these. We deliberately do NOT key on the OSP-MANAGED datasource markers: a legacy
+    # co-tenant has no marker, so marker-based detection would under-count and wrongly tear
+    # down a Tomcat that legacy app still needs.
+    _stock_wars: ['ROOT', 'manager', 'host-manager', 'docs', 'examples']
+    # A skipped find (non-shared) leaves _webapps_scan without .files → default([]).
+    _others: >-
+      {{ (_webapps_scan.files | default([]) | map(attribute='path') | map('basename')
+          | map('regex_replace', '\.war$', '') | list)
+          | difference([_instance.war_name] + _stock_wars) }}

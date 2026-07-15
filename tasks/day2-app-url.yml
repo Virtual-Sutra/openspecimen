@@ -1,6 +1,14 @@
 ---
 # Per-instance app.url update (#102). Looped from update-app-url.yml.
 # app.url comes from the customer folder config (one instance per folder, ADR-009).
+- name: "[{{ _instance.name }}] NOTE - shared Tomcat: restart bounces co-tenant apps"
+  ansible.builtin.debug:
+    msg: >-
+      Shared Tomcat ({{ _instance.service_name }}): the app.url edit is per-app
+      ({{ _instance.war_name }}.properties), but the restart bounces every co-tenant on
+      this JVM.
+  when: openspecimen_shared_tomcat | default(false) | bool
+
 - name: "[{{ _instance.name }}] Backup openspecimen.properties"
   ansible.builtin.include_tasks: tasks/backup_config.yml
   vars:

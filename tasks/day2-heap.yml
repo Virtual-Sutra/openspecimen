@@ -1,5 +1,13 @@
 ---
 # Per-instance heap update (#102). Looped from update-heap.yml over _instances.
+- name: "[{{ _instance.name }}] NOTE - shared Tomcat: heap is ONE JVM for all co-tenants"
+  ansible.builtin.debug:
+    msg: >-
+      Shared Tomcat ({{ _instance.service_name }}): setenv.sh is the single shared JVM's
+      config, so this heap change applies to ALL co-tenant apps and the restart bounces
+      every one of them - not just {{ _instance.war_name }}.
+  when: openspecimen_shared_tomcat | default(false) | bool
+
 - name: "[{{ _instance.name }}] Backup setenv.sh"
   ansible.builtin.include_tasks: tasks/backup_config.yml
   vars:
