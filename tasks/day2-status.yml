@@ -18,7 +18,7 @@
 - name: "[{{ _instance.name }}] Read pool maxActive"
   ansible.builtin.shell:
     cmd: >-
-      {{ ('sed -n "/BEGIN OSP-MANAGED datasource: ' ~ _instance.war_name ~ '/,/END OSP-MANAGED datasource: ' ~ _instance.war_name ~ '/p" '
+      {{ ('sed -n "/BEGIN OSP-MANAGED datasource: ' ~ _instance.war_name ~ ' -->/,/END OSP-MANAGED datasource: ' ~ _instance.war_name ~ ' -->/p" '
           if (openspecimen_shared_tomcat | default(false) | bool)
           else 'cat ') }} {{ _instance.catalina_base }}/conf/context.xml | grep -oP 'maxActive="\K[^"]+' | head -1
   register: _pool
