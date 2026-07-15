@@ -1,4 +1,4 @@
-app.name=openspecimen
+app.name={{ openspecimen_war_name | default('openspecimen') }}
 datasource.jndi={{ openspecimen_datasource_name | default('jdbc/openspecimen') }}
 database.type={{ db_type }}
 
