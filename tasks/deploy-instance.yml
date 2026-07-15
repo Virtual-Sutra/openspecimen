@@ -27,6 +27,13 @@
     openspecimen_service_name:          "{{ _instance.service_name }}"
     openspecimen_context_path:          "{{ _instance.context_path }}"
     openspecimen_war_name:              "{{ _instance.war_name }}"
+    # Must be shimmed here (not left to the openspecimen role's default): the TOMCAT
+    # role renders context.xml BEFORE the openspecimen role is include_role'd, so an
+    # openspecimen-role default is out of scope and the block silently falls back to
+    # jdbc/openspecimen - wrong (and colliding) for shared-Tomcat co-tenants. Shared
+    # mode → jdbc/<war_name> (unique per app); otherwise jdbc/openspecimen (byte-
+    # identical to the pre-feature render). Mirrors roles/openspecimen/defaults/main.yml.
+    openspecimen_datasource_name:       "jdbc/{{ _instance.war_name if (openspecimen_shared_tomcat | default(false) | bool) else 'openspecimen' }}"
     catalina_home:                      "{{ _instance.catalina_home }}"
     catalina_base:                      "{{ _instance.catalina_base }}"
     mysql_db_name:                      "{{ _instance.db_name }}"
