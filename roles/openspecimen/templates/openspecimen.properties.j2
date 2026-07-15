@@ -1,4 +1,4 @@
-app.name={{ openspecimen_war_name | default('openspecimen') }}
+app.name={{ openspecimen_war_name if (openspecimen_shared_tomcat | default(false) | bool) else 'openspecimen' }}
 datasource.jndi={{ openspecimen_datasource_name | default('jdbc/openspecimen') }}
 database.type={{ db_type }}
 
