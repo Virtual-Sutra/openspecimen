@@ -286,13 +286,33 @@
 
 # ── 7. Restore config files from <backup>/config/ ────────────────────────────
 
+# Shared Tomcat: setenv.sh and context.xml are SHARED across co-tenants, so restoring
+# them wholesale from this app's backup would overwrite the co-tenants' JVM config /
+# datasource blocks. Restore only the per-app <war>.properties there; the live shared
+# context.xml already carries the correct (blockinfile-managed) datasource for this app
+# and setenv.sh is one JVM for all co-tenants. Non-shared instances own their Tomcat, so
+# they restore all three exactly as before.
+- name: "Select config files to restore (shared Tomcat: per-app only)"
+  ansible.builtin.set_fact:
+    _rollback_config_items: >-
+      {{ [ {'name': openspecimen_war_name ~ '.properties',
+            'dest': catalina_base ~ '/conf/' ~ openspecimen_war_name ~ '.properties', 'mode': '0640'} ]
+         + ( [] if (openspecimen_shared_tomcat | default(false) | bool)
+             else [ {'name': 'setenv.sh',   'dest': catalina_base ~ '/bin/setenv.sh',    'mode': '0755'},
+                    {'name': 'context.xml', 'dest': catalina_base ~ '/conf/context.xml', 'mode': '0640'} ] ) }}
+
+- name: NOTE - shared Tomcat rollback leaves shared conf (setenv.sh / context.xml) untouched
+  ansible.builtin.debug:
+    msg: >-
+      Shared Tomcat ({{ openspecimen_service_name | default('openspecimen') }}): rolling back only
+      {{ openspecimen_war_name }}.properties + WAR + DB. setenv.sh and context.xml are shared with
+      co-tenants and are left as-is (the live per-app datasource block is already correct).
+  when: openspecimen_shared_tomcat | default(false) | bool
+
 - name: Probe backup config files
   ansible.builtin.stat:
     path: "{{ _restore_path }}/config/{{ item.name }}"
-  loop:
-    - { name: "{{ openspecimen_war_name }}.properties", dest: "{{ catalina_base }}/conf/{{ openspecimen_war_name }}.properties", mode: '0640' }
-    - { name: setenv.sh,               dest: "{{ catalina_base }}/bin/setenv.sh",                mode: '0755' }
-    - { name: context.xml,             dest: "{{ catalina_base }}/conf/context.xml",             mode: '0640' }
+  loop: "{{ _rollback_config_items }}"
   loop_control:
     label: "{{ item.name }}"
   register: _backup_config_stat

@@ -1,5 +1,11 @@
 ---
 # Per-instance JDBC pool update (#102). Looped from update-db-pool.yml.
+#
+# Shared Tomcat: conf/context.xml holds one <Resource> per co-tenant, so an unscoped
+# replace would rewrite EVERY co-tenant's pool. In shared mode the edit is anchored to
+# THIS app's OSP-MANAGED datasource marker block (after:/before:) so only this app's
+# <Resource> is touched. Non-shared context.xml has a single Resource - the unscoped
+# replace is fine and byte-identical to before.
 - name: "[{{ _instance.name }}] Backup context.xml"
   ansible.builtin.include_tasks: tasks/backup_config.yml
   vars:
@@ -7,18 +13,50 @@
     backup_src: "{{ _instance.catalina_base }}/conf/context.xml"
     backup_label: "context.xml-{{ _instance.name }}"
 
+# ── Non-shared: single Resource, unscoped replace ────────────────────────────
 - name: "[{{ _instance.name }}] Set pool maxActive"
   ansible.builtin.replace:
     path: "{{ _instance.catalina_base }}/conf/context.xml"
     regexp: 'maxActive="[^"]*"'
     replace: 'maxActive="{{ pool_max_active }}"'
+  when: not (openspecimen_shared_tomcat | default(false) | bool)
 
 - name: "[{{ _instance.name }}] Set pool minIdle (when provided)"
   ansible.builtin.replace:
     path: "{{ _instance.catalina_base }}/conf/context.xml"
     regexp: 'minIdle="[^"]*"'
     replace: 'minIdle="{{ pool_min_idle }}"'
-  when: pool_min_idle is defined
+  when:
+    - not (openspecimen_shared_tomcat | default(false) | bool)
+    - pool_min_idle is defined
+
+# ── Shared Tomcat: scope the edit to this app's datasource marker block ───────
+- name: "[{{ _instance.name }}] Set pool maxActive (scoped to this app's datasource block)"
+  ansible.builtin.replace:
+    path: "{{ _instance.catalina_base }}/conf/context.xml"
+    after: 'BEGIN OSP-MANAGED datasource: {{ _instance.war_name }}'
+    before: 'END OSP-MANAGED datasource: {{ _instance.war_name }}'
+    regexp: 'maxActive="[^"]*"'
+    replace: 'maxActive="{{ pool_max_active }}"'
+  when: openspecimen_shared_tomcat | default(false) | bool
+
+- name: "[{{ _instance.name }}] Set pool minIdle (scoped, when provided)"
+  ansible.builtin.replace:
+    path: "{{ _instance.catalina_base }}/conf/context.xml"
+    after: 'BEGIN OSP-MANAGED datasource: {{ _instance.war_name }}'
+    before: 'END OSP-MANAGED datasource: {{ _instance.war_name }}'
+    regexp: 'minIdle="[^"]*"'
+    replace: 'minIdle="{{ pool_min_idle }}"'
+  when:
+    - openspecimen_shared_tomcat | default(false) | bool
+    - pool_min_idle is defined
+
+- name: "[{{ _instance.name }}] NOTE - shared Tomcat: restart bounces co-tenant apps"
+  ansible.builtin.debug:
+    msg: >-
+      Shared Tomcat ({{ _instance.service_name }}): restarting bounces every co-tenant app
+      on this JVM, not just {{ _instance.war_name }}.
+  when: openspecimen_shared_tomcat | default(false) | bool
 
 - name: "[{{ _instance.name }}] Restart {{ _instance.service_name }}"
   ansible.builtin.systemd:
@@ -31,9 +69,13 @@
     openspecimen_port: "{{ _instance.http_port }}"
     openspecimen_context_path: "{{ _instance.context_path }}"
 
+# Read back maxActive from THIS app's block (shared) or the sole Resource (non-shared).
 - name: "[{{ _instance.name }}] Confirm pool"
-  ansible.builtin.command:
-    cmd: "grep -oP 'maxActive=\"\\K[^\"]+' {{ _instance.catalina_base }}/conf/context.xml"
+  ansible.builtin.shell:
+    cmd: >-
+      {{ ('sed -n "/BEGIN OSP-MANAGED datasource: ' ~ _instance.war_name ~ '/,/END OSP-MANAGED datasource: ' ~ _instance.war_name ~ '/p" '
+          if (openspecimen_shared_tomcat | default(false) | bool)
+          else 'cat ') }} {{ _instance.catalina_base }}/conf/context.xml | grep -oP 'maxActive="\K[^"]+' | head -1
   register: _pool
   changed_when: false
 
