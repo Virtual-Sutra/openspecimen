@@ -1,5 +1,5 @@
 app.name=openspecimen
-datasource.jndi=jdbc/openspecimen
+datasource.jndi={{ openspecimen_datasource_name | default('jdbc/openspecimen') }}
 database.type={{ db_type }}
 
 # 'upgrade' is only for legacy caTissue→OpenSpecimen migrations.
