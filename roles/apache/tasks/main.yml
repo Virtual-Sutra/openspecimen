@@ -88,6 +88,71 @@
     - downtime.html
     - OS_LOGO_BANNER.png
 
+# ── Domain-mode collision guard (co-located instances) ───────────────────────
+# In domain mode each instance owns a full vhost file (apache_vhost_name.conf)
+# answering on apache_server_name. Two co-located instances that resolve the SAME
+# vhost filename (e.g. a shared openspecimen_service_name) or the SAME ServerName
+# silently clobber each other's vhost, or trigger an Apache duplicate-ServerName so
+# only the first-loaded vhost serves. ADR-009 deploys one instance per run, so the
+# co-tenant is a SEPARATE run - detect the clash by inspecting the host's existing
+# OSP-managed vhosts (not _instances) and fail BEFORE overwriting anything.
+- name: Domain-mode collision pre-check
+  when: apache_routing_mode != 'path'
+  block:
+    - name: Check whether another OSP vhost already answers on this ServerName
+      ansible.builtin.shell: |
+        set -o pipefail
+        shopt -s nullglob
+        for f in {{ _apache_conf_dir }}/*.conf; do
+          [ "$(basename "$f")" = "{{ apache_vhost_name }}.conf" ] && continue
+          grep -q '# Managed by Ansible' "$f" || continue
+          if grep -qE '^[[:space:]]*ServerName[[:space:]]+{{ apache_server_name | regex_escape }}[[:space:]]*$' "$f"; then
+            echo "$f"
+          fi
+        done
+      args:
+        executable: /bin/bash
+      register: _apache_servername_clash
+      changed_when: false
+      failed_when: false
+
+    - name: Check whether this instance's vhost file is already owned by a different context
+      ansible.builtin.shell: |
+        set -o pipefail
+        f={{ _apache_conf_dir }}/{{ apache_vhost_name }}.conf
+        if [ -f "$f" ] && grep -q '# Managed by Ansible' "$f" \
+           && ! grep -qE '^[[:space:]]*ProxyPass[[:space:]]+{{ apache_path_prefix | regex_escape }}/[[:space:]]' "$f"; then
+          grep -oE 'ProxyPass[[:space:]]+/[^[:space:]]*' "$f" | head -1
+        fi
+      args:
+        executable: /bin/bash
+      register: _apache_vhost_owner_clash
+      changed_when: false
+      failed_when: false
+
+    - name: Fail fast on a domain-mode ServerName / vhost-file collision
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - _apache_servername_clash.stdout | trim | length == 0
+          - _apache_vhost_owner_clash.stdout | trim | length == 0
+        fail_msg: |
+          Apache domain-mode routing collision for instance '{{ openspecimen_service_name | default('openspecimen') }}':
+          {% if _apache_servername_clash.stdout | trim | length > 0 %}
+            - ServerName '{{ apache_server_name }}' is already served by another OSP vhost:
+              {{ _apache_servername_clash.stdout_lines | join(', ') }}
+          {% endif %}
+          {% if _apache_vhost_owner_clash.stdout | trim | length > 0 %}
+            - vhost file '{{ apache_vhost_name }}.conf' already mounts a different context
+              ('{{ _apache_vhost_owner_clash.stdout | trim }}'), i.e. a co-located instance owns it.
+          {% endif %}
+          Two co-located instances cannot share a ServerName or a vhost filename in domain
+          mode. Fix one of:
+            - use path mode (apache_routing_mode: path) - co-tenants share one ServerName at
+              distinct URL paths (the shared-Tomcat co-tenant model), OR
+            - give each instance a DISTINCT hostname (apache_server_name, via
+              openspecimen_app_url) AND a distinct apache_vhost_name.
+
 # ── DOMAIN mode (default): one full vhost per instance on its own ServerName ──
 - name: Deploy OpenSpecimen VirtualHost config (domain mode)
   ansible.builtin.template:
