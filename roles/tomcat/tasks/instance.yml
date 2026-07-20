@@ -216,17 +216,24 @@
 # connector refuses to start and aborts the service. Disable it and bind AJP to
 # IPv4 loopback (Ghostcat / CVE-2020-1938). Idempotent.
 - name: "[tomcat:{{ openspecimen_service_name }}] Set secretRequired=false on AJP connector"
+  # Operate on the AJP <Connector> tag only (not the whole file), and REPLACE an
+  # existing secretRequired="true"/"..." with "false" as well as ADD it when absent -
+  # the stock/bundle server.xml can ship secretRequired="true", which the old
+  # 'skip if the string appears anywhere' guard left in place, aborting startup.
   ansible.builtin.shell: |
     python3 -c "
     import re, sys
     path = '{{ catalina_base }}/conf/server.xml'
     content = open(path).read()
-    if 'secretRequired' in content:
-        sys.exit(0)
+    def patch(m):
+        tag, close = m.group(1), m.group(2)
+        if 'secretRequired=' in tag:
+            tag = re.sub(r'secretRequired=\"[^\"]*\"', 'secretRequired=\"false\"', tag)
+            return tag + close
+        return tag + ' secretRequired=\"false\"' + close
     patched = re.sub(
         r'(<Connector[^>]*protocol=\"AJP/1\.3\"[^>]*?)(\s*/>)',
-        r'\1 secretRequired=\"false\"\2',
-        content, flags=re.DOTALL)
+        patch, content, flags=re.DOTALL)
     if patched == content:
         sys.exit(0)
     open(path, 'w').write(patched)
