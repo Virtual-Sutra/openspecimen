@@ -158,6 +158,35 @@
         group: "{{ tomcat_user }}"
         recurse: true
 
+    # The stock Apache Tomcat tarball ships sample webapps (ROOT, docs, examples,
+    # host-manager, manager) that OpenSpecimen never serves. Remove them here - after the
+    # unpack/overlay that introduces them and BEFORE the openspecimen role copies the WAR -
+    # so they don't clutter webapps/ or expose the manager apps. Removal is BY NAME (the
+    # fixed stock set), never a wildcard, so an existing instance WAR is never touched:
+    # openspecimen.war on an upgrade, or a co-tenant's <name>.war (e.g. test.war/test1.war)
+    # on a shared Tomcat, all survive.
+    - name: Remove stock Tomcat sample webapps (keep instance WARs)
+      ansible.builtin.file:
+        path: "{{ catalina_home }}/webapps/{{ item }}"
+        state: absent
+      loop:
+        - ROOT
+        - ROOT.war
+        - docs
+        - docs.war
+        - examples
+        - examples.war
+        - host-manager
+        - host-manager.war
+        - manager
+        - manager.war
+      # Belt-and-braces: never remove the instance being deployed even if it is
+      # (pathologically) named after a stock app - e.g. context_path /manager. On a
+      # shared Tomcat this install only runs on the FIRST co-tenant (fresh), so no OTHER
+      # co-tenant WAR can exist yet; the current war_name is the only one to protect.
+      when: (item | regex_replace('\.war$', '')) != (openspecimen_war_name | default(''))
+      notify: restart openspecimen
+
 # ── Copy database connectors ──────────────────────────────────────────────────
 # lib/ is empty in the tomcat-as bundle so unzip does not create it.
 # Connectors are always redeployed from the current release zip - stale JARs
