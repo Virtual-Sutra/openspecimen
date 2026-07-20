@@ -181,28 +181,32 @@
       when: _inst_tomcat_stat.stat.exists
 
     - name: "[{{ _instance.name }}] Decide whether Tomcat needs (re)installing"
-      # (Re)install when Tomcat is absent OR the installed version differs from the
-      # spec's tomcat_version. Compare the first three components (server.number is
-      # 4-part). An unreadable/empty version also forces a reinstall (fail-safe).
+      # Relaxed to the MAJOR version: (re)install only when Tomcat is absent, its version
+      # is unreadable, or the installed MAJOR differs from the spec's. When the majors
+      # match (e.g. installed 9.0.90 vs spec 9.0.59) the deploy proceeds WITHOUT touching
+      # Tomcat - it neither downgrades to the spec patch nor forces a patch upgrade; the
+      # installed binary is kept. An unreadable/empty version forces a reinstall (fail-safe).
       ansible.builtin.set_fact:
         _inst_tomcat_needs_install: >-
           {{ (not _inst_tomcat_stat.stat.exists)
-             or ((_inst_tomcat_ver.stdout | default('') | trim).split('.')[:3] | join('.') != os_versions.tomcat) }}
+             or ((_inst_tomcat_ver.stdout | default('') | trim) | length == 0)
+             or ((_inst_tomcat_ver.stdout | trim).split('.')[0] != (os_versions.tomcat | string).split('.')[0]) }}
 
     # Shared Tomcat: refuse an IMPLICIT Tomcat version bump. The shared binary backs
     # EVERY co-tenant, so reinstalling it (to satisfy one app's spec) would restart and
     # re-unpack stock config under all of them. Fail HERE - before Java and the Tomcat
     # reinstall, i.e. before any change - so the shared Tomcat is migrated deliberately.
     # Fresh shared install (no prior Tomcat) and same-version re-deploys are unaffected.
-    - name: "[{{ _instance.name }}] Refuse an implicit Tomcat version bump on a shared Tomcat"
+    - name: "[{{ _instance.name }}] Refuse an implicit Tomcat major-version change on a shared Tomcat"
       ansible.builtin.fail:
         msg: |
-          ✗ Shared-Tomcat version bump blocked for instance '{{ openspecimen_service_name | default('openspecimen') }}'.
+          ✗ Shared-Tomcat major-version change blocked for instance '{{ openspecimen_service_name | default('openspecimen') }}'.
 
           The shared Tomcat at {{ catalina_home }} is {{ _inst_tomcat_ver.stdout | default('') | trim | default('unreadable', true) }},
-          but release '{{ openspecimen_release }}' requires Tomcat {{ os_versions.tomcat }}. Reinstalling
+          but release '{{ openspecimen_release }}' requires a different Tomcat major ({{ os_versions.tomcat }}). Reinstalling
           the shared binary would restart and re-unpack stock config under EVERY co-tenant
-          on it, so an implicit bump via one app's upgrade is refused before any change.
+          on it, so an implicit major change via one app's upgrade is refused before any change.
+          (A same-major difference is allowed and does not reinstall Tomcat.)
 
           To move the shared Tomcat to {{ os_versions.tomcat }}: clean up every co-tenant on it and
           re-deploy them on the new version, or move this app to its own Tomcat.
@@ -238,8 +242,8 @@
       ansible.builtin.debug:
         msg: >-
           {% if not _inst_tomcat_stat.stat.exists %}Fresh Tomcat install: {{ os_versions.tomcat }}.
-          {% elif _inst_tomcat_needs_install | bool %}Tomcat upgrade: installed {{ _inst_tomcat_ver.stdout | default('unknown') | trim }} -> spec {{ os_versions.tomcat }} - re-installing binaries.
-          {% else %}Tomcat already at {{ os_versions.tomcat }} - no reinstall.{% endif %}
+          {% elif _inst_tomcat_needs_install | bool %}Tomcat MAJOR change: installed {{ _inst_tomcat_ver.stdout | default('unknown') | trim }} -> spec {{ os_versions.tomcat }} - re-installing binaries.
+          {% else %}Tomcat {{ _inst_tomcat_ver.stdout | default('unknown') | trim }} kept (same major as spec {{ os_versions.tomcat }}) - no reinstall.{% endif %}
 
     - name: "[{{ _instance.name }}] Install/upgrade this instance's Tomcat (binary + conf + connectors)"
       ansible.builtin.include_role:
