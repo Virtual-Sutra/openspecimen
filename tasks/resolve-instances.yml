@@ -10,6 +10,16 @@
 # (site.yml, cleanup.yml, status.yml, update-*.yml) shares one shape. The single
 # entry is byte-for-byte the legacy single-host layout.
 
+# WAR name derived from the context path (leading slash stripped, '#' for nested
+# paths). Computed once here so it is both the fallback below and the value the
+# empty-name guard reports against. The openspecimen role's own war_name default
+# (roles/openspecimen/defaults/main.yml) is NOT in scope in these pre_tasks - the
+# role has not loaded yet - which is why an explicit inventory openspecimen_war_name
+# was previously bypassed and silently re-derived from the context path.
+- name: Derive the context-based WAR name (fallback when no explicit war_name)
+  ansible.builtin.set_fact:
+    _os_derived_war_name: "{{ (openspecimen_context_path | default('/openspecimen')) | regex_replace('/+$', '') | regex_replace('^/', '') | regex_replace('/', '#') }}"
+
 - name: Resolve the single instance from flat vars
   ansible.builtin.set_fact:
     _instances:
@@ -20,10 +30,11 @@
       - name:          "{{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}"
         service_name:  "{{ openspecimen_service_name | default('openspecimen') }}"
         context_path:  "{{ openspecimen_context_path | default('/openspecimen') }}"
-        # WAR filename = context with the leading slash stripped ('#' for nested
-        # paths): openspecimen.war → /openspecimen, openspecimen-test.war →
-        # /openspecimen-test. Drives cleanup's webapp removal.
-        war_name:      "{{ (openspecimen_context_path | default('/openspecimen')) | regex_replace('/+$', '') | regex_replace('^/', '') | regex_replace('/', '#') }}"
+        # WAR filename → Tomcat context. An explicit openspecimen_war_name wins (a
+        # shared-Tomcat co-tenant sets it, kept equal to its context path segment);
+        # otherwise fall back to the context-derived name above. default(..., true)
+        # also treats an empty string as unset. Drives cleanup's webapp removal.
+        war_name:      "{{ openspecimen_war_name | default(_os_derived_war_name, true) }}"
         catalina_home: "{{ catalina_home | default(tomcat_home) }}"
         catalina_base: "{{ catalina_base | default(tomcat_home) }}"
         # Instance root dir. Co-located instances live under /usr/local/openspecimen/
@@ -60,3 +71,20 @@
         node_name:     "{{ openspecimen_node_name | default(openspecimen_service_name | default('openspecimen'), true) }}"
         paid_plugins:      "{{ openspecimen_paid_plugins | default([]) }}"
         customer_plugins:  "{{ openspecimen_customer_plugins | default([]) }}"
+
+# A root/empty context path with no explicit openspecimen_war_name resolves war_name
+# to '' → the WAR deploys as webapps/.war and the context descriptor renders a broken
+# <Environment name="config/"> (Tomcat SEVERE) and jdbc/ datasource. OpenSpecimen also
+# cannot run at root context: AppServletContextListener does getContextPath().substring(1),
+# and getContextPath() is '' for the root context. Fail fast with guidance instead of
+# shipping a silently-broken deploy.
+- name: Fail fast when the resolved WAR/context name is empty
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - (_instances | first).war_name | string | trim | length > 0
+    fail_msg: >-
+      Resolved war_name is empty for instance '{{ (_instances | first).name }}':
+      openspecimen_context_path='{{ openspecimen_context_path | default('/openspecimen') }}'
+      strips to nothing and no explicit openspecimen_war_name is set. Set a non-root
+      openspecimen_context_path (e.g. /openspecimen) or an explicit openspecimen_war_name.
