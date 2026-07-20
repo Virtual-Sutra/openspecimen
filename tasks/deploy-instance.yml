@@ -156,30 +156,9 @@
         name: openspecimen
         tasks_from: preflight
 
-    # Per-instance JDK (os_versions.java.track from this instance's spec). Installs
-    # the JDK (idempotent; JDKs coexist) and sets openspecimen_java_home, which the
-    # tomcat runtime below pins into this instance's setenv.sh + systemd unit - so
-    # two instances can run on different Java majors. Runs every deploy because the
-    # runtime config below is re-templated every deploy and needs openspecimen_java_home.
-    - name: "[{{ _instance.name }}] Stage 1/5 - Java deployment"
-      ansible.builtin.set_fact:
-        _current_stage: "Java deployment (JDK + JAVA_HOME)"
-
-    - name: "[{{ _instance.name }}] Per-instance Java (JDK + JAVA_HOME)"
-      ansible.builtin.include_role:
-        name: java
-
-    - name: "[{{ _instance.name }}] Java stage complete"
-      ansible.builtin.set_fact:
-        _stage_status: "{{ _stage_status | combine({'java': 'ok'}) }}"
-        _current_stage: "Tomcat deployment (binary + runtime)"
-
-    # Per-instance Tomcat INSTALL: own CATALINA_HOME (binary at os_versions.tomcat)
-    # + golden conf + DB connectors, all from THIS instance's zip. The binary is
-    # laid down only when CATALINA_HOME is absent - a fresh instance installs its
-    # pinned Tomcat; to change an existing instance's Tomcat version, clean up
-    # that instance first. App-only upgrades skip this include entirely (the
-    # openspecimen role uploads its own zip).
+    # Per-instance Tomcat version detection - done BEFORE the Java install and the
+    # Tomcat (re)install below, so a shared-Tomcat co-tenant whose spec needs a
+    # DIFFERENT Tomcat version is refused up front (next task), before ANY change.
     - name: "[{{ _instance.name }}] Check this instance's Tomcat install"
       ansible.builtin.stat:
         path: "{{ catalina_home }}/bin/startup.sh"
@@ -210,6 +189,51 @@
           {{ (not _inst_tomcat_stat.stat.exists)
              or ((_inst_tomcat_ver.stdout | default('') | trim).split('.')[:3] | join('.') != os_versions.tomcat) }}
 
+    # Shared Tomcat: refuse an IMPLICIT Tomcat version bump. The shared binary backs
+    # EVERY co-tenant, so reinstalling it (to satisfy one app's spec) would restart and
+    # re-unpack stock config under all of them. Fail HERE - before Java and the Tomcat
+    # reinstall, i.e. before any change - so the shared Tomcat is migrated deliberately.
+    # Fresh shared install (no prior Tomcat) and same-version re-deploys are unaffected.
+    - name: "[{{ _instance.name }}] Refuse an implicit Tomcat version bump on a shared Tomcat"
+      ansible.builtin.fail:
+        msg: |
+          ✗ Shared-Tomcat version bump blocked for instance '{{ openspecimen_service_name | default('openspecimen') }}'.
+
+          The shared Tomcat at {{ catalina_home }} is {{ _inst_tomcat_ver.stdout | default('') | trim | default('unreadable', true) }},
+          but release '{{ openspecimen_release }}' requires Tomcat {{ os_versions.tomcat }}. Reinstalling
+          the shared binary would restart and re-unpack stock config under EVERY co-tenant
+          on it, so an implicit bump via one app's upgrade is refused before any change.
+
+          To move the shared Tomcat to {{ os_versions.tomcat }}: clean up every co-tenant on it and
+          re-deploy them on the new version, or move this app to its own Tomcat.
+      when:
+        - openspecimen_shared_tomcat | default(false) | bool
+        - _inst_tomcat_stat.stat.exists
+        - _inst_tomcat_needs_install | bool
+
+    # Per-instance JDK (os_versions.java.track from this instance's spec). Installs
+    # the JDK (idempotent; JDKs coexist) and sets openspecimen_java_home, which the
+    # tomcat runtime below pins into this instance's setenv.sh + systemd unit - so
+    # two instances can run on different Java majors. Runs every deploy because the
+    # runtime config below is re-templated every deploy and needs openspecimen_java_home.
+    - name: "[{{ _instance.name }}] Stage 1/5 - Java deployment"
+      ansible.builtin.set_fact:
+        _current_stage: "Java deployment (JDK + JAVA_HOME)"
+
+    - name: "[{{ _instance.name }}] Per-instance Java (JDK + JAVA_HOME)"
+      ansible.builtin.include_role:
+        name: java
+
+    - name: "[{{ _instance.name }}] Java stage complete"
+      ansible.builtin.set_fact:
+        _stage_status: "{{ _stage_status | combine({'java': 'ok'}) }}"
+        _current_stage: "Tomcat deployment (binary + runtime)"
+
+    # Per-instance Tomcat INSTALL: own CATALINA_HOME (binary at os_versions.tomcat)
+    # + golden conf + DB connectors, all from THIS instance's zip. The binary is
+    # laid down only when CATALINA_HOME is absent - a fresh instance installs its
+    # pinned Tomcat; a version change on an EXISTING dedicated Tomcat reinstalls the
+    # binary (refused above for a shared Tomcat). App-only upgrades skip this include.
     - name: "[{{ _instance.name }}] Log Tomcat (re)install decision"
       ansible.builtin.debug:
         msg: >-
