@@ -8,6 +8,14 @@ apache_https_port:  443
 # openspecimen-<name>.conf - each instance owns its own vhost.
 apache_vhost_name: "{{ openspecimen_service_name | default('openspecimen') }}"
 
+# Path-mode: the per-instance mount snippet filename in the shared drop-in dir.
+# Keyed to the WAR/context name (UNIQUE per co-tenant) - NOT apache_vhost_name.
+# Co-located instances sharing one Tomcat share openspecimen_service_name (hence
+# apache_vhost_name), so keying the snippet on apache_vhost_name would make two
+# co-tenants (e.g. /test and /test1 as service 'osshared') overwrite each other's
+# snippet - deploying one drops the other's proxy mount. war_name is distinct.
+apache_path_snippet_name: "{{ openspecimen_war_name | default(apache_vhost_name) }}"
+
 # Enable the Apache reverse-proxy front-end. Defaults on when openspecimen_app_url
 # is set (public hostname → fronted; bare Tomcat/ALB → not). Override via -e.
 apache_enabled: "{{ (openspecimen_app_url | default('') | trim | length) > 0 }}"

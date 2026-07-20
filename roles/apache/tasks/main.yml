@@ -181,10 +181,15 @@
     - ansible_os_family == 'Debian'
   notify: reload apache
 
-- name: Remove this instance's path-mode snippet (not in path mode)
+- name: Remove this instance's path-mode snippet(s) (not in path mode)
   ansible.builtin.file:
-    path: "{{ _apache_dropin_dir }}/{{ apache_vhost_name }}.conf"
+    path: "{{ item }}"
     state: absent
+  # Both the war_name-keyed name and the legacy apache_vhost_name-keyed name, so an
+  # instance that predates the war_name keying is cleaned when it switches to domain.
+  loop:
+    - "{{ _apache_dropin_dir }}/{{ apache_path_snippet_name }}.conf"
+    - "{{ _apache_dropin_dir }}/{{ apache_vhost_name }}.conf"
   when: apache_routing_mode != 'path'
   notify: reload apache
 
@@ -226,10 +231,21 @@
       when: ansible_os_family == 'Debian'
       notify: reload apache
 
+    # If this instance previously deployed a snippet under the legacy
+    # apache_vhost_name name (before war_name keying), remove it so the shared vhost
+    # doesn't Include a stale duplicate mount. No-op when the names already match
+    # (every instance whose context segment == service_name).
+    - name: Remove stale legacy-named path snippet (pre war_name keying)
+      ansible.builtin.file:
+        path: "{{ _apache_dropin_dir }}/{{ apache_vhost_name }}.conf"
+        state: absent
+      when: apache_vhost_name != apache_path_snippet_name
+      notify: reload apache
+
     - name: Deploy this instance's path mount snippet
       ansible.builtin.template:
         src: openspecimen-path-snippet.conf.j2
-        dest: "{{ _apache_dropin_dir }}/{{ apache_vhost_name }}.conf"
+        dest: "{{ _apache_dropin_dir }}/{{ apache_path_snippet_name }}.conf"
         owner: root
         group: root
         mode: '0644'

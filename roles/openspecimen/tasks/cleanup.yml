@@ -65,10 +65,15 @@
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
+  # The domain-mode vhost is keyed by apache_vhost_name; the path-mode snippet is keyed
+  # by war_name (unique per co-tenant). Remove the legacy apache_vhost_name-named snippet
+  # too, so an instance deployed before war_name keying is fully cleaned.
   loop:
     - "/etc/apache2/sites-available/{{ _instance.apache_vhost_name }}.conf"
     - "/etc/apache2/sites-enabled/{{ _instance.apache_vhost_name }}.conf"
     - "/etc/httpd/conf.d/{{ _instance.apache_vhost_name }}.conf"
+    - "/etc/apache2/openspecimen.d/{{ _instance.war_name }}.conf"
+    - "/etc/httpd/openspecimen.d/{{ _instance.war_name }}.conf"
     - "/etc/apache2/openspecimen.d/{{ _instance.apache_vhost_name }}.conf"
     - "/etc/httpd/openspecimen.d/{{ _instance.apache_vhost_name }}.conf"
 
