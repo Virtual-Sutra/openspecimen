@@ -13,6 +13,15 @@ db_type:    mysql
 # false = skip the mysql role; DB is external - RDS, Aurora, Oracle, etc.
 db_managed: true
 
+# Apache front-end management, mirroring db_managed:
+# true  = Ansible manages this instance's Apache reverse-proxy config (vhost / path
+#         snippet / reload) on every deploy (default).
+# false = skip ALL Apache config changes - the front-end is managed outside Ansible
+#         (a hand-maintained vhost, or an operator-owned shared vhost for co-tenants).
+#         The app (WAR + config) still deploys and the readiness gate probes Tomcat
+#         directly; the on-host Apache config is left exactly as-is.
+apache_managed: true
+
 # ── Release ───────────────────────────────────────────────────────────────────
 # openspecimen_release is the zip filename without the .zip extension.
 # It must be set per deployment - no default is provided here.
