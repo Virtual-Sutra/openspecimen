@@ -180,6 +180,11 @@
         - host-manager.war
         - manager
         - manager.war
+      # Belt-and-braces: never remove the instance being deployed even if it is
+      # (pathologically) named after a stock app - e.g. context_path /manager. On a
+      # shared Tomcat this install only runs on the FIRST co-tenant (fresh), so no OTHER
+      # co-tenant WAR can exist yet; the current war_name is the only one to protect.
+      when: (item | regex_replace('\.war$', '')) != (openspecimen_war_name | default(''))
       notify: restart openspecimen
 
 # ── Copy database connectors ──────────────────────────────────────────────────
