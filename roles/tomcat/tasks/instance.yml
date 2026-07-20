@@ -328,6 +328,36 @@
     mode: '0640'
   when: openspecimen_shared_tomcat | default(false)
 
+# A CRLF context.xml (a Windows-authored stock/bundle file that brownfield seeding
+# preserves) breaks the blockinfile marker match below: the markers are compared with
+# '\n' line endings and never match the file's '...-->\r' lines, so every deploy
+# APPENDED a fresh OSP-MANAGED block instead of updating in place - duplicating this
+# instance's datasource. Strip CR so the markers match (and the ^M chars are removed),
+# and drop any pre-existing DUPLICATE blocks for THIS war_name (the merge below re-adds
+# exactly one). Co-tenant blocks are left untouched. Idempotent: no-op once the file is
+# LF with a single block for this app. newline='' preserves raw endings so CRLF is
+# detected and rewritten.
+- name: "[tomcat:{{ openspecimen_service_name }}] Normalise shared context.xml (strip CR, drop duplicate blocks)"
+  ansible.builtin.shell: |
+    python3 -c "
+    import re
+    path = '{{ catalina_base }}/conf/context.xml'
+    c = open(path, newline='').read(); orig = c
+    c = c.replace('\r', '')
+    war = '{{ openspecimen_war_name }}'
+    pat = re.compile(r'[ \t]*<!-- BEGIN OSP-MANAGED datasource: ' + re.escape(war) + r' -->.*?<!-- END OSP-MANAGED datasource: ' + re.escape(war) + r' -->[ \t]*\n?', re.DOTALL)
+    if len(pat.findall(c)) >= 2:
+        c = pat.sub('', c)
+    if c != orig:
+        open(path, 'w').write(c); print('changed')
+    "
+  args:
+    executable: /bin/bash
+  register: _ctx_normalise
+  changed_when: "'changed' in _ctx_normalise.stdout"
+  notify: restart openspecimen
+  when: openspecimen_shared_tomcat | default(false)
+
 - name: "[tomcat:{{ openspecimen_service_name }}] Merge this app's datasource block into shared context.xml"
   ansible.builtin.blockinfile:
     path: "{{ catalina_base }}/conf/context.xml"
