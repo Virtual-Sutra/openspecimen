@@ -88,3 +88,20 @@
       openspecimen_context_path='{{ openspecimen_context_path | default('/openspecimen') }}'
       strips to nothing and no explicit openspecimen_war_name is set. Set a non-root
       openspecimen_context_path (e.g. /openspecimen) or an explicit openspecimen_war_name.
+
+# An instance MUST NOT be named after a stock Apache Tomcat webapp (ROOT, docs,
+# examples, host-manager, manager). Such a name collides with Tomcat's own apps in
+# webapps/ and with the stock-webapp cleanup on install. Reject it up front (the check
+# is case-insensitive, matched on the war_name = context-path segment).
+- name: Fail fast when the WAR/context name is a reserved Tomcat webapp
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - ((_instances | first).war_name | string | trim | lower) not in _tomcat_reserved_webapps
+    fail_msg: >-
+      war_name '{{ (_instances | first).war_name }}' for instance '{{ (_instances | first).name }}'
+      is a reserved Tomcat webapp name ({{ _tomcat_reserved_webapps | join(', ') }}). It would
+      collide with the stock Tomcat apps in webapps/. Choose a different
+      openspecimen_context_path / openspecimen_war_name (e.g. /openspecimen).
+  vars:
+    _tomcat_reserved_webapps: [root, docs, examples, host-manager, manager]
