@@ -122,7 +122,9 @@
         f={{ _apache_conf_dir }}/{{ apache_vhost_name }}.conf
         if [ -f "$f" ] && grep -q '# Managed by Ansible' "$f" \
            && ! grep -qE '^[[:space:]]*ProxyPass[[:space:]]+{{ apache_path_prefix | regex_escape }}/[[:space:]]' "$f"; then
-          grep -oE 'ProxyPass[[:space:]]+/[^[:space:]]*' "$f" | head -1
+          # Report the real context mount (a path ending in '/ '), skipping the
+          # '! ' exclusion lines (ProxyPass /downtime.html !) that precede it.
+          grep -oE 'ProxyPass[[:space:]]+/[^[:space:]!]+/ ' "$f" | head -1 | awk '{print $2}'
         fi
       args:
         executable: /bin/bash
