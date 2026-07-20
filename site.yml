@@ -28,6 +28,12 @@
 - name: Deploy OpenSpecimen
   hosts: openspecimen
   become: true
+  # Run notified handlers (the 'restart openspecimen' Tomcat restart) even if a task
+  # fails later in the play. Config changes (server.xml/AJP, context.xml, setenv.sh,
+  # WAR) notify the restart and it is flushed before the readiness gate; without this,
+  # a failure between the change and that flush would DROP the pending restart, leaving
+  # new config on disk with the old process running (needing a manual restart).
+  force_handlers: true
 
   pre_tasks:
     # Resolve `_instances` (one instance from the flat customer vars, ADR-009).
