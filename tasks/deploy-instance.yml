@@ -247,17 +247,23 @@
         _stage_status: "{{ _stage_status | combine({'openspecimen': 'ok'}) }}"
         _current_stage: "Apache deployment (reverse-proxy vhost)"
 
+    # apache_managed=false skips ALL Apache config changes (front-end managed outside
+    # Ansible) - mirrors db_managed=false skipping the mysql role.
     - name: "[{{ _instance.name }}] Apache reverse proxy"
       ansible.builtin.include_role:
         name: apache
-      when: apache_enabled | default(false)
+      when:
+        - apache_enabled | default(false)
+        - apache_managed | default(true)
 
-    - name: "[{{ _instance.name }}] Apache stage complete (or skipped when disabled)"
+    - name: "[{{ _instance.name }}] Apache stage complete (or skipped when disabled/unmanaged)"
       ansible.builtin.set_fact:
         _stage_status: >-
           {{ _stage_status | combine({'apache':
-             ((apache_enabled | default(false) | bool)
-              | ternary('ok', 'skipped (apache_enabled=false - direct Tomcat)'))}) }}
+             ('ok' if ((apache_enabled | default(false) | bool) and (apache_managed | default(true) | bool))
+              else ('skipped (apache_managed=false - front-end managed outside Ansible)'
+                    if not (apache_managed | default(true) | bool)
+                    else 'skipped (apache_enabled=false - direct Tomcat)'))}) }}
         _current_stage: "startup & readiness gate (OpenSpecimen serving)"
 
     # Apply pending restarts BEFORE the readiness gate - a mid-restart Tomcat makes
@@ -285,7 +291,7 @@
         _ready_cmd: >-
           {% set _app = openspecimen_app_url | default('') | trim -%}
           {% set _to = openspecimen_health_timeout | default(30) | int -%}
-          {% if _app | length > 0 and (apache_enabled | default(false) | bool) -%}
+          {% if _app | length > 0 and (apache_enabled | default(false) | bool) and (apache_managed | default(true) | bool) -%}
           {% set _h = _app | regex_replace('^https?://', '') | regex_replace('/.*$', '') | regex_replace(':.*$', '') -%}
           {% set _prefix = (apache_path_prefix | default(openspecimen_context_path | default('/openspecimen'))) | regex_replace('/+$', '') -%}
           {% set _ssl = apache_enable_ssl | default(false) | bool -%}
