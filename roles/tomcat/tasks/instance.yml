@@ -22,6 +22,33 @@
     mode: '0755'
   loop: [conf, logs, temp, work, webapps, bin]
 
+# The stock Apache Tomcat tarball ships sample webapps (ROOT, docs, examples,
+# host-manager, manager) that OpenSpecimen never serves. Remove them from THIS
+# instance's served webapps/ on EVERY deploy - not only when the Tomcat binary is
+# (re)installed - so a co-tenant on an already-installed shared Tomcat (e.g. test1
+# deploying onto the Tomcat test installed) also clears any leftover stock apps. Runs
+# before the openspecimen role copies the WAR. Removal is BY NAME (the fixed stock
+# set), never a wildcard, and skips the instance's own war_name, so no instance WAR is
+# ever touched: openspecimen.war, or a co-tenant's test.war/test1.war and its exploded
+# dir on a shared Tomcat, all survive.
+- name: "[tomcat:{{ openspecimen_service_name }}] Remove stock Tomcat sample webapps (keep instance WARs)"
+  ansible.builtin.file:
+    path: "{{ catalina_base }}/webapps/{{ item }}"
+    state: absent
+  loop:
+    - ROOT
+    - ROOT.war
+    - docs
+    - docs.war
+    - examples
+    - examples.war
+    - host-manager
+    - host-manager.war
+    - manager
+    - manager.war
+  when: (item | regex_replace('\.war$', '')) != (openspecimen_war_name | default(''))
+  notify: restart openspecimen
+
 # Seed conf/ from the golden CATALINA_HOME/conf (the #91 zip overlay) for extra
 # instances. `cp -an` (archive, no-clobber) never overwrites an already
 # port-patched server.xml on re-runs. `creates:` makes it idempotent. Skipped for
