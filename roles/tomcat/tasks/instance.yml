@@ -300,9 +300,14 @@
 # Multiple named apps share ONE conf/context.xml. Instead of rendering the file
 # whole (which would erase every other app's datasource), MERGE only THIS app's
 # <Resource>+<Environment> block, keyed by war_name marker. Preserves co-tenant
-# blocks - including a legacy hand-managed app's inline datasource. Runs even in
-# the _reuse_existing_config path: a NEW co-tenant's datasource must be added
-# while the shared Tomcat runtime (server.xml/setenv) is left untouched.
+# blocks - including a legacy hand-managed app's inline datasource.
+#
+# SKIPPED when _reuse_existing_config (db_managed=false AND this instance's own
+# datasource - jdbc/<war>, see direction.yml's per-instance probe - is already on the
+# host): the existing/legacy datasource (host/db/user/password) is REUSED, not
+# re-rendered or duplicated - so onboarding a hand-managed co-tenant (e.g. darpan) never
+# grows a second jdbc/<war> block. A fresh install or a NEW co-tenant (datasource
+# absent) is NOT reuse, so its block is still merged in.
 - name: "[tomcat:{{ openspecimen_service_name }}] Ensure shared context.xml has a clean <Context> wrapper"
   # Greenfield (this run just installed the Tomcat - CATALINA_HOME/bin/startup.sh was
   # absent at the pre-install stat) → force:true: reset context.xml to the clean wrapper,
@@ -326,7 +331,9 @@
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
     mode: '0640'
-  when: openspecimen_shared_tomcat | default(false)
+  when:
+    - openspecimen_shared_tomcat | default(false)
+    - not (_reuse_existing_config | default(false))   # reuse → leave context.xml alone
 
 # A CRLF context.xml (a Windows-authored stock/bundle file that brownfield seeding
 # preserves) breaks the blockinfile marker match below: the markers are compared with
@@ -356,7 +363,9 @@
   register: _ctx_normalise
   changed_when: "'changed' in _ctx_normalise.stdout"
   notify: restart openspecimen
-  when: openspecimen_shared_tomcat | default(false)
+  when:
+    - openspecimen_shared_tomcat | default(false)
+    - not (_reuse_existing_config | default(false))   # reuse → leave context.xml alone
 
 - name: "[tomcat:{{ openspecimen_service_name }}] Merge this app's datasource block into shared context.xml"
   ansible.builtin.blockinfile:
@@ -368,7 +377,9 @@
     group: "{{ tomcat_user }}"
     mode: '0640'
   notify: restart openspecimen
-  when: openspecimen_shared_tomcat | default(false)
+  when:
+    - openspecimen_shared_tomcat | default(false)
+    - not (_reuse_existing_config | default(false))   # reuse → leave context.xml alone
 
 # Reuse safety net: when reusing existing config (db_managed=false + existing host
 # config), we deliberately did NOT re-render context.xml. It was present at the
