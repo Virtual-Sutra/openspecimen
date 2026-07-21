@@ -328,26 +328,36 @@
     mode: '0640'
   when: openspecimen_shared_tomcat | default(false)
 
-# A CRLF context.xml (a Windows-authored stock/bundle file that brownfield seeding
-# preserves) breaks the blockinfile marker match below: the markers are compared with
-# '\n' line endings and never match the file's '...-->\r' lines, so every deploy
-# APPENDED a fresh OSP-MANAGED block instead of updating in place - duplicating this
-# instance's datasource. Strip CR so the markers match (and the ^M chars are removed),
-# and drop any pre-existing DUPLICATE blocks for THIS war_name (the merge below re-adds
-# exactly one). Co-tenant blocks are left untouched. Idempotent: no-op once the file is
-# LF with a single block for this app. newline='' preserves raw endings so CRLF is
-# detected and rewritten.
-- name: "[tomcat:{{ openspecimen_service_name }}] Normalise shared context.xml (strip CR, drop duplicate blocks)"
+# A shared context.xml can carry blocks this deploy must reconcile BEFORE the merge:
+#  (a) CRLF endings (a Windows-authored stock/bundle file preserved by brownfield seeding)
+#      break blockinfile's '\n'-based marker match, so it APPENDS a fresh block every run
+#      instead of updating in place - duplicating the datasource, plus ^M on every line.
+#  (b) A LEGACY, hand-managed <Resource jdbc/<war>> + <Environment config/<war>> with NO
+#      OSP-MANAGED marker (onboarding an existing hand-configured app, e.g. darpan): the
+#      marker-keyed merge cannot see it, so it ADDS a second, marked copy -> duplicate JNDI
+#      name -> Tomcat aborts every webapp's context (NameAlreadyBoundException).
+# Normalise first: strip CR; drop any DUPLICATE marked blocks for this war; and remove a
+# legacy UNMARKED jdbc/<war> + config/<war> that sits OUTSIDE the managed markers - so the
+# merge below owns exactly one block for this app (it "adopts" the legacy datasource).
+# Co-tenant blocks (jdbc/kmc, ...) are never touched. Idempotent: no-op once the file is
+# LF with a single marked block. newline='' preserves raw endings so CRLF is detected.
+- name: "[tomcat:{{ openspecimen_service_name }}] Normalise shared context.xml (strip CR, adopt legacy block, de-dup)"
   ansible.builtin.shell: |
     python3 -c "
     import re
     path = '{{ catalina_base }}/conf/context.xml'
+    war  = '{{ openspecimen_war_name }}'
     c = open(path, newline='').read(); orig = c
     c = c.replace('\r', '')
-    war = '{{ openspecimen_war_name }}'
-    pat = re.compile(r'[ \t]*<!-- BEGIN OSP-MANAGED datasource: ' + re.escape(war) + r' -->.*?<!-- END OSP-MANAGED datasource: ' + re.escape(war) + r' -->[ \t]*\n?', re.DOTALL)
-    if len(pat.findall(c)) >= 2:
-        c = pat.sub('', c)
+    mk = r'[ \t]*<!-- BEGIN OSP-MANAGED datasource: ' + re.escape(war) + r' -->.*?<!-- END OSP-MANAGED datasource: ' + re.escape(war) + r' -->[ \t]*\n?'
+    if len(re.findall(mk, c, re.DOTALL)) >= 2:
+        c = re.sub(mk, '', c, flags=re.DOTALL)
+    res = r'[ \t]*<Resource\b[^>]*?name\s*=\s*\"jdbc/' + re.escape(war) + r'\"[^>]*?/>[ \t]*\n?'
+    env = r'[ \t]*<Environment\b[^>]*?name\s*=\s*\"config/' + re.escape(war) + r'\"[^>]*?/>[ \t]*\n?'
+    segs = re.split('(' + mk + ')', c, flags=re.DOTALL)
+    for i in range(0, len(segs), 2):
+        segs[i] = re.sub(env, '', re.sub(res, '', segs[i], flags=re.DOTALL), flags=re.DOTALL)
+    c = ''.join(segs)
     if c != orig:
         open(path, 'w').write(c); print('changed')
     "
