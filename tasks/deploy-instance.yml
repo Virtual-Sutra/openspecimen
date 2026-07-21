@@ -336,7 +336,7 @@
           {% set _to = openspecimen_health_timeout | default(30) | int -%}
           {% if _app | length > 0 and (apache_enabled | default(false) | bool) and (apache_managed | default(true) | bool) -%}
           {% set _h = _app | regex_replace('^https?://', '') | regex_replace('/.*$', '') | regex_replace(':.*$', '') -%}
-          {% set _prefix = '' if (apache_mount_at_root | default(false) | bool) else ((apache_path_prefix | default(openspecimen_context_path | default('/openspecimen'))) | regex_replace('/+$', '')) -%}
+          {% set _prefix = '' if ((apache_routing_mode | default('domain')) == 'domain') else ((apache_path_prefix | default(openspecimen_context_path | default('/openspecimen'))) | regex_replace('/+$', '')) -%}
           {% set _ssl = apache_enable_ssl | default(false) | bool -%}
           {% set _scheme = 'https' if _ssl else 'http' -%}
           {% set _lport = (apache_https_port | default(443)) if _ssl else (apache_http_port | default(80)) -%}

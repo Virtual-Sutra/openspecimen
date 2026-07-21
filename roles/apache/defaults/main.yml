@@ -71,17 +71,11 @@ apache_shared_server_name: "{{ apache_server_name }}"
 # proxy is 1:1; set app.url to <scheme>://<host>{{ '<context_path>' }}.
 apache_path_prefix: "{{ openspecimen_context_path | default('/openspecimen') }}"
 
-# DOMAIN mode only: serve the app at the domain ROOT ('/') and HIDE the Tomcat context,
-# instead of exposing it in the URL. true → the vhost proxies '/' to the Tomcat context
-# (apache_path_prefix) and rewrites the session cookie path back to '/', so the public
-# URL is a clean https://<host>/ (set openspecimen_app_url to the bare host, no path).
-# A root-mount monopolises the ServerName, so it is invalid in path mode (a fail-fast in
-# tasks/main.yml enforces this).
-#
-# DEFAULT: true in domain mode (an instance on its OWN hostname is normally served at
-# that host's root), false in path mode (co-tenants under one host need distinct paths).
-# A domain instance that must keep the context in the URL sets apache_mount_at_root: false.
-apache_mount_at_root: "{{ (apache_routing_mode | default('domain')) == 'domain' }}"
+# NOTE: there is no apache_mount_at_root knob. Root-mount is intrinsic to the routing
+# mode and derived internally: DOMAIN mode serves the app at the host ROOT and hides the
+# Tomcat context (openspecimen.conf.j2), PATH mode mounts at the context path
+# (openspecimen-path-snippet.conf.j2). Set openspecimen_app_url to the bare host in domain
+# mode so email/SAML links match the clean URL.
 
 # Backend base (no context suffix) - AJP/HTTP to THIS instance's Tomcat port. The mount
 # appends apache_path_prefix so the proxy is 1:1 to the same Tomcat context.
