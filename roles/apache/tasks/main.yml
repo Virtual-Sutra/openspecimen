@@ -2,6 +2,19 @@
 - name: Load OS-specific Apache variables
   ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
 
+# Root-mount ('/') claims the whole ServerName, so it can only work as a full per-instance
+# domain vhost - never as one path snippet Include'd alongside others on a shared host.
+- name: Reject apache_mount_at_root in path routing mode
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - not ((apache_mount_at_root | default(false) | bool) and apache_routing_mode == 'path')
+    fail_msg: >-
+      apache_mount_at_root is only valid in domain routing mode: a root-mount serves the
+      app at '/' and monopolises the ServerName, so it cannot share a host with path-mounted
+      instances. Set apache_routing_mode: domain (this instance on its own hostname), or drop
+      apache_mount_at_root and use the context-path mount.
+
 - name: Install Apache
   ansible.builtin.package:
     name: "{{ _apache_package }}"
