@@ -71,6 +71,14 @@ apache_shared_server_name: "{{ apache_server_name }}"
 # proxy is 1:1; set app.url to <scheme>://<host>{{ '<context_path>' }}.
 apache_path_prefix: "{{ openspecimen_context_path | default('/openspecimen') }}"
 
+# DOMAIN mode only: serve the app at the domain ROOT ('/') and HIDE the Tomcat context,
+# instead of exposing it in the URL. true → the vhost proxies '/' to the Tomcat context
+# (apache_path_prefix) and rewrites the session cookie path back to '/', so the public
+# URL is a clean https://<host>/ (set openspecimen_app_url to the bare host, no path).
+# A root-mount monopolises the ServerName, so it is invalid in path mode (a fail-fast in
+# tasks/main.yml enforces this). Default false keeps the 1:1 context-path mount.
+apache_mount_at_root: false
+
 # Backend base (no context suffix) - AJP/HTTP to THIS instance's Tomcat port. The mount
 # appends apache_path_prefix so the proxy is 1:1 to the same Tomcat context.
 # openspecimen_ajp_port / openspecimen_port are shimmed per instance; apache_ajp_port is

@@ -30,15 +30,24 @@
     ProxyPass /downtime.html    !
     ProxyPass /OS_LOGO_BANNER.png !
 
+    ProxyPreserveHost On
+{% if apache_mount_at_root | default(false) | bool %}
+    # ROOT mount: serve at the domain root and HIDE the Tomcat context ({{ apache_path_prefix }}).
+    # The public URL is https://{{ apache_server_name }}/ ; the session cookie path is
+    # rewritten from the context back to '/'. (openspecimen_app_url must be the bare host.)
+    ProxyPass        / {{ apache_path_backend }}{{ apache_path_prefix }}/
+    ProxyPassReverse / {{ apache_path_backend }}{{ apache_path_prefix }}/
+    ProxyPassReverseCookiePath {{ apache_path_prefix }} /
+{% else %}
     # Send the bare domain root and the bare context (no trailing slash) to the app.
     RedirectMatch ^/$ {{ apache_path_prefix }}/
     RedirectMatch ^{{ apache_path_prefix }}$ {{ apache_path_prefix }}/
 
-    ProxyPreserveHost On
     # 1:1 mount at the context path (no cookie/path rewrite - path == Tomcat context).
     # Trailing slashes keep the mount from overlapping a sibling prefix.
     ProxyPass        {{ apache_path_prefix }}/ {{ apache_path_backend }}{{ apache_path_prefix }}/
     ProxyPassReverse {{ apache_path_prefix }}/ {{ apache_path_backend }}{{ apache_path_prefix }}/
+{% endif %}
 
 {% if apache_security_headers %}
     Header always set X-Frame-Options        "SAMEORIGIN"
