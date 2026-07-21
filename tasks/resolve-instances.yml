@@ -16,9 +16,21 @@
 # (roles/openspecimen/defaults/main.yml) is NOT in scope in these pre_tasks - the
 # role has not loaded yet - which is why an explicit inventory openspecimen_war_name
 # was previously bypassed and silently re-derived from the context path.
-- name: Derive the context-based WAR name (fallback when no explicit war_name)
+# Context path and WAR name are two views of ONE thing - set EITHER, the other derives:
+#   openspecimen_war_name (e.g. darpan)      → context_path defaults to /darpan
+#   openspecimen_context_path (e.g. /darpan) → war_name defaults to darpan
+# An explicit war_name wins when both are set. A nested war (a#b) maps to /a/b. Neither
+# has an inventory default here (only inline defaults), so 'is defined' == operator-set.
+- name: Resolve the effective context path (an explicit war_name drives it)
   ansible.builtin.set_fact:
-    _os_derived_war_name: "{{ (openspecimen_context_path | default('/openspecimen')) | regex_replace('/+$', '') | regex_replace('^/', '') | regex_replace('/', '#') }}"
+    _os_context_path: >-
+      {{ ('/' ~ (openspecimen_war_name | string | regex_replace('#', '/')))
+         if (openspecimen_war_name is defined and (openspecimen_war_name | string | trim | length) > 0)
+         else (openspecimen_context_path | default('/openspecimen')) }}
+
+- name: Derive the WAR name from the effective context path (fallback when no explicit war_name)
+  ansible.builtin.set_fact:
+    _os_derived_war_name: "{{ _os_context_path | regex_replace('/+$', '') | regex_replace('^/', '') | regex_replace('/', '#') }}"
 
 - name: Resolve the single instance from flat vars
   ansible.builtin.set_fact:
@@ -29,11 +41,10 @@
       # reading as 'openspecimen'.
       - name:          "{{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}"
         service_name:  "{{ openspecimen_service_name | default('openspecimen') }}"
-        context_path:  "{{ openspecimen_context_path | default('/openspecimen') }}"
-        # WAR filename → Tomcat context. An explicit openspecimen_war_name wins (a
-        # shared-Tomcat co-tenant sets it, kept equal to its context path segment);
-        # otherwise fall back to the context-derived name above. default(..., true)
-        # also treats an empty string as unset. Drives cleanup's webapp removal.
+        context_path:  "{{ _os_context_path }}"
+        # WAR filename → Tomcat context. An explicit openspecimen_war_name wins; otherwise
+        # fall back to the name derived from the effective context path above.
+        # default(..., true) also treats an empty string as unset. Drives cleanup's webapp removal.
         war_name:      "{{ openspecimen_war_name | default(_os_derived_war_name, true) }}"
         catalina_home: "{{ catalina_home | default(tomcat_home) }}"
         catalina_base: "{{ catalina_base | default(tomcat_home) }}"
