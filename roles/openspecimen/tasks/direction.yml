@@ -42,7 +42,7 @@
   # rc 0 = datasource present (existing install), 1/2 = absent/no file (fresh).
   # -F: the datasource name is a literal, not a regex.
   ansible.builtin.command: >-
-    grep -qF 'jdbc/openspecimen'
+    grep -qF -- '{{ openspecimen_datasource_name | default("jdbc/openspecimen") }}'
     {{ catalina_base }}/conf/context.xml
   register: _external_ds_probe
   failed_when: false

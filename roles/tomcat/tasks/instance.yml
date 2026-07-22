@@ -242,9 +242,9 @@
 - name: "[tomcat:{{ openspecimen_service_name }}] Re-verify the reused datasource survives (db_managed=false upgrade)"
   when: _reuse_existing_config | default(false)
   block:
-    - name: "[tomcat:{{ openspecimen_service_name }}] Check context.xml still has the jdbc/openspecimen datasource"
+    - name: "[tomcat:{{ openspecimen_service_name }}] Check context.xml still has the {{ openspecimen_datasource_name }} datasource"
       # rc 0 = present, 1 = file exists but no datasource, 2 = file missing.
-      ansible.builtin.command: "grep -q 'jdbc/openspecimen' {{ catalina_base }}/conf/context.xml"
+      ansible.builtin.command: "grep -qF -- '{{ openspecimen_datasource_name | default('jdbc/openspecimen') }}' {{ catalina_base }}/conf/context.xml"
       register: _external_datasource_check
       failed_when: false
       changed_when: false
