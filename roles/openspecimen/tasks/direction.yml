@@ -39,14 +39,10 @@
 # installs have no marker but do have a live context.xml). datasource present = reuse;
 # absent = fresh. db_managed=true is never reuse and skips this probe.
 - name: Probe existing DB datasource (db_managed=false fresh vs existing)
-  # rc 0 = datasource present (existing install), 1/2 = absent/no file (fresh). Grep THIS
-  # instance's OWN datasource name - jdbc/<war_name> in shared mode, jdbc/openspecimen
-  # otherwise - not a hardcoded 'jdbc/openspecimen'. A shared co-tenant (e.g. darpan ->
-  # jdbc/darpan, or a legacy hand-managed block) would otherwise be mis-read as fresh and
-  # its on-host config (server.xml / setenv.sh / <war>.properties) re-rendered and clobbered.
+  # rc 0 = datasource present (existing install), 1/2 = absent/no file (fresh).
   # -F: the datasource name is a literal, not a regex.
   ansible.builtin.command: >-
-    grep -qF '{{ openspecimen_datasource_name | default("jdbc/openspecimen") }}'
+    grep -qF 'jdbc/openspecimen'
     {{ catalina_base }}/conf/context.xml
   register: _external_ds_probe
   failed_when: false

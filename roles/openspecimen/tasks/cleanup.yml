@@ -3,38 +3,22 @@
 # Called per instance from cleanup.yml; `_instance` is the loop var. DESTRUCTIVE.
 #
 # Removes the instance's service, deployed webapp, data/plugins/backups/markers
-# and (local MySQL) its DB + user. Leaves the shared Tomcat binary / MySQL
-# server / Java in place for a fast re-deploy unless cleanup.yml's full_wipe
-# host-level step also runs.
-#
-# Shared-Tomcat co-tenancy (openspecimen_shared_tomcat): several named apps share one
-# CATALINA_BASE + service + conf/context.xml. Cleanup is then CO-TENANT PRESERVING -
-# it undeploys only THIS app (its WAR, its OSP-MANAGED datasource block, its per-app
-# dir + DB) and RESTARTS the shared service so surviving co-tenants keep serving. The
-# shared service/unit/Tomcat are torn down only when THIS is the last co-tenant (or on
-# full_wipe). Detection is by host inspection (detect-cotenants.yml), since a run only
-# sees one customer folder (ADR-009).
+# and (local MySQL) its DB + user. Leaves the Tomcat binary / MySQL server / Java
+# in place for a fast re-deploy unless cleanup.yml's full_wipe host-level step also
+# runs.
 
-- name: "[{{ _instance.name }}] Detect co-tenants on the (possibly shared) Tomcat"
-  ansible.builtin.include_tasks: detect-cotenants.yml
-
-# ── Service: co-tenant aware ─────────────────────────────────────────────────
-# Stop/disable + remove the unit ONLY when no other co-tenant depends on the shared
-# service (i.e. a non-shared instance, or the LAST app on a shared Tomcat). When
-# co-tenants remain we leave the service running and just restart it at the end.
+# ── Service ──────────────────────────────────────────────────────────────────
 - name: "[{{ _instance.name }}] Stop and disable the service"
   ansible.builtin.systemd:
     name: "{{ _instance.service_name }}"
     state: stopped
     enabled: false
   failed_when: false
-  when: not (_cotenants_remain | default(false) | bool)
 
 - name: "[{{ _instance.name }}] Remove the systemd unit"
   ansible.builtin.file:
     path: "/etc/systemd/system/{{ _instance.service_name }}.service"
     state: absent
-  when: not (_cotenants_remain | default(false) | bool)
 
 # ── App artifacts (always, per-app scoped) ───────────────────────────────────
 - name: "[{{ _instance.name }}] Remove the deployed webapp"
@@ -44,17 +28,6 @@
   loop:
     - "{{ _instance.catalina_base }}/webapps/{{ _instance.war_name }}.war"
     - "{{ _instance.catalina_base }}/webapps/{{ _instance.war_name }}"
-
-# Shared Tomcat: drop only THIS app's datasource block from the shared context.xml,
-# keyed on the same OSP-MANAGED marker the deploy merged it with - every co-tenant
-# block (incl. a legacy hand-managed app's) survives. No-op if the marker is absent.
-- name: "[{{ _instance.name }}] Remove this app's datasource block from the shared context.xml"
-  ansible.builtin.blockinfile:
-    path: "{{ _instance.catalina_base }}/conf/context.xml"
-    marker: "    <!-- {mark} OSP-MANAGED datasource: {{ _instance.war_name }} -->"
-    state: absent
-  failed_when: false
-  when: openspecimen_shared_tomcat | default(false) | bool
 
 # Remove ONLY this instance's Apache front-end - never the whole config. Covers both
 # routing modes: the domain-mode vhost (sites-available + sites-enabled link on Debian,
@@ -97,9 +70,6 @@
   ansible.builtin.set_fact:
     _inst_dir:    "{{ _instance.instance_dir | default('') | regex_replace('/+$', '') }}"
     _shared_root: "{{ (_instance.catalina_home | default(catalina_home | default(tomcat_home))) | dirname | regex_replace('/+$', '') }}"
-    # Shared-Tomcat per-app dir: parent of this app's data dir (e.g. .../osshared/test),
-    # sibling of the shared tomcat-as. Removed only when a strict subdir of the shared root.
-    _shared_app_dir: "{{ (_instance.data_dir | default('') | dirname) | regex_replace('/+$', '') }}"
 
 - name: "[{{ _instance.name }}] Remove the complete instance directory ({{ _inst_dir }})"
   ansible.builtin.file:
@@ -120,29 +90,6 @@
     state: absent
   when: _instance.catalina_base != (_instance.catalina_home | default(catalina_home | default(tomcat_home)))
 
-# Shared Tomcat: the per-app dir sits under the shared root (base == home, so both
-# removals above are skipped). Drop just this app's dir, guarded to a strict subdir of
-# the shared root so the shared tomcat-as / co-tenant dirs are never touched.
-- name: "[{{ _instance.name }}] Remove this app's dir under the shared root ({{ _shared_app_dir }})"
-  ansible.builtin.file:
-    path: "{{ _shared_app_dir }}"
-    state: absent
-  when:
-    - openspecimen_shared_tomcat | default(false) | bool
-    - _shared_app_dir | length > 0
-    - "'..' not in _shared_app_dir.split('/')"
-    - _shared_app_dir != _shared_root
-    - _shared_app_dir.startswith(_shared_root ~ '/')
-
-# Last co-tenant on a shared Tomcat: nothing else uses the shared service/binary now,
-# so tear the shared Tomcat down too (the unit was already removed above since
-# _cotenants_remain is false). The shared root wrapper is left for full_wipe.
-- name: "[{{ _instance.name }}] Remove the shared Tomcat (last co-tenant teardown)"
-  ansible.builtin.file:
-    path: "{{ _instance.catalina_base }}"
-    state: absent
-  when: _is_last_cotenant | default(false) | bool
-
 - name: "[{{ _instance.name }}] Remove data, plugins, backups and markers"
   ansible.builtin.file:
     path: "{{ item }}"
@@ -153,16 +100,6 @@
     - "{{ _instance.backup_dir }}"
     - "{{ _instance.release_marker }}"
     - "{{ _instance.deploy_success_marker }}"
-
-# ── Restart survivors (shared Tomcat, co-tenants remain) ─────────────────────
-# This app's WAR + datasource block are gone; bounce the shared service so the running
-# JVM drops the removed context and reloads the trimmed context.xml. Survivors keep
-# serving; the service/unit/Tomcat were intentionally left intact above.
-- name: "[{{ _instance.name }}] Restart the shared Tomcat so surviving co-tenants keep serving"
-  ansible.builtin.systemd:
-    name: "{{ _instance.service_name }}"
-    state: restarted
-  when: _cotenants_remain | default(false) | bool
 
 # ── Database (always, per-app) ───────────────────────────────────────────────
 # On a clean/fresh VM (e.g. cleanup-before-deploy) local MySQL may not be running,

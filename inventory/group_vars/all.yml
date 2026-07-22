@@ -152,8 +152,8 @@ tomcat_user: openspecimen
 # Co-location memory guardrail: on each deploy, the tomcat role sums the -Xmx of
 # every OpenSpecimen instance's setenv.sh on the host + the MySQL InnoDB buffer +
 # an OS reserve + a per-JVM off-heap estimate, and compares to RAM. The default
-# 50%-of-RAM heap is NOT multi-instance-aware, so with a 2nd instance you MUST set
-# tomcat_heap_max_override per folder (see docs/MULTI-INSTANCE.md). Action on
+# 50%-of-RAM heap is NOT co-location-aware, so when a 2nd instance shares the host
+# you MUST set tomcat_heap_max_override per customer folder. Action on
 # over-subscription: fail | warn | off.
 openspecimen_memory_guardrail:  fail
 openspecimen_mem_os_reserve_mb: 1024   # RAM reserved for the OS + page cache

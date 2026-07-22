@@ -29,11 +29,9 @@
     openspecimen_war_name:              "{{ _instance.war_name }}"
     # Must be shimmed here (not left to the openspecimen role's default): the TOMCAT
     # role renders context.xml BEFORE the openspecimen role is include_role'd, so an
-    # openspecimen-role default is out of scope and the block silently falls back to
-    # jdbc/openspecimen - wrong (and colliding) for shared-Tomcat co-tenants. Shared
-    # mode → jdbc/<war_name> (unique per app); otherwise jdbc/openspecimen (byte-
-    # identical to the pre-feature render). Mirrors roles/openspecimen/defaults/main.yml.
-    openspecimen_datasource_name:       "jdbc/{{ _instance.war_name if (openspecimen_shared_tomcat | default(false) | bool) else 'openspecimen' }}"
+    # openspecimen-role default is out of scope and the block would fall back to an
+    # undefined var at render time. Mirrors roles/openspecimen/defaults/main.yml.
+    openspecimen_datasource_name:       "jdbc/openspecimen"
     catalina_home:                      "{{ _instance.catalina_home }}"
     catalina_base:                      "{{ _instance.catalina_base }}"
     mysql_db_name:                      "{{ _instance.db_name }}"
@@ -157,8 +155,7 @@
         tasks_from: preflight
 
     # Per-instance Tomcat version detection - done BEFORE the Java install and the
-    # Tomcat (re)install below, so a shared-Tomcat co-tenant whose spec needs a
-    # DIFFERENT Tomcat version is refused up front (next task), before ANY change.
+    # Tomcat (re)install below, so the version decision is made before ANY change.
     - name: "[{{ _instance.name }}] Check this instance's Tomcat install"
       ansible.builtin.stat:
         path: "{{ catalina_home }}/bin/startup.sh"
@@ -184,50 +181,19 @@
       ansible.builtin.set_fact:
         _tc_installed: "{{ (_inst_tomcat_ver.stdout | default('') | trim).split('.')[:3] | join('.') }}"
 
-    - name: "[{{ _instance.name }}] Decide Tomcat action (never downgrade; shared blocks a major upgrade)"
+    - name: "[{{ _instance.name }}] Decide Tomcat action (never downgrade)"
       # Never downgrade Tomcat. Compare the installed version with the spec:
-      #   Dedicated Tomcat:
       #     installed <  spec  → reinstall (upgrade): same-major lower minor (9.0.30 → 9.0.59)
       #                          OR a lower major (9.x → 11.x).
       #     installed >= spec  → keep, no reinstall: exact match, same-major HIGHER minor
       #                          (9.0.90 vs 9.0.59), or a HIGHER major (11.x vs 9.x).
       #     absent / unreadable → reinstall (fresh install / fail-safe).
-      #   Shared Tomcat (one binary backs every co-tenant - never reinstalled in place):
-      #     a same-major difference (either direction) just proceeds - no reinstall;
-      #     a required MAJOR upgrade (installed major < spec major) is REFUSED below.
       ansible.builtin.set_fact:
         _inst_tomcat_needs_install: >-
           {{ (not _inst_tomcat_stat.stat.exists)
              or (_inst_tomcat_stat.stat.exists
-                 and not (openspecimen_shared_tomcat | default(false) | bool)
                  and ((_tc_installed | length == 0)
                       or (_tc_installed is version(os_versions.tomcat, '<')))) }}
-        _tc_shared_major_upgrade: >-
-          {{ (openspecimen_shared_tomcat | default(false) | bool)
-             and _inst_tomcat_stat.stat.exists
-             and (_tc_installed | length > 0)
-             and ((_tc_installed.split('.')[0] | int) < ((os_versions.tomcat | string).split('.')[0] | int)) }}
-
-    # Shared Tomcat: refuse a MAJOR Tomcat upgrade. The shared binary backs EVERY
-    # co-tenant, so reinstalling it across majors (to satisfy one app's spec) would
-    # restart and re-unpack stock config under all of them. Fail HERE - before Java and
-    # the Tomcat reinstall, i.e. before any change - so the shared Tomcat is migrated
-    # deliberately. A same-major difference (either direction) and a fresh shared install
-    # are unaffected.
-    - name: "[{{ _instance.name }}] Refuse a Tomcat major upgrade on a shared Tomcat"
-      ansible.builtin.fail:
-        msg: |
-          ✗ Shared-Tomcat major upgrade blocked for instance '{{ openspecimen_service_name | default('openspecimen') }}'.
-
-          The shared Tomcat at {{ catalina_home }} is {{ _tc_installed | default('unreadable', true) }},
-          but release '{{ openspecimen_release }}' requires a higher Tomcat major ({{ os_versions.tomcat }}). Reinstalling
-          the shared binary would restart and re-unpack stock config under EVERY co-tenant
-          on it, so an implicit major upgrade via one app's upgrade is refused before any change.
-          (A same-major difference is kept in place and does not reinstall Tomcat.)
-
-          To move the shared Tomcat to {{ os_versions.tomcat }}: clean up every co-tenant on it and
-          re-deploy them on the new version, or move this app to its own Tomcat.
-      when: _tc_shared_major_upgrade | bool
 
     # Per-instance JDK (os_versions.java.track from this instance's spec). Installs
     # the JDK (idempotent; JDKs coexist) and sets openspecimen_java_home, which the
@@ -250,15 +216,14 @@
     # Per-instance Tomcat INSTALL: own CATALINA_HOME (binary at os_versions.tomcat)
     # + golden conf + DB connectors, all from THIS instance's zip. The binary is
     # laid down only when CATALINA_HOME is absent - a fresh instance installs its
-    # pinned Tomcat; a version change on an EXISTING dedicated Tomcat reinstalls the
-    # binary (refused above for a shared Tomcat). App-only upgrades skip this include.
+    # pinned Tomcat; a version change on an EXISTING Tomcat reinstalls the binary.
+    # App-only upgrades skip this include.
     - name: "[{{ _instance.name }}] Log Tomcat (re)install decision"
       ansible.builtin.debug:
         msg: >-
           {% if not _inst_tomcat_stat.stat.exists %}Fresh Tomcat install: {{ os_versions.tomcat }}.
           {% elif _inst_tomcat_needs_install | bool %}Tomcat upgrade: installed {{ _tc_installed }} -> spec {{ os_versions.tomcat }} - re-installing binaries.
-          {% elif _tc_shared_major_upgrade | bool %}Shared Tomcat needs a MAJOR upgrade ({{ _tc_installed }} -> {{ os_versions.tomcat }}) - refused (see below).
-          {% else %}Tomcat {{ _tc_installed }} kept (>= spec {{ os_versions.tomcat }}, or shared same-major) - no reinstall (never downgrade).{% endif %}
+          {% else %}Tomcat {{ _tc_installed }} kept (>= spec {{ os_versions.tomcat }}) - no reinstall (never downgrade).{% endif %}
 
     - name: "[{{ _instance.name }}] Install/upgrade this instance's Tomcat (binary + conf + connectors)"
       ansible.builtin.include_role:

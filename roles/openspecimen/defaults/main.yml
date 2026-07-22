@@ -9,23 +9,8 @@
 # in deploy-instance.yml, or the flat customer var in rollback/cleanup).
 openspecimen_war_name: "{{ (openspecimen_context_path | default('/openspecimen')) | regex_replace('/+$', '') | regex_replace('^/', '') | regex_replace('/', '#') }}"
 
-# ── Multi-webapp / shared-Tomcat mode (opt-in) ────────────────────────────────
-# OFF by default: an instance owns its CATALINA_BASE and its conf/context.xml is
-# rendered whole (unchanged for every existing customer, incl. co-located ones on
-# their own Tomcat like k-testvm-test).
-# Set true PER INSTANCE when this app shares ONE Tomcat (one CATALINA_BASE) with
-# other named apps: its datasource + config block is then MERGED into the shared
-# conf/context.xml by war_name marker (blockinfile), never overwriting co-tenant
-# blocks - including a legacy hand-managed app's inline datasource.
-openspecimen_shared_tomcat: false
-
-# ── Multi-webapp / shared-Tomcat: per-app JNDI datasource name ────────────────
-# The global conf/context.xml can hold several named datasources, one per co-tenant
-# app in a shared Tomcat. Each app binds its OWN datasource via datasource.jndi in
-# its <war_name>.properties, so co-located apps reach different DBs.
-# The war_name-derived name is used ONLY in shared-Tomcat mode. Any NON-shared
-# instance (single OR co-located-on-its-own-Tomcat, e.g. k-testvm-test) keeps the
-# literal jdbc/openspecimen, so its rendered context.xml + properties stay
-# byte-identical to before this feature — no re-template, no disruption to the
-# existing per-instance / multi-Tomcat models. Override to pin a specific name.
-openspecimen_datasource_name: "jdbc/{{ openspecimen_war_name if (openspecimen_shared_tomcat | default(false) | bool) else 'openspecimen' }}"
+# ── JNDI datasource name ──────────────────────────────────────────────────────
+# The instance's conf/context.xml holds one <Resource> bound to this name; the app
+# reaches it via datasource.jndi in its <war_name>.properties. Override to pin a
+# specific name.
+openspecimen_datasource_name: "jdbc/openspecimen"

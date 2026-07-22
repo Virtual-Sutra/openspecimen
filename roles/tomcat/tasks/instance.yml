@@ -78,67 +78,6 @@
 # Set this instance's HTTP / AJP / shutdown ports in its own server.xml. The
 # golden conf ships stock 8080/8009/8005; for the default instance these match
 # (changed=0). A co-located 2nd customer sets its own ports explicitly (ADR-009).
-# Shared Tomcat has ONE set of connectors, so every co-tenant MUST declare identical
-# ports. A run only sees one customer folder (ADR-009), so we can't compare folders;
-# instead inspect the host: if a co-tenant is ALREADY deployed (its WAR is in the shared
-# webapps/) and the live server.xml HTTP port differs from this folder's, the two would
-# flip-flop the shared server.xml on every deploy (and collide at runtime). Fail fast.
-# Gated on a co-tenant actually existing - not on the stock port - so a first co-tenant
-# on a freshly-seeded (stock 8080) conf still claims its port, and a solo app freely
-# changes its own port (its own WAR is excluded from the co-tenant set).
-- name: "[tomcat:{{ openspecimen_service_name }}] Guard - co-tenant port conflict on shared server.xml"
-  when:
-    - openspecimen_shared_tomcat | default(false) | bool
-    - not (_reuse_existing_config | default(false))
-  block:
-    - name: "[tomcat:{{ openspecimen_service_name }}] Read current HTTP connector port"
-      ansible.builtin.shell: |
-        python3 -c "
-        import re
-        try:
-            c = open('{{ catalina_base }}/conf/server.xml').read()
-        except Exception:
-            print(''); raise SystemExit
-        m = re.search(r'<Connector\b[^>]*?protocol=\"HTTP/1\.1\"[^>]*?/>', c, re.DOTALL)
-        p = re.search(r'\bport=\"(\d+)\"', m.group(0)) if m else None
-        print(p.group(1) if p else '')
-        "
-      args:
-        executable: /bin/bash
-      register: _cur_http_port
-      changed_when: false
-      failed_when: false
-
-    - name: "[tomcat:{{ openspecimen_service_name }}] Probe shared webapps for an already-deployed co-tenant"
-      ansible.builtin.find:
-        paths: "{{ catalina_base }}/webapps"
-        patterns: "*.war"
-        file_type: file
-      register: _cotenant_war_scan
-      changed_when: false
-
-    - name: "[tomcat:{{ openspecimen_service_name }}] Fail on co-tenant port mismatch"
-      ansible.builtin.fail:
-        msg: |
-          ✗ Shared-Tomcat port conflict on {{ catalina_base }}/conf/server.xml
-              live HTTP port : {{ _cur_http_port.stdout | trim }}
-              this folder    : {{ openspecimen_port }}
-              co-tenant WARs : {{ _other_wars | join(', ') }}
-
-          A shared Tomcat has ONE HTTP connector, so every co-tenant customer folder MUST
-          set identical openspecimen_port / openspecimen_ajp_port / openspecimen_shutdown_port.
-          Align this folder's ports with the co-tenant's (or vice versa) and redeploy.
-      vars:
-        # Existing app WARs excluding this app (its own re-deploy) and stock Tomcat webapps.
-        _other_wars: >-
-          {{ (_cotenant_war_scan.files | map(attribute='path') | map('basename')
-              | map('regex_replace', '\.war$', '') | list)
-              | difference([openspecimen_war_name, 'ROOT', 'manager', 'host-manager', 'docs', 'examples']) }}
-      when:
-        - _cur_http_port.stdout | trim | length > 0
-        - _other_wars | length > 0
-        - _cur_http_port.stdout | trim != (openspecimen_port | string)
-
 - name: "[tomcat:{{ openspecimen_service_name }}] Set HTTP/AJP/shutdown ports in server.xml"
   # Match each connector block by protocol (any attribute order) then set its own
   # port - stock Tomcat 9 ships the AJP connector as protocol-before-port, so an
@@ -292,94 +231,7 @@
     group: "{{ tomcat_user }}"
     mode: '0640'
   notify: restart openspecimen
-  when:
-    - not (_reuse_existing_config | default(false))
-    - not (openspecimen_shared_tomcat | default(false))
-
-# ── Shared-Tomcat co-tenancy (openspecimen_shared_tomcat) ────────────────────
-# Multiple named apps share ONE conf/context.xml. Instead of rendering the file
-# whole (which would erase every other app's datasource), MERGE only THIS app's
-# <Resource>+<Environment> block, keyed by war_name marker. Preserves co-tenant
-# blocks - including a legacy hand-managed app's inline datasource.
-#
-# SKIPPED when _reuse_existing_config (db_managed=false AND this instance's own
-# datasource - jdbc/<war>, see direction.yml's per-instance probe - is already on the
-# host): the existing/legacy datasource (host/db/user/password) is REUSED, not
-# re-rendered or duplicated - so onboarding a hand-managed co-tenant (e.g. darpan) never
-# grows a second jdbc/<war> block. A fresh install or a NEW co-tenant (datasource
-# absent) is NOT reuse, so its block is still merged in.
-- name: "[tomcat:{{ openspecimen_service_name }}] Ensure shared context.xml has a clean <Context> wrapper"
-  # Greenfield (this run just installed the Tomcat - CATALINA_HOME/bin/startup.sh was
-  # absent at the pre-install stat) → force:true: reset context.xml to the clean wrapper,
-  # discarding whatever the release bundle's conf overlay laid down (its stock
-  # jdbc/openspecimen sample), so a freshly Ansible-built shared Tomcat holds ONLY
-  # Ansible-managed blocks. No real co-tenant can exist yet on a just-installed Tomcat.
-  # Brownfield (Tomcat pre-existed) → force:false: NEVER clobber an existing shared
-  # context.xml - it may hold a real co-tenant or a legacy install.sh datasource.
-  # Undefined stat (called outside the deploy flow) defaults to brownfield (preserve).
-  ansible.builtin.copy:
-    dest: "{{ catalina_base }}/conf/context.xml"
-    content: |
-      <?xml version="1.0" encoding="UTF-8"?>
-      <!-- Managed by Ansible - shared context.xml (co-tenant OpenSpecimen apps) -->
-      <Context notFoundClassResourceCacheSize="0">
-          <WatchedResource>WEB-INF/web.xml</WatchedResource>
-          <WatchedResource>WEB-INF/tomcat-web.xml</WatchedResource>
-          <WatchedResource>${catalina.base}/conf/web.xml</WatchedResource>
-      </Context>
-    force: "{{ not (_inst_tomcat_stat.stat.exists | default(true)) }}"
-    owner: "{{ tomcat_user }}"
-    group: "{{ tomcat_user }}"
-    mode: '0640'
-  when:
-    - openspecimen_shared_tomcat | default(false)
-    - not (_reuse_existing_config | default(false))   # reuse → leave context.xml alone
-
-# A CRLF context.xml (a Windows-authored stock/bundle file that brownfield seeding
-# preserves) breaks the blockinfile marker match below: the markers are compared with
-# '\n' line endings and never match the file's '...-->\r' lines, so every deploy
-# APPENDED a fresh OSP-MANAGED block instead of updating in place - duplicating this
-# instance's datasource. Strip CR so the markers match (and the ^M chars are removed),
-# and drop any pre-existing DUPLICATE blocks for THIS war_name (the merge below re-adds
-# exactly one). Co-tenant blocks are left untouched. Idempotent: no-op once the file is
-# LF with a single block for this app. newline='' preserves raw endings so CRLF is
-# detected and rewritten.
-- name: "[tomcat:{{ openspecimen_service_name }}] Normalise shared context.xml (strip CR, drop duplicate blocks)"
-  ansible.builtin.shell: |
-    python3 -c "
-    import re
-    path = '{{ catalina_base }}/conf/context.xml'
-    c = open(path, newline='').read(); orig = c
-    c = c.replace('\r', '')
-    war = '{{ openspecimen_war_name }}'
-    pat = re.compile(r'[ \t]*<!-- BEGIN OSP-MANAGED datasource: ' + re.escape(war) + r' -->.*?<!-- END OSP-MANAGED datasource: ' + re.escape(war) + r' -->[ \t]*\n?', re.DOTALL)
-    if len(pat.findall(c)) >= 2:
-        c = pat.sub('', c)
-    if c != orig:
-        open(path, 'w').write(c); print('changed')
-    "
-  args:
-    executable: /bin/bash
-  register: _ctx_normalise
-  changed_when: "'changed' in _ctx_normalise.stdout"
-  notify: restart openspecimen
-  when:
-    - openspecimen_shared_tomcat | default(false)
-    - not (_reuse_existing_config | default(false))   # reuse → leave context.xml alone
-
-- name: "[tomcat:{{ openspecimen_service_name }}] Merge this app's datasource block into shared context.xml"
-  ansible.builtin.blockinfile:
-    path: "{{ catalina_base }}/conf/context.xml"
-    marker: "    <!-- {mark} OSP-MANAGED datasource: {{ openspecimen_war_name }} -->"
-    insertbefore: '</Context>'
-    block: "{{ lookup('template', 'context-datasource-block.xml.j2') | indent(8, first=True) }}"
-    owner: "{{ tomcat_user }}"
-    group: "{{ tomcat_user }}"
-    mode: '0640'
-  notify: restart openspecimen
-  when:
-    - openspecimen_shared_tomcat | default(false)
-    - not (_reuse_existing_config | default(false))   # reuse → leave context.xml alone
+  when: not (_reuse_existing_config | default(false))
 
 # Reuse safety net: when reusing existing config (db_managed=false + existing host
 # config), we deliberately did NOT re-render context.xml. It was present at the
@@ -390,11 +242,9 @@
 - name: "[tomcat:{{ openspecimen_service_name }}] Re-verify the reused datasource survives (db_managed=false upgrade)"
   when: _reuse_existing_config | default(false)
   block:
-    - name: "[tomcat:{{ openspecimen_service_name }}] Check context.xml still has the {{ openspecimen_datasource_name }} datasource"
+    - name: "[tomcat:{{ openspecimen_service_name }}] Check context.xml still has the jdbc/openspecimen datasource"
       # rc 0 = present, 1 = file exists but no datasource, 2 = file missing.
-      # Keyed to this app's datasource name so a co-tenant (e.g. jdbc/darpan) in a
-      # shared context.xml is checked correctly, not the default jdbc/openspecimen.
-      ansible.builtin.command: "grep -q '{{ openspecimen_datasource_name }}' {{ catalina_base }}/conf/context.xml"
+      ansible.builtin.command: "grep -q 'jdbc/openspecimen' {{ catalina_base }}/conf/context.xml"
       register: _external_datasource_check
       failed_when: false
       changed_when: false
@@ -506,8 +356,8 @@
       The combined Tomcat heaps + MySQL InnoDB buffer + OS reserve exceed host RAM.
       Set tomcat_heap_max_override (integer MB) per customer folder so the total fits:
         heap budget ≈ RAM - MySQL buffer - OS reserve - (off-heap x instances)
-      Each instance's -Xmx must stay >= 2048 (OpenSpecimen's floor). See
-      docs/MULTI-INSTANCE.md - Resource sizing.
+      Each instance's -Xmx must stay >= 2048 (OpenSpecimen's floor) when sizing
+      co-located instances.
 
       To proceed anyway, downgrade the guardrail:
         -e openspecimen_memory_guardrail=warn   (log only)   or   =off (skip)
