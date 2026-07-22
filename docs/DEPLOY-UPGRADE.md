@@ -18,10 +18,8 @@ Day-1 fresh install, Day-2 upgrade, and rollback procedures for OpenSpecimen.
    + plugin deploy, Apache vhost, and public-URL verify.
 
 A single-instance host (the default) has exactly one instance, so the loop runs
-once and everything collapses onto the shared Tomcat (service `openspecimen`,
-`CATALINA_BASE` == `CATALINA_HOME`). To run more than one instance per host see
-[`MULTI-INSTANCE.md`](MULTI-INSTANCE.md). Target one instance with
-`-e instance=<name>`.
+once (service `openspecimen`, `CATALINA_BASE` == `CATALINA_HOME`). Target one
+instance with `-e instance=<name>`.
 
 ## How version detection works
 

@@ -62,7 +62,6 @@ inventory/
 secrets/_template.yml   - example credential variables (never commit with real values)
 docs/
   DEPLOY-UPGRADE.md     - fresh install, upgrade, rollback, day-2, cleanup procedures
-  MULTI-INSTANCE.md     - running multiple OpenSpecimen instances on one host
   TROUBLESHOOTING.md    - common errors and fixes
 CONFIG-REFERENCE.md     - every config file the roles write and what controls it
 ```
