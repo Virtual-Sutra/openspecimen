@@ -38,6 +38,37 @@
     - apache_enable_ssl
   notify: reload apache
 
+# ── Disable the distro's stock default vhost ─────────────────────────────────
+# On a dedicated OpenSpecimen host the stock default (Debian 000-default.conf /
+# default-ssl.conf; RedHat welcome.conf) overlaps the managed OpenSpecimen vhost on
+# :80 and can shadow it (or serve the distro "It works" page). Disable it so the
+# managed openspecimen[-shared].conf is authoritative. This also cleans up a legacy
+# install whose whole config lived in 000-default.conf. Set apache_disable_default_vhost:
+# false to leave it alone (e.g. an Apache shared with non-OpenSpecimen apps).
+- name: Disable the stock default vhost (Debian)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apache2/sites-enabled/000-default.conf
+    - /etc/apache2/sites-enabled/default-ssl.conf
+  when:
+    - ansible_os_family == 'Debian'
+    - apache_disable_default_vhost | default(true) | bool
+  notify: reload apache
+
+- name: Disable the stock welcome vhost (RedHat)
+  ansible.builtin.copy:
+    dest: /etc/httpd/conf.d/welcome.conf
+    content: "# Disabled by OpenSpecimen Ansible (apache_disable_default_vhost).\n"
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - ansible_os_family == 'RedHat'
+    - apache_disable_default_vhost | default(true) | bool
+  notify: reload apache
+
 # Self-signed cert for internal / test environments with no CA-issued cert.
 # Generated only when missing (creates:) so it never churns or forces a reload
 # on subsequent runs. Must precede the VirtualHost template task below, whose
