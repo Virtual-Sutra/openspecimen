@@ -106,15 +106,16 @@
         [ -f "$f" ] || exit 0
         # Drop THIS instance's own block, then look for a matching ServerName in any
         # OTHER instance's block (a duplicate ServerName across co-located instances).
-        awk '/^# BEGIN OpenSpecimen {{ openspecimen_instance_name }}$/{skip=1}
+        awk '/^# BEGIN OpenSpecimen {{ openspecimen_instance_name | default('openspecimen') }}$/{skip=1}
              !skip
-             /^# END OpenSpecimen {{ openspecimen_instance_name }}$/{skip=0}' "$f" \
+             /^# END OpenSpecimen {{ openspecimen_instance_name | default('openspecimen') }}$/{skip=0}' "$f" \
           | grep -E '^[[:space:]]*ServerName[[:space:]]+{{ apache_server_name | regex_escape }}[[:space:]]*$'
       args:
         executable: /bin/bash
       register: _apache_servername_clash
       changed_when: false
       failed_when: false
+      check_mode: false   # shell is skipped in --check; run it so the assert below has .stdout
 
     - name: Fail fast on a domain-mode ServerName collision
       ansible.builtin.assert:
@@ -149,10 +150,13 @@
     - ansible_os_family == 'RedHat'
   notify: reload apache
 
-# First-management reset: if the default conf still holds the distro's stock content but NO
-# OpenSpecimen block yet, overwrite it once with a managed header so the stock :80 vhost
-# can't overlap. Co-located second deploys already see a marker and skip this (blockinfile
-# then just adds/updates their own block).
+# First-management reset: when the default conf has NO OpenSpecimen block yet, overwrite it
+# once with a managed header so the stock :80 vhost can't overlap the block we add next.
+# Co-located second deploys already see a marker and skip this (blockinfile then just
+# adds/updates their own block). NOTE: OpenSpecimen OWNS this file in domain mode - the
+# reset replaces WHATEVER is there (fine on a dedicated host, which is the norm). If this
+# Apache also serves a non-OpenSpecimen site out of the default conf, set apache_managed:
+# false for the OpenSpecimen deploy so Ansible leaves Apache alone.
 - name: Check whether the default conf is already OpenSpecimen-managed (domain mode)
   ansible.builtin.command:
     cmd: "grep -qs '# BEGIN OpenSpecimen ' {{ _apache_default_conf }}"
@@ -177,13 +181,27 @@
 - name: "Write this instance's domain vhost block into {{ _apache_default_conf }}"
   ansible.builtin.blockinfile:
     path: "{{ _apache_default_conf }}"
-    marker: "# {mark} OpenSpecimen {{ openspecimen_instance_name }}"
+    marker: "# {mark} OpenSpecimen {{ openspecimen_instance_name | default('openspecimen') }}"
     block: "{{ lookup('ansible.builtin.template', 'openspecimen.conf.j2') }}"
     create: true
     owner: root
     group: root
     mode: '0644'
   when: apache_routing_mode != 'path'
+  notify: reload apache
+
+# The managed conf loads via the stock sites-enabled/000-default.conf symlink - but a
+# host previously managed by OpenSpecimen (older release / #157) had that symlink
+# removed. Re-create it so the block we just wrote is actually included (else Apache
+# passes configtest but serves nothing on :80 - a silent outage on upgrade).
+- name: "Ensure the managed default vhost is enabled (Debian, domain mode)"
+  ansible.builtin.file:
+    src: "{{ _apache_default_conf }}"
+    dest: /etc/apache2/sites-enabled/000-default.conf
+    state: link
+  when:
+    - apache_routing_mode != 'path'
+    - ansible_os_family == 'Debian'
   notify: reload apache
 
 - name: "Remove the obsolete standalone domain vhost file (migrated into {{ _apache_default_conf }})"
@@ -223,6 +241,17 @@
       loop:
         - "{{ _apache_conf_dir }}/{{ apache_vhost_name }}.conf"
         - "{{ _apache_conf_link | dirname }}/{{ apache_vhost_name }}.conf"
+      notify: reload apache
+
+    # Domain vhosts now live as blockinfile blocks inside _apache_default_conf, so also
+    # drop this instance's block when it switches domain -> path (else its stale vhost
+    # keeps answering on the same ServerName as the new shared vhost).
+    - name: Remove this instance's domain-mode block from the default conf (switching to path)
+      ansible.builtin.blockinfile:
+        path: "{{ _apache_default_conf }}"
+        marker: "# {mark} OpenSpecimen {{ openspecimen_instance_name | default('openspecimen') }}"
+        state: absent
+      failed_when: false
       notify: reload apache
 
     - name: Create the path-mode drop-in directory
