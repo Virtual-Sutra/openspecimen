@@ -6,5 +6,5 @@
 # slashes keep sibling mounts non-overlapping (e.g. /openspecimen vs /openspecimen-test),
 # so the shared vhost's Include order is irrelevant.
 RedirectMatch ^{{ apache_path_prefix }}$ {{ apache_path_prefix }}/
-ProxyPass        {{ apache_path_prefix }}/ {{ apache_path_backend }}{{ apache_path_prefix }}/
-ProxyPassReverse {{ apache_path_prefix }}/ {{ apache_path_backend }}{{ apache_path_prefix }}/
+ProxyPass        {{ apache_path_prefix }}/ {{ apache_path_backend }}/{{ openspecimen_war_name }}/
+ProxyPassReverse {{ apache_path_prefix }}/ {{ apache_path_backend }}/{{ openspecimen_war_name }}/
