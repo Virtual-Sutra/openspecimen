@@ -2,10 +2,10 @@
 # Tear down ONE OpenSpecimen instance so the host can be reused (ADR-006, #72).
 # Called per instance from cleanup.yml; `_instance` is the loop var. DESTRUCTIVE.
 #
-# Removes the instance's service, deployed webapp, data/plugins/backups/markers
-# and (local MySQL) its DB + user. Leaves the Tomcat binary / MySQL server / Java
-# in place for a fast re-deploy unless cleanup.yml's full_wipe host-level step also
-# runs.
+# Removes the instance's service, its ENTIRE directory openspecimen_instance_dir
+# (/usr/local/<instance_name>/: tomcat-as + data/plugins/backups/scripts/markers), its
+# Apache vhost, and (local MySQL) its DB + user. Only host-level MySQL server / Java /
+# Apache are left - cleanup.yml's full_wipe step removes those.
 
 # ── Service ──────────────────────────────────────────────────────────────────
 - name: "[{{ _instance.name }}] Stop and disable the service"
@@ -60,18 +60,17 @@
   failed_when: false
   when: not (full_wipe | default(false) | bool)
 
-# ── Directories ──────────────────────────────────────────────────────────────
-# Every instance is self-contained in openspecimen_instance_dir (/usr/local/<instance_name>/) with its own
-# tomcat-as/data/plugins/backup. cleanup removes the app (data/plugins/backup/markers
-# below) but leaves this instance's own tomcat-as (the Tomcat binary) for a fast
-# redeploy - full_wipe removes that. This defensive guard only ever removes a strict
-# subdirectory below CATALINA_HOME's parent (never that dir itself, never a traversal);
-# with the standard layout catalina_home == catalina_base, so it no-ops and the
-# per-item removal below does the work.
-- name: "[{{ _instance.name }}] Compute instance-dir safety bounds"
+# ── Directory ─────────────────────────────────────────────────────────────────
+# Every instance is fully self-contained in openspecimen_instance_dir
+# (/usr/local/<instance_name>/: tomcat-as + data/plugins/backup/scripts/markers). In
+# the per-instance layout there is NO shared Tomcat binary to preserve, so cleanup
+# removes the WHOLE dir - tomcat-as included. Guarded to a strict subdirectory under
+# /usr/local (never /usr/local itself, never a path containing '..'). A non-/usr/local
+# openspecimen_instance_dir override isn't auto-removed here; the safety net below
+# still cleans data/plugins/backups and a dedicated CATALINA_BASE.
+- name: "[{{ _instance.name }}] Compute instance dir"
   ansible.builtin.set_fact:
-    _inst_dir:    "{{ _instance.instance_dir | default('') | regex_replace('/+$', '') }}"
-    _shared_root: "{{ (_instance.catalina_home | default(catalina_home | default(tomcat_home))) | dirname | regex_replace('/+$', '') }}"
+    _inst_dir: "{{ (_instance.instance_dir | default(openspecimen_instance_dir | default(''))) | regex_replace('/+$', '') }}"
 
 - name: "[{{ _instance.name }}] Remove the complete instance directory ({{ _inst_dir }})"
   ansible.builtin.file:
@@ -80,19 +79,22 @@
   when:
     - _inst_dir | length > 0
     - "'..' not in _inst_dir.split('/')"   # no traversal: '..' would resolve to an ancestor on delete
-    - _inst_dir != _shared_root
-    - _inst_dir.startswith(_shared_root ~ '/')
+    - _inst_dir.startswith('/usr/local/')  # instances live under openspecimen_instance_dir = /usr/local/<name>
+    - _inst_dir != '/usr/local'            # never the shared parent itself
 
-# Only fires for an inventory that split CATALINA_BASE off from CATALINA_HOME (older
-# co-location style): drop that dedicated base. With the standard layout base == home,
-# so this no-ops and the instance's tomcat-as is left for full_wipe / fast redeploy.
-- name: "[{{ _instance.name }}] Remove the isolated CATALINA_BASE (split base/home only)"
+# Safety net for paths an operator moved OUT of the instance dir - a dedicated
+# CATALINA_BASE, or data/plugins/backups on another volume - which the wholesale
+# removal above won't have caught. Idempotent (an already-removed path is a no-op).
+- name: "[{{ _instance.name }}] Remove a CATALINA_BASE outside the instance dir"
   ansible.builtin.file:
     path: "{{ _instance.catalina_base }}"
     state: absent
-  when: _instance.catalina_base != (_instance.catalina_home | default(catalina_home | default(tomcat_home)))
+  when:
+    - _instance.catalina_base | length > 0
+    - (_instance.catalina_base | regex_replace('/+$', '')) != _inst_dir
+    - not (_instance.catalina_base | regex_replace('/+$', '')).startswith(_inst_dir ~ '/')
 
-- name: "[{{ _instance.name }}] Remove data, plugins, backups and markers"
+- name: "[{{ _instance.name }}] Remove data, plugins, backups and markers (safety net)"
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
