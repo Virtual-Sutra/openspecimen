@@ -61,11 +61,13 @@
   when: not (full_wipe | default(false) | bool)
 
 # ── Directories ──────────────────────────────────────────────────────────────
-# Remove the instance's ENTIRE directory tree (catalina_base + data/plugins/backup
-# all live under it for a co-located instance). Guarded so it can only ever remove a
-# strict subdirectory of the shared root - never /usr/local/openspecimen itself (the
-# legacy single instance resolves instance_dir to the shared root; that is full_wipe's
-# job), and never a path outside the openspecimen tree.
+# Every instance is self-contained in openspecimen_instance_dir (/usr/local/<instance_name>/) with its own
+# tomcat-as/data/plugins/backup. cleanup removes the app (data/plugins/backup/markers
+# below) but leaves this instance's own tomcat-as (the Tomcat binary) for a fast
+# redeploy - full_wipe removes that. This defensive guard only ever removes a strict
+# subdirectory below CATALINA_HOME's parent (never that dir itself, never a traversal);
+# with the standard layout catalina_home == catalina_base, so it no-ops and the
+# per-item removal below does the work.
 - name: "[{{ _instance.name }}] Compute instance-dir safety bounds"
   ansible.builtin.set_fact:
     _inst_dir:    "{{ _instance.instance_dir | default('') | regex_replace('/+$', '') }}"
@@ -81,10 +83,10 @@
     - _inst_dir != _shared_root
     - _inst_dir.startswith(_shared_root ~ '/')
 
-# Fallback for the legacy single instance (instance_dir == shared root, so the
-# wholesale removal above is skipped): drop the instance's own CATALINA_BASE when it
-# is a dedicated base, leaving the shared Tomcat binary for full_wipe.
-- name: "[{{ _instance.name }}] Remove the isolated CATALINA_BASE (legacy fallback)"
+# Only fires for an inventory that split CATALINA_BASE off from CATALINA_HOME (older
+# co-location style): drop that dedicated base. With the standard layout base == home,
+# so this no-ops and the instance's tomcat-as is left for full_wipe / fast redeploy.
+- name: "[{{ _instance.name }}] Remove the isolated CATALINA_BASE (split base/home only)"
   ansible.builtin.file:
     path: "{{ _instance.catalina_base }}"
     state: absent

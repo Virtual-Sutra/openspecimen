@@ -144,7 +144,7 @@
 # stale/absent), so no force flag is needed to recover.
 - name: Read deploy-success marker on target
   ansible.builtin.slurp:
-    src: "{{ openspecimen_deploy_success_marker | default('/usr/local/openspecimen/.deploy_success') }}"
+    src: "{{ openspecimen_deploy_success_marker }}"
   register: _success_marker_slurp
   failed_when: false
   changed_when: false

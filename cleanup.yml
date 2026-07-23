@@ -2,11 +2,11 @@
 # Tear down OpenSpecimen so a VM can be reused (ADR-006/009). DESTRUCTIVE -
 # requires -e cleanup_confirm=true. Runs against ONE customer folder = ONE instance.
 # Default: tear down THIS instance only - its service+unit, its complete instance
-# directory (/usr/local/openspecimen/<name>/ for a co-located instance), only its
+# directory openspecimen_instance_dir (/usr/local/<instance_name>/), only its
 # own Apache vhost, and its local-MySQL DB+user - leaving the shared Tomcat/MySQL/
 # Java and any co-located instance untouched.
 # -e full_wipe=true is HOST-WIDE: it removes EVERY instance (all openspecimen*
-# services/units, the whole /usr/local/openspecimen tree, all openspecimen*.conf
+# services/units, every /usr/local/openspecimen* instance tree, all openspecimen*.conf
 # vhosts) plus the shared Tomcat, Java and MySQL server+data - a from-scratch reset.
 
 - name: Clean up OpenSpecimen
@@ -24,7 +24,7 @@
           {% if full_wipe | default(false) | bool %}
           ⚠  FULL WIPE requested. This is HOST-WIDE, not scoped to one instance:
              it removes ALL OpenSpecimen instances on this host (every service +
-             systemd unit, the whole /usr/local/openspecimen tree, and every
+             systemd unit, every /usr/local/openspecimen* instance tree, and every
              openspecimen*.conf Apache vhost) AND the shared Tomcat, Java, and the
              MySQL server INCLUDING /var/lib/mysql - every database on the box.
              A co-located prod instance WILL be destroyed too.
@@ -43,7 +43,7 @@
           - "============================================================"
           - "  Removing EVERY OpenSpecimen instance on {{ inventory_hostname }}:"
           - "    - all openspecimen* systemd services + units"
-          - "    - the entire /usr/local/openspecimen tree (all instances)"
+          - "    - every /usr/local/openspecimen* instance tree (all instances)"
           - "    - all openspecimen*.conf Apache vhosts"
           - "  plus shared Tomcat, Java, and MySQL server + /var/lib/mysql"
           - "  (ALL databases). A co-located prod instance is destroyed too."
@@ -141,10 +141,22 @@
             - /etc/apache2/openspecimen.d
             - /etc/httpd/openspecimen.d
 
-        - name: Remove the OpenSpecimen tree (Tomcat binary + all instances)
+        # Every instance is its own sibling dir /usr/local/<instance_name> now, so wipe
+        # them ALL (default openspecimen + any co-located openspecimen-*), not just the
+        # default tree. Matches the openspecimen* unit/vhost globs used elsewhere here.
+        - name: Find all OpenSpecimen instance dirs under /usr/local
+          ansible.builtin.find:
+            paths: /usr/local
+            patterns: 'openspecimen*'
+            file_type: directory
+            recurse: false
+          register: _osp_full_wipe_dirs
+
+        - name: Remove the OpenSpecimen trees (Tomcat binaries + all instances)
           ansible.builtin.file:
-            path: /usr/local/openspecimen
+            path: "{{ item }}"
             state: absent
+          loop: "{{ _osp_full_wipe_dirs.files | map(attribute='path') | list }}"
 
         - name: Purge MySQL + Java packages (Debian)
           ansible.builtin.apt:

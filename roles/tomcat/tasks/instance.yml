@@ -309,7 +309,11 @@
         return n  # m or bare (Xmx defaults to bytes if bare, but our template writes m)
 
     heaps = []
-    for se in sorted(glob.glob(root + '/**/bin/setenv.sh', recursive=True)):
+    # Each instance's Tomcat is openspecimen_instance_dir/tomcat-as (e.g.
+    # /usr/local/<instance_name>/tomcat-as), so glob every sibling's setenv.sh
+    # (root = /usr/local). The old '/**' under a single instance dir only saw the
+    # default instance and missed co-located siblings.
+    for se in sorted(glob.glob(root + '/*/tomcat-as/bin/setenv.sh')):
         m = re.search(r'-Xmx(\d+[kKmMgG]?)', open(se, errors='replace').read())
         if m:
             heaps.append((se, to_mb(m.group(1))))
@@ -333,7 +337,7 @@
   args:
     executable: /bin/bash
   environment:
-    OSP_ROOT:         "{{ openspecimen_root | default('/usr/local/openspecimen') }}"
+    OSP_ROOT:         "{{ openspecimen_root | default('/usr/local') }}"
     RAM_MB:           "{{ ansible_facts['memtotal_mb'] }}"
     OS_RESERVE_MB:    "{{ openspecimen_mem_os_reserve_mb | default(1024) }}"
     JVM_OFFHEAP_MB:   "{{ openspecimen_mem_jvm_offheap_mb | default(512) }}"

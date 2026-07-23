@@ -86,7 +86,7 @@
 
     - name: Check current OpenSpecimen version
       ansible.builtin.slurp:
-        src: /usr/local/openspecimen/.release
+        src: "{{ openspecimen_release_marker }}"
       register: _release_marker
       failed_when: false
       when: _ssh_ping is succeeded

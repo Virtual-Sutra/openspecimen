@@ -208,7 +208,7 @@ halt remains the safety net), pass `-e db_backup_enabled=false`.
 
 | Playbook | Purpose | Key `-e` flags |
 |----------|---------|----------------|
-| `db-backup.yml` | On-demand consistent dump (local MySQL). Output: `<db_backup_dir>/<timestamp>_<db>.sql.gz` (default `db_backup_dir`: `/usr/local/openspecimen/db-backups`). | `-e db_backup_dir=<path>` (optional) |
+| `db-backup.yml` | On-demand consistent dump (local MySQL). Output: `<db_backup_dir>/<timestamp>_<db>.sql.gz` (default `db_backup_dir`: `openspecimen_instance_dir/db-backups`, i.e. `/usr/local/openspecimen/db-backups`). | `-e db_backup_dir=<path>` (optional) |
 | `db-restore.yml` | Restore a dump produced by `db-backup.yml`. **DESTRUCTIVE** - overwrites the live DB. Stops the service and leaves it stopped (deploy the matching WAR before starting). | `-e db_restore_confirm=true` (required); `-e db_backup_file=<path>` (else newest dump) |
 
 ```bash
@@ -459,7 +459,7 @@ service or moving any files.
 | `conf/openspecimen.properties` | Yes (if present in backup) - restores the exact config the old WAR ran with |
 | `bin/setenv.sh` (JVM heap) | Yes (if present in backup) |
 | `conf/context.xml` (JDBC pool) | Yes (if present in backup) |
-| `/usr/local/openspecimen/.release` | Yes (if present in backup) - keeps the marker consistent with the live version |
+| `openspecimen_instance_dir/.release` | Yes (if present in backup) - keeps the marker consistent with the live version |
 | Database schema + data | **Opt-in** with `-e restore_db=true` - restores the `db/<db>.sql.gz` dump taken at the matching upgrade (local MySQL only). Off by default; see below. |
 
 No separate `site.yml` run is needed for config - `rollback.yml` restores the

@@ -25,12 +25,12 @@
       Re-run with: -e db_restore_confirm=true
       Pick a dump with -e db_backup_file=<path/to/dump.sql.gz>, or omit it to
       restore the newest dump under
-      {{ db_backup_dir | default('/usr/local/openspecimen/db-backups') }}.
+      {{ db_backup_dir | default(openspecimen_instance_dir ~ '/db-backups') }}.
   when: not (db_restore_confirm | default(false) | bool)
 
 - name: Find newest dump in db_backup_dir (when db_backup_file not given)
   ansible.builtin.find:
-    paths:    "{{ db_backup_dir | default('/usr/local/openspecimen/db-backups') }}"
+    paths:    "{{ db_backup_dir | default(openspecimen_instance_dir ~ '/db-backups') }}"
     patterns: "*.sql.gz"
   register: _db_dumps
   when: not (db_backup_file is defined and db_backup_file | trim)
@@ -52,7 +52,7 @@
       No database dump found.
       Pass -e db_backup_file=<path/to/dump.sql.gz>, or create one first:
         ansible-playbook -i inventory/customers/<name>/ db-backup.yml ...
-      (searched {{ db_backup_dir | default('/usr/local/openspecimen/db-backups') }} for *.sql.gz)
+      (searched {{ db_backup_dir | default(openspecimen_instance_dir ~ '/db-backups') }} for *.sql.gz)
   when: _restore_dump == 'NONE'
 
 - name: Verify the dump exists
