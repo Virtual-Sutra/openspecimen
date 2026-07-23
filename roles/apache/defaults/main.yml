@@ -20,12 +20,6 @@ apache_path_snippet_name: "{{ openspecimen_war_name | default(apache_vhost_name)
 # is set (public hostname → fronted; bare Tomcat/ALB → not). Override via -e.
 apache_enabled: "{{ (openspecimen_app_url | default('') | trim | length) > 0 }}"
 
-# Disable the distro's stock default vhost (Debian 000-default.conf/default-ssl.conf,
-# RedHat welcome.conf) so it can't overlap/shadow the managed OpenSpecimen vhost on
-# :80 - and to retire a legacy install whose config lived in 000-default.conf. Set
-# false when this Apache is shared with other, non-OpenSpecimen apps.
-apache_disable_default_vhost: true
-
 # VirtualHost ServerName - derived from openspecimen_app_url (scheme and path
 # stripped) when set, else the host's own FQDN. Same derivation the openspecimen
 # role uses for its external-reachability check.

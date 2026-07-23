@@ -38,37 +38,6 @@
     - apache_enable_ssl
   notify: reload apache
 
-# ── Disable the distro's stock default vhost ─────────────────────────────────
-# On a dedicated OpenSpecimen host the stock default (Debian 000-default.conf /
-# default-ssl.conf; RedHat welcome.conf) overlaps the managed OpenSpecimen vhost on
-# :80 and can shadow it (or serve the distro "It works" page). Disable it so the
-# managed openspecimen[-shared].conf is authoritative. This also cleans up a legacy
-# install whose whole config lived in 000-default.conf. Set apache_disable_default_vhost:
-# false to leave it alone (e.g. an Apache shared with non-OpenSpecimen apps).
-- name: Disable the stock default vhost (Debian)
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /etc/apache2/sites-enabled/000-default.conf
-    - /etc/apache2/sites-enabled/default-ssl.conf
-  when:
-    - ansible_os_family == 'Debian'
-    - apache_disable_default_vhost | default(true) | bool
-  notify: reload apache
-
-- name: Disable the stock welcome vhost (RedHat)
-  ansible.builtin.copy:
-    dest: /etc/httpd/conf.d/welcome.conf
-    content: "# Disabled by OpenSpecimen Ansible (apache_disable_default_vhost).\n"
-    owner: root
-    group: root
-    mode: '0644'
-  when:
-    - ansible_os_family == 'RedHat'
-    - apache_disable_default_vhost | default(true) | bool
-  notify: reload apache
-
 # Self-signed cert for internal / test environments with no CA-issued cert.
 # Generated only when missing (creates:) so it never churns or forces a reload
 # on subsequent runs. Must precede the VirtualHost template task below, whose
@@ -120,96 +89,133 @@
     - OS_LOGO_BANNER.png
 
 # ── Domain-mode collision guard (co-located instances) ───────────────────────
-# In domain mode each instance owns a full vhost file (apache_vhost_name.conf)
-# answering on apache_server_name. Two co-located instances that resolve the SAME
-# vhost filename (e.g. a shared openspecimen_service_name) or the SAME ServerName
-# silently clobber each other's vhost, or trigger an Apache duplicate-ServerName so
-# only the first-loaded vhost serves. ADR-009 deploys one instance per run, so the
-# co-tenant is a SEPARATE run - detect the clash by inspecting the host's existing
-# OSP-managed vhosts (not _instances) and fail BEFORE overwriting anything.
+# In domain mode every instance writes its full vhost as a marker-delimited blockinfile
+# block INTO the one managed default conf ({{ _apache_default_conf }}), keyed by instance
+# name. Distinct instances can't clobber each other's block (distinct markers), but two
+# co-located instances declaring the SAME ServerName still trigger an Apache
+# duplicate-ServerName so only the first-loaded vhost serves. ADR-009 deploys one instance
+# per run, so the co-tenant is a SEPARATE run - inspect the OTHER instances' blocks already
+# in the file and fail BEFORE injecting this one.
 - name: Domain-mode collision pre-check
   when: apache_routing_mode != 'path'
   block:
-    - name: Check whether another OSP vhost already answers on this ServerName
+    - name: Check whether another instance's vhost block already answers on this ServerName
       ansible.builtin.shell: |
         set -o pipefail
-        shopt -s nullglob
-        for f in {{ _apache_conf_dir }}/*.conf; do
-          [ "$(basename "$f")" = "{{ apache_vhost_name }}.conf" ] && continue
-          grep -q '# Managed by Ansible' "$f" || continue
-          if grep -qE '^[[:space:]]*ServerName[[:space:]]+{{ apache_server_name | regex_escape }}[[:space:]]*$' "$f"; then
-            echo "$f"
-          fi
-        done
+        f={{ _apache_default_conf }}
+        [ -f "$f" ] || exit 0
+        # Drop THIS instance's own block, then look for a matching ServerName in any
+        # OTHER instance's block (a duplicate ServerName across co-located instances).
+        awk '/^# BEGIN OpenSpecimen {{ openspecimen_instance_name | default('openspecimen') }}$/{skip=1}
+             !skip
+             /^# END OpenSpecimen {{ openspecimen_instance_name | default('openspecimen') }}$/{skip=0}' "$f" \
+          | grep -E '^[[:space:]]*ServerName[[:space:]]+{{ apache_server_name | regex_escape }}[[:space:]]*$'
       args:
         executable: /bin/bash
       register: _apache_servername_clash
       changed_when: false
       failed_when: false
+      check_mode: false   # shell is skipped in --check; run it so the assert below has .stdout
 
-    - name: Check whether this instance's vhost file is already owned by a different context
-      ansible.builtin.shell: |
-        set -o pipefail
-        f={{ _apache_conf_dir }}/{{ apache_vhost_name }}.conf
-        if [ -f "$f" ] && grep -q '# Managed by Ansible' "$f" \
-           && ! grep -qE '^[[:space:]]*ProxyPass[[:space:]]+{{ apache_path_prefix | regex_escape }}/[[:space:]]' "$f"; then
-          # Report the real context mount (a path ending in '/ '), skipping the
-          # '! ' exclusion lines (ProxyPass /downtime.html !) that precede it.
-          grep -oE 'ProxyPass[[:space:]]+/[^[:space:]!]+/ ' "$f" | head -1 | awk '{print $2}'
-        fi
-      args:
-        executable: /bin/bash
-      register: _apache_vhost_owner_clash
-      changed_when: false
-      failed_when: false
-
-    - name: Fail fast on a domain-mode ServerName / vhost-file collision
+    - name: Fail fast on a domain-mode ServerName collision
       ansible.builtin.assert:
         quiet: true
         that:
           - _apache_servername_clash.stdout | trim | length == 0
-          - _apache_vhost_owner_clash.stdout | trim | length == 0
         fail_msg: |
-          Apache domain-mode routing collision for instance '{{ openspecimen_service_name | default('openspecimen') }}':
-          {% if _apache_servername_clash.stdout | trim | length > 0 %}
-            - ServerName '{{ apache_server_name }}' is already served by another OSP vhost:
-              {{ _apache_servername_clash.stdout_lines | join(', ') }}
-          {% endif %}
-          {% if _apache_vhost_owner_clash.stdout | trim | length > 0 %}
-            - vhost file '{{ apache_vhost_name }}.conf' already mounts a different context
-              ('{{ _apache_vhost_owner_clash.stdout | trim }}'), i.e. a co-located instance owns it.
-          {% endif %}
-          Two co-located instances cannot share a ServerName or a vhost filename in domain
-          mode. Fix one of:
+          Apache domain-mode routing collision for instance
+          '{{ openspecimen_instance_name | default('openspecimen') }}':
+            - ServerName '{{ apache_server_name }}' is already served by another OpenSpecimen
+              instance's vhost block in {{ _apache_default_conf }}.
+          Two co-located instances cannot share a ServerName in domain mode. Fix one of:
             - use path mode (apache_routing_mode: path) - co-tenants share one ServerName at
               distinct URL paths (the shared-Tomcat co-tenant model), OR
             - give each instance a DISTINCT hostname (apache_server_name, via
-              openspecimen_app_url) AND a distinct apache_vhost_name.
+              openspecimen_app_url).
 
-# ── DOMAIN mode (default): one full vhost per instance on its own ServerName ──
-- name: Deploy OpenSpecimen VirtualHost config (domain mode)
-  ansible.builtin.template:
-    src: openspecimen.conf.j2
-    dest: "{{ _apache_conf_dir }}/{{ apache_vhost_name }}.conf"
+# ── DOMAIN mode (default): one marked vhost block per instance in the managed default conf ──
+# Each instance's full vhost (redirect + SSL/proxy) is written as a blockinfile block INTO
+# {{ _apache_default_conf }} (Debian: the stock, already-enabled 000-default.conf; RedHat: a
+# managed conf.d/openspecimen.conf). Co-located instances each own a marker-delimited block
+# in the same file - no per-instance file or sites-enabled symlink.
+- name: Neutralise the stock welcome vhost (RedHat, domain mode)
+  ansible.builtin.copy:
+    dest: /etc/httpd/conf.d/welcome.conf
+    content: "# Disabled by OpenSpecimen Ansible\n"
     owner: root
     group: root
     mode: '0644'
-  # No inline `validate: apache2ctl -t -f %s`: the -f flag makes Apache use ONLY
-  # the vhost file as the whole config, so the base config (and the MPM module)
-  # is never loaded - `apache2ctl -t -f <vhost>` fails with "No MPM loaded". The
-  # full configtest below validates the real config (base + MPM + this vhost)
-  # once the site is enabled.
+  when:
+    - apache_routing_mode != 'path'
+    - ansible_os_family == 'RedHat'
+  notify: reload apache
+
+# First-management reset: when the default conf has NO OpenSpecimen block yet, overwrite it
+# once with a managed header so the stock :80 vhost can't overlap the block we add next.
+# Co-located second deploys already see a marker and skip this (blockinfile then just
+# adds/updates their own block). NOTE: OpenSpecimen OWNS this file in domain mode - the
+# reset replaces WHATEVER is there (fine on a dedicated host, which is the norm). If this
+# Apache also serves a non-OpenSpecimen site out of the default conf, set apache_managed:
+# false for the OpenSpecimen deploy so Ansible leaves Apache alone.
+- name: Check whether the default conf is already OpenSpecimen-managed (domain mode)
+  ansible.builtin.command:
+    cmd: "grep -qs '# BEGIN OpenSpecimen ' {{ _apache_default_conf }}"
+  register: _apache_default_managed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: apache_routing_mode != 'path'
+
+- name: Reset the stock default conf to a managed header on first management (domain mode)
+  ansible.builtin.copy:
+    dest: "{{ _apache_default_conf }}"
+    content: "# Managed by OpenSpecimen Ansible. Per-instance vhosts are blockinfile blocks below.\n"
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - apache_routing_mode != 'path'
+    - _apache_default_managed.rc | default(1) != 0
+  notify: reload apache
+
+- name: "Write this instance's domain vhost block into {{ _apache_default_conf }}"
+  ansible.builtin.blockinfile:
+    path: "{{ _apache_default_conf }}"
+    marker: "# {mark} OpenSpecimen {{ openspecimen_instance_name | default('openspecimen') }}"
+    block: "{{ lookup('ansible.builtin.template', 'openspecimen.conf.j2') }}"
+    create: true
+    owner: root
+    group: root
+    mode: '0644'
   when: apache_routing_mode != 'path'
   notify: reload apache
 
-- name: Enable site (Debian, domain mode)
+# The managed conf loads via the stock sites-enabled/000-default.conf symlink - but a
+# host previously managed by OpenSpecimen (older release / #157) had that symlink
+# removed. Re-create it so the block we just wrote is actually included (else Apache
+# passes configtest but serves nothing on :80 - a silent outage on upgrade).
+- name: "Ensure the managed default vhost is enabled (Debian, domain mode)"
   ansible.builtin.file:
-    src: "{{ _apache_conf_dir }}/{{ apache_vhost_name }}.conf"
-    dest: "{{ _apache_conf_link | dirname }}/{{ apache_vhost_name }}.conf"
+    src: "{{ _apache_default_conf }}"
+    dest: /etc/apache2/sites-enabled/000-default.conf
     state: link
   when:
     - apache_routing_mode != 'path'
     - ansible_os_family == 'Debian'
+  notify: reload apache
+
+- name: "Remove the obsolete standalone domain vhost file (migrated into {{ _apache_default_conf }})"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ _apache_conf_dir }}/{{ apache_vhost_name }}.conf"
+    - "/etc/apache2/sites-enabled/{{ apache_vhost_name }}.conf"
+  when:
+    - apache_routing_mode != 'path'
+    # Never delete the managed default conf itself (on RedHat the default instance's
+    # standalone name resolves to conf.d/openspecimen.conf == _apache_default_conf).
+    - item != _apache_default_conf
   notify: reload apache
 
 - name: Remove this instance's path-mode snippet(s) (not in path mode)
@@ -235,6 +241,17 @@
       loop:
         - "{{ _apache_conf_dir }}/{{ apache_vhost_name }}.conf"
         - "{{ _apache_conf_link | dirname }}/{{ apache_vhost_name }}.conf"
+      notify: reload apache
+
+    # Domain vhosts now live as blockinfile blocks inside _apache_default_conf, so also
+    # drop this instance's block when it switches domain -> path (else its stale vhost
+    # keeps answering on the same ServerName as the new shared vhost).
+    - name: Remove this instance's domain-mode block from the default conf (switching to path)
+      ansible.builtin.blockinfile:
+        path: "{{ _apache_default_conf }}"
+        marker: "# {mark} OpenSpecimen {{ openspecimen_instance_name | default('openspecimen') }}"
+        state: absent
+      failed_when: false
       notify: reload apache
 
     - name: Create the path-mode drop-in directory
