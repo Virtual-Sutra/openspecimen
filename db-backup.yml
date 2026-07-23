@@ -3,7 +3,7 @@
 # roles/openspecimen/tasks/db-backup.yml. Use before a large-DB upgrade when the
 # deploy's size gate halts, then re-run with -e db_backup_confirmed=true.
 # Consistent (mysqldump --single-transaction), no outage. Output:
-# <db_backup_dir>/<timestamp>_<db>.sql.gz (default /usr/local/openspecimen/db-backups).
+# <db_backup_dir>/<timestamp>_<db>.sql.gz (default `<openspecimen_instance_dir>/db-backups`).
 
 - name: Back up OpenSpecimen database
   hosts: openspecimen

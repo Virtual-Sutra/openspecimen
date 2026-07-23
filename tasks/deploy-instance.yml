@@ -14,6 +14,7 @@
     openspecimen_zip_path:              "{{ openspecimen_builds_dir }}/{{ _instance.release }}.zip"
     openspecimen_release_marker:        "{{ _instance.release_marker }}"
     openspecimen_deploy_success_marker: "{{ _instance.deploy_success_marker }}"
+    openspecimen_instance_dir:          "{{ _instance.instance_dir }}"
     openspecimen_data_dir:              "{{ _instance.data_dir }}"
     openspecimen_plugin_dir:            "{{ _instance.plugin_dir }}"
     openspecimen_backup_dir:            "{{ _instance.backup_dir }}"

@@ -44,10 +44,12 @@
 #   openspecimen_port:         8090                  # default 8080
 #   openspecimen_context_path: /openspecimen-test    # default /openspecimen
 #   openspecimen_service_name: openspecimen-test     # default openspecimen
-#   catalina_base:             /usr/local/openspecimen/test/tomcat-as
-#   openspecimen_data_dir:     /usr/local/openspecimen/test/data
-#   openspecimen_plugin_dir:   /usr/local/openspecimen/test/plugins
-#   openspecimen_backup_dir:   /usr/local/openspecimen/test/backup
+#   # paths all derive from openspecimen_instance_dir (default
+#   # /usr/local/<openspecimen_instance_name>) - override only for a non-standard layout:
+#   catalina_base:             {{ openspecimen_instance_dir }}/tomcat-as
+#   openspecimen_data_dir:     {{ openspecimen_instance_dir }}/data
+#   openspecimen_plugin_dir:   {{ openspecimen_instance_dir }}/plugins
+#   openspecimen_backup_dir:   {{ openspecimen_instance_dir }}/backup
 #   mysql_db_name:             os_test
 #   mysql_db_user:             os_test
 #   openspecimen_app_url:      https://test.host.example.org
@@ -60,10 +62,11 @@
 # Role: openspecimen / tomcat
 # Override if the customer requires non-default install locations.
 
-# tomcat_home:             /usr/local/openspecimen/tomcat-as
-# openspecimen_data_dir:   /usr/local/openspecimen/data
-# openspecimen_plugin_dir: /usr/local/openspecimen/plugins
-# openspecimen_backup_dir: /usr/local/openspecimen/backup
+# All default to subdirs of openspecimen_instance_dir (default /usr/local/openspecimen):
+# tomcat_home:             {{ openspecimen_instance_dir }}/tomcat-as
+# openspecimen_data_dir:   {{ openspecimen_instance_dir }}/data
+# openspecimen_plugin_dir: {{ openspecimen_instance_dir }}/plugins
+# openspecimen_backup_dir: {{ openspecimen_instance_dir }}/backup
 
 # ── Public URL ────────────────────────────────────────────────────────────────
 # Role: openspecimen

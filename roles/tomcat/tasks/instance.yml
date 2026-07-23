@@ -309,9 +309,10 @@
         return n  # m or bare (Xmx defaults to bytes if bare, but our template writes m)
 
     heaps = []
-    # Each instance's Tomcat is /usr/local/<instance_name>/tomcat-as, so glob every
-    # sibling's setenv.sh (root = /usr/local). The old '/**' under /usr/local/openspecimen
-    # only saw the default instance and missed co-located siblings.
+    # Each instance's Tomcat is openspecimen_instance_dir/tomcat-as (e.g.
+    # /usr/local/<instance_name>/tomcat-as), so glob every sibling's setenv.sh
+    # (root = /usr/local). The old '/**' under a single instance dir only saw the
+    # default instance and missed co-located siblings.
     for se in sorted(glob.glob(root + '/*/tomcat-as/bin/setenv.sh')):
         m = re.search(r'-Xmx(\d+[kKmMgG]?)', open(se, errors='replace').read())
         if m:

@@ -166,7 +166,7 @@
     - "{{ openspecimen_instance_dir }}/scripts"
 
 # Operator convenience script with this instance's paths/service baked in. It lives
-# in the instance's own dir (/usr/local/<instance_name>/scripts/), so each co-located
+# in the instance's own dir (openspecimen_instance_dir/scripts/), so each co-located
 # instance gets its own copy that edits ITS config - no shared dir, no name clash.
 - name: Deploy the per-instance update-config operator script
   ansible.builtin.template:
@@ -999,7 +999,7 @@
       customer_plugins: {{ openspecimen_customer_plugins | default([]) | to_json }}
       install_type: {{ openspecimen_install_type | default('unknown') }}
       timestamp: {{ ansible_date_time.iso8601 | default('') }}
-    dest: "{{ openspecimen_deploy_success_marker | default('/usr/local/openspecimen/.deploy_success') }}"
+    dest: "{{ openspecimen_deploy_success_marker }}"
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
     mode: '0644'

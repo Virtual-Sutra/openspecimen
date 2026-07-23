@@ -61,7 +61,7 @@
   when: not (full_wipe | default(false) | bool)
 
 # ── Directories ──────────────────────────────────────────────────────────────
-# Every instance is self-contained in /usr/local/<instance_name>/ with its own
+# Every instance is self-contained in openspecimen_instance_dir (/usr/local/<instance_name>/) with its own
 # tomcat-as/data/plugins/backup. cleanup removes the app (data/plugins/backup/markers
 # below) but leaves this instance's own tomcat-as (the Tomcat binary) for a fast
 # redeploy - full_wipe removes that. This defensive guard only ever removes a strict

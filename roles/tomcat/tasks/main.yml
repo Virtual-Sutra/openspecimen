@@ -42,9 +42,9 @@
 # Apache download (tomcat_version = os_versions.tomcat); conf + connectors come from
 # the release zip. conf and binaries must share a Tomcat major (master=11, lowers=9).
 
-- name: Create the instance base dir ({{ openspecimen_instance_dir | default('/usr/local/openspecimen') }})
+- name: Create the instance base dir ({{ openspecimen_instance_dir }})
   ansible.builtin.file:
-    path: "{{ openspecimen_instance_dir | default('/usr/local/openspecimen') }}"
+    path: "{{ openspecimen_instance_dir }}"
     state: directory
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
@@ -127,8 +127,9 @@
     # (server.xml etc.) on top of the pinned Tomcat. Connectors come from the zip below.
     # Extract to a temp dir and copy the bundle's tomcat-as/ CONTENTS into THIS
     # instance's CATALINA_HOME. The bundle's top dir is always 'tomcat-as', so
-    # unzipping straight to a fixed path would clobber /usr/local/openspecimen/tomcat-as
-    # (the default/prod instance) even when a co-located instance is deploying.
+    # unzipping straight to a fixed path would clobber openspecimen_instance_dir/tomcat-as
+    # (e.g. the default/prod instance's /usr/local/openspecimen/tomcat-as) even when a
+    # co-located instance is deploying.
     - name: Overlay OpenSpecimen config from the bundle over the pinned Tomcat
       ansible.builtin.shell: |
         set -eo pipefail

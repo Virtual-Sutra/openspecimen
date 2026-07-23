@@ -70,10 +70,10 @@ shared Tomcat; with multiple instances each has its own copy.
 | `$CATALINA_HOME/lib/ojdbc*.jar` | _(from release zip)_ | Oracle JDBC driver (shared, host-level) | Yes (redeploy) |
 | `/etc/systemd/system/<service_name>.service` | `tomcat_user`, `catalina_home`, `catalina_base`, `db_managed`, `openspecimen_service_name` | systemd unit (one per instance; `openspecimen` for the default) | Yes - `systemctl daemon-reload` |
 
-`$CATALINA_HOME` = `tomcat_home` = `/usr/local/{{ openspecimen_instance_name }}/tomcat-as`
+`$CATALINA_HOME` = `tomcat_home` = `openspecimen_instance_dir/tomcat-as`
 (default `/usr/local/openspecimen/tomcat-as`). A co-located 2nd customer just sets
 `openspecimen_instance_name` (e.g. `openspecimen-test`) — the install dir
-(`/usr/local/<name>/`), service, node, vhost, WAR/context, `config/<name>` and
+`openspecimen_instance_dir` (`/usr/local/<name>/`), service, node, vhost, WAR/context, `config/<name>` and
 `jdbc/<name>` all derive from it; only its `openspecimen_port` (and its DB, when
 separate) still need setting explicitly (ADR-009).
 
@@ -119,11 +119,12 @@ each resolves under that instance's `$CATALINA_BASE` and per-instance dirs.
 | `$PLUGIN_DIR/default/*.jar` | _(from release zip)_ | Common plugin JARs | Yes (Tomcat re-scans on startup) |
 | `$PLUGIN_DIR/paid/*.jar` | `openspecimen_paid_plugins` | Licensed enterprise plugin JARs | Yes (Tomcat re-scans on startup) |
 | `$PLUGIN_DIR/zustomer/*.jar` | `openspecimen_customer_plugins` | Customer-specific plugin JARs | Yes (Tomcat re-scans on startup) |
-| `/usr/local/openspecimen/.release` | `openspecimen_release` | Deployed version marker (per instance) - drives downgrade/no-op detection. Downgrade = an older tagged release, `master` → any tag, or `master` → an older `master` snapshot (by its `-DD-MM-YYYY` date); all route to rollback and need a matching backup. | No |
-| `/usr/local/openspecimen/.deploy_success` | _(written by the role)_ | Records the last fully-successful deploy (release + plugins). The no-op fast path requires this to match the requested release. | No |
-| `/usr/local/<instance_name>/scripts/update-config.sh` | _(templated per instance)_ | On-box helper for heap / db-pool / app-url changes; one per instance, in that instance's own dir (default `/usr/local/openspecimen/scripts/update-config.sh`) | No |
+| `openspecimen_instance_dir/.release` (default `/usr/local/openspecimen/.release`) | `openspecimen_release` | Deployed version marker (per instance) - drives downgrade/no-op detection. Downgrade = an older tagged release, `master` → any tag, or `master` → an older `master` snapshot (by its `-DD-MM-YYYY` date); all route to rollback and need a matching backup. | No |
+| `openspecimen_instance_dir/.deploy_success` (default `/usr/local/openspecimen/.deploy_success`) | _(written by the role)_ | Records the last fully-successful deploy (release + plugins). The no-op fast path requires this to match the requested release. | No |
+| `openspecimen_instance_dir/scripts/update-config.sh` | _(templated per instance)_ | On-box helper for heap / db-pool / app-url changes; one per instance, in that instance's own dir (default `/usr/local/openspecimen/scripts/update-config.sh`) | No |
 
-`$PLUGIN_DIR` = `openspecimen_plugin_dir` = `/usr/local/openspecimen/plugins`
+`$PLUGIN_DIR` = `openspecimen_plugin_dir` = `openspecimen_instance_dir/plugins`
+(default `/usr/local/openspecimen/plugins`)
 
 **Key properties** (`openspecimen.properties`):
 
@@ -207,7 +208,7 @@ directory written by the `update-config.sh` operator script, not a snapshot.
 |----------|---------|-------|
 | `db_backup_enabled` | `true` | Auto-dump the DB into the upgrade backup (local MySQL, WAR-changing upgrades). `false` → artifact-only rollback. |
 | `db_backup_auto_max_mb` | `2048` | DBs larger than this halt the deploy; back up manually (`db-backup.yml` / RDS snapshot) then re-run with `-e db_backup_confirmed=true`. |
-| `db_backup_dir` | `/usr/local/<instance_name>/db-backups` (default `/usr/local/openspecimen/db-backups`) | Output dir for the standalone `db-backup.yml` / source for `db-restore.yml`; per-instance so a co-located instance's dumps stay in its own tree. |
+| `db_backup_dir` | `openspecimen_instance_dir/db-backups` (default `/usr/local/openspecimen/db-backups`) | Output dir for the standalone `db-backup.yml` / source for `db-restore.yml`; per-instance so a co-located instance's dumps stay in its own tree. |
 
 ---
 
@@ -264,8 +265,8 @@ values explicitly in each:
 | `openspecimen_port` | `8080` | e.g. `8090` |
 | `openspecimen_context_path` | `/openspecimen` | e.g. `/openspecimen-test` |
 | `openspecimen_service_name` | `openspecimen` | e.g. `openspecimen-test` |
-| `catalina_base` | `{{ tomcat_home }}` | a separate path, e.g. `/usr/local/openspecimen/test/tomcat-as` |
-| `openspecimen_data_dir` / `openspecimen_plugin_dir` / `openspecimen_backup_dir` | under `/usr/local/openspecimen` | separate paths |
+| `catalina_base` | `{{ tomcat_home }}` | derives from `openspecimen_instance_dir` (set via `openspecimen_instance_name`), e.g. `openspecimen_instance_dir/tomcat-as` |
+| `openspecimen_data_dir` / `openspecimen_plugin_dir` / `openspecimen_backup_dir` | under `openspecimen_instance_dir` | separate paths (derive from `openspecimen_instance_name`) |
 | `mysql_db_name` / `mysql_db_user` | `openspecimen` | a separate schema |
 
 ---

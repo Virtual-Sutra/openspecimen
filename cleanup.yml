@@ -2,7 +2,7 @@
 # Tear down OpenSpecimen so a VM can be reused (ADR-006/009). DESTRUCTIVE -
 # requires -e cleanup_confirm=true. Runs against ONE customer folder = ONE instance.
 # Default: tear down THIS instance only - its service+unit, its complete instance
-# directory (/usr/local/openspecimen/<name>/ for a co-located instance), only its
+# directory openspecimen_instance_dir (/usr/local/<instance_name>/), only its
 # own Apache vhost, and its local-MySQL DB+user - leaving the shared Tomcat/MySQL/
 # Java and any co-located instance untouched.
 # -e full_wipe=true is HOST-WIDE: it removes EVERY instance (all openspecimen*

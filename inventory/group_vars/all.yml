@@ -53,7 +53,7 @@ openspecimen_customer_plugins: []
 
 # ── Instance identity & paths ─────────────────────────────────────────────────
 # openspecimen_instance_name is the SINGLE identity for this instance. It names:
-#   • the install dir            /usr/local/<name>/{tomcat-as,data,plugins,backup,…}
+#   • the install dir            openspecimen_instance_dir (/usr/local/<name>/{tomcat-as,data,plugins,backup,…})
 #   • the systemd service        <name>
 #   • the HA node (node.name)    <name>
 #   • the Apache vhost           <name>
