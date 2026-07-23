@@ -48,11 +48,10 @@
         war_name:      "{{ openspecimen_war_name | default(_os_derived_war_name, true) }}"
         catalina_home: "{{ catalina_home | default(tomcat_home) }}"
         catalina_base: "{{ catalina_base | default(tomcat_home) }}"
-        # Instance root dir. Co-located instances live under /usr/local/openspecimen/
-        # <name>/ (so dirname of their catalina_base is the instance root); the legacy
-        # single instance has catalina_base == the shared CATALINA_HOME, so this
-        # resolves to the shared root and cleanup's safety guard skips removing it.
-        # An explicit openspecimen_instance_dir overrides the derivation.
+        # Instance root dir. Every instance lives in its own /usr/local/<instance_name>/
+        # (default openspecimen → /usr/local/openspecimen), with tomcat-as/data/plugins/
+        # backup all under it. openspecimen_instance_dir (group_vars) supplies it; the
+        # fallback keeps older inventories working (dirname of catalina_base).
         instance_dir:  "{{ openspecimen_instance_dir | default((catalina_base | default(tomcat_home)) | dirname, true) }}"
         # Apache vhost basename for THIS instance (sites-available/<name>.conf +
         # sites-enabled link on Debian, conf.d/<name>.conf on RedHat). Same default

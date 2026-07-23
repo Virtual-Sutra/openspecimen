@@ -42,9 +42,9 @@
 # Apache download (tomcat_version = os_versions.tomcat); conf + connectors come from
 # the release zip. conf and binaries must share a Tomcat major (master=11, lowers=9).
 
-- name: Create /usr/local/openspecimen base dir
+- name: Create the instance base dir ({{ openspecimen_instance_dir | default('/usr/local/openspecimen') }})
   ansible.builtin.file:
-    path: /usr/local/openspecimen
+    path: "{{ openspecimen_instance_dir | default('/usr/local/openspecimen') }}"
     state: directory
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"

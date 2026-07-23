@@ -70,8 +70,12 @@ shared Tomcat; with multiple instances each has its own copy.
 | `$CATALINA_HOME/lib/ojdbc*.jar` | _(from release zip)_ | Oracle JDBC driver (shared, host-level) | Yes (redeploy) |
 | `/etc/systemd/system/<service_name>.service` | `tomcat_user`, `catalina_home`, `catalina_base`, `db_managed`, `openspecimen_service_name` | systemd unit (one per instance; `openspecimen` for the default) | Yes - `systemctl daemon-reload` |
 
-`$CATALINA_HOME` = `tomcat_home` = `/usr/local/openspecimen/tomcat-as`.
-A co-located 2nd customer sets its own `catalina_base` explicitly (ADR-009).
+`$CATALINA_HOME` = `tomcat_home` = `/usr/local/{{ openspecimen_instance_name }}/tomcat-as`
+(default `/usr/local/openspecimen/tomcat-as`). A co-located 2nd customer just sets
+`openspecimen_instance_name` (e.g. `openspecimen-test`) — the install dir
+(`/usr/local/<name>/`), service, node, vhost, WAR/context, `config/<name>` and
+`jdbc/<name>` all derive from it; only its `openspecimen_port` (and its DB, when
+separate) still need setting explicitly (ADR-009).
 
 **Tomcat install source** (#90/#91): the binary comes from a pinned Apache download
 (`tomcat_version` from the component spec, default `9.0.59`), not an OS package;
@@ -117,7 +121,7 @@ each resolves under that instance's `$CATALINA_BASE` and per-instance dirs.
 | `$PLUGIN_DIR/zustomer/*.jar` | `openspecimen_customer_plugins` | Customer-specific plugin JARs | Yes (Tomcat re-scans on startup) |
 | `/usr/local/openspecimen/.release` | `openspecimen_release` | Deployed version marker (per instance) - drives downgrade/no-op detection. Downgrade = an older tagged release, `master` → any tag, or `master` → an older `master` snapshot (by its `-DD-MM-YYYY` date); all route to rollback and need a matching backup. | No |
 | `/usr/local/openspecimen/.deploy_success` | _(written by the role)_ | Records the last fully-successful deploy (release + plugins). The no-op fast path requires this to match the requested release. | No |
-| `/usr/local/openspecimen/scripts/update-config[-<service>].sh` | _(templated per instance)_ | On-box helper for heap / db-pool / app-url changes; one per instance (default keeps `update-config.sh`) | No |
+| `/usr/local/<instance_name>/scripts/update-config.sh` | _(templated per instance)_ | On-box helper for heap / db-pool / app-url changes; one per instance, in that instance's own dir (default `/usr/local/openspecimen/scripts/update-config.sh`) | No |
 
 `$PLUGIN_DIR` = `openspecimen_plugin_dir` = `/usr/local/openspecimen/plugins`
 

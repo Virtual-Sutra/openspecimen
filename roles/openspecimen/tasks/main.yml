@@ -163,15 +163,15 @@
     - "{{ openspecimen_backup_dir }}"
     - "{{ openspecimen_backup_dir }}/config-changes"
     - "{{ openspecimen_data_dir }}/heapdumps"
-    - /usr/local/openspecimen/scripts
+    - "{{ openspecimen_instance_dir }}/scripts"
 
-# One operator script per instance, with that instance's paths/service baked in.
-# The default instance keeps the historical name update-config.sh; a co-located
-# instance gets update-config-<service>.sh so it edits ITS own config, not prod's.
+# Operator convenience script with this instance's paths/service baked in. It lives
+# in the instance's own dir (/usr/local/<instance_name>/scripts/), so each co-located
+# instance gets its own copy that edits ITS config - no shared dir, no name clash.
 - name: Deploy the per-instance update-config operator script
   ansible.builtin.template:
     src: "{{ playbook_dir }}/scripts/update-config.sh.j2"
-    dest: "/usr/local/openspecimen/scripts/update-config{{ ('-' ~ openspecimen_service_name) if (openspecimen_service_name | default('openspecimen')) != 'openspecimen' else '' }}.sh"
+    dest: "{{ openspecimen_instance_dir }}/scripts/update-config.sh"
     owner: root
     group: root
     mode: '0750'

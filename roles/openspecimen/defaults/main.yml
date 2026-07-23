@@ -11,6 +11,8 @@ openspecimen_war_name: "{{ (openspecimen_context_path | default('/openspecimen')
 
 # ── JNDI datasource name ──────────────────────────────────────────────────────
 # The instance's conf/context.xml holds one <Resource> bound to this name; the app
-# reaches it via datasource.jndi in its <war_name>.properties. Override to pin a
-# specific name.
-openspecimen_datasource_name: "jdbc/openspecimen"
+# reaches it via datasource.jndi in its <war_name>.properties. Derives from the
+# instance identity (jdbc/<instance_name>) so it stays consistent with the service,
+# WAR and config names; default instance 'openspecimen' → jdbc/openspecimen
+# (unchanged). Override to pin a specific name.
+openspecimen_datasource_name: "jdbc/{{ openspecimen_instance_name | default('openspecimen') }}"

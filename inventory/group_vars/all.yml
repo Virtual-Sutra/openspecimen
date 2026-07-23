@@ -51,42 +51,57 @@ openspecimen_zip_path:   "{{ openspecimen_builds_dir }}/{{ openspecimen_release 
 openspecimen_paid_plugins:     []
 openspecimen_customer_plugins: []
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
-tomcat_home:                /usr/local/openspecimen/tomcat-as
-openspecimen_data_dir:      /usr/local/openspecimen/data
-openspecimen_plugin_dir:    /usr/local/openspecimen/plugins
-openspecimen_backup_dir:    /usr/local/openspecimen/backup
-openspecimen_release_marker: /usr/local/openspecimen/.release
+# ── Instance identity & paths ─────────────────────────────────────────────────
+# openspecimen_instance_name is the SINGLE identity for this instance. It names:
+#   • the install dir            /usr/local/<name>/{tomcat-as,data,plugins,backup,…}
+#   • the systemd service        <name>
+#   • the HA node (node.name)    <name>
+#   • the Apache vhost           <name>
+#   • the WAR + Tomcat context   <name>.war → /<name> → config/<name>
+#   • the JNDI datasource        jdbc/<name>
+# Default 'openspecimen' → every value below resolves to today's layout exactly
+# (fully backward-compatible; nothing moves on an existing host). A co-located 2nd
+# instance on one VM sets ONLY openspecimen_instance_name (plus its port and public
+# routing, and its own DB when separate) — all of the below then follow automatically.
+openspecimen_instance_name: openspecimen
+openspecimen_instance_dir:  "/usr/local/{{ openspecimen_instance_name }}"
+
+tomcat_home:                "{{ openspecimen_instance_dir }}/tomcat-as"
+openspecimen_data_dir:      "{{ openspecimen_instance_dir }}/data"
+openspecimen_plugin_dir:    "{{ openspecimen_instance_dir }}/plugins"
+openspecimen_backup_dir:    "{{ openspecimen_instance_dir }}/backup"
+openspecimen_release_marker: "{{ openspecimen_instance_dir }}/.release"
 
 # ── Single-instance layout (ADR-009) ──────────────────────────────────────────
 # One OpenSpecimen instance per customer folder. The flat vars below describe it;
 # tasks/resolve-instances.yml assembles them into the single _instances entry the
-# app roles consume (standard single-host layout: service 'openspecimen',
-# CATALINA_BASE == the shared Tomcat, ports 8080/8009/8005, context /openspecimen).
+# app roles consume. Service, context, node and the install dir all derive from
+# openspecimen_instance_name (above), so the default is the standard single-host
+# layout (service 'openspecimen', context /openspecimen, ports 8080/8009/8005).
 #
-# Two co-located customers on one VM are two separate customer folders, each
-# OVERRIDING the colliding values below explicitly (no derivation), e.g. the test
-# folder sets openspecimen_port: 8090, openspecimen_context_path: /openspecimen-test,
-# openspecimen_service_name: openspecimen-test, catalina_base + mysql_db_name. See
-# ADR-009 (supersedes ADR-006/007).
+# A co-located 2nd instance on one VM is a separate customer folder that sets
+# openspecimen_instance_name (e.g. openspecimen-test) — service/node/vhost/dir/war/
+# datasource then all follow — plus only the values that genuinely can't derive from
+# the name: openspecimen_port (e.g. 8090) and, when it needs its own database,
+# mysql_db_name / mysql_db_user. See ADR-009 (supersedes ADR-006/007).
 catalina_home:              "{{ tomcat_home }}"
 catalina_base:              "{{ tomcat_home }}"
-openspecimen_service_name:  openspecimen
-openspecimen_context_path:  /openspecimen
+openspecimen_service_name:  "{{ openspecimen_instance_name }}"
+openspecimen_context_path:  "/{{ openspecimen_instance_name }}"
 openspecimen_ajp_port:      "{{ apache_ajp_port | default(8009) | int }}"
 openspecimen_shutdown_port: 8005
-openspecimen_node_name:     openspecimen
+openspecimen_node_name:     "{{ openspecimen_instance_name }}"
 
 # Written ONLY at the very last task of a successful deploy. Read by
 # roles/openspecimen/tasks/direction.yml - the skip-if-current shortcut requires
 # this file to match the requested release. If the previous deploy failed before
 # reaching the end, the file is stale and the next run will redeploy
 # automatically.
-openspecimen_deploy_success_marker: /usr/local/openspecimen/.deploy_success
+openspecimen_deploy_success_marker: "{{ openspecimen_instance_dir }}/.deploy_success"
 
 # Number of timestamped backup directories under openspecimen_backup_dir to keep.
 # Older backups are pruned at the end of every deploy. Override per customer in
-# inventory/host_vars/<customer>.yml when you need a longer retention window.
+# inventory/customers/<name>/group_vars/all/20-customer.yml for a longer window.
 openspecimen_backup_retention: 3
 
 # Gracefully restore the prior version when an UPGRADE deploy fails (any step after
