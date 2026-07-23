@@ -141,10 +141,22 @@
             - /etc/apache2/openspecimen.d
             - /etc/httpd/openspecimen.d
 
-        - name: Remove the OpenSpecimen tree (Tomcat binary + all instances)
+        # Every instance is its own sibling dir /usr/local/<instance_name> now, so wipe
+        # them ALL (default openspecimen + any co-located openspecimen-*), not just the
+        # default tree. Matches the openspecimen* unit/vhost globs used elsewhere here.
+        - name: Find all OpenSpecimen instance dirs under /usr/local
+          ansible.builtin.find:
+            paths: /usr/local
+            patterns: 'openspecimen*'
+            file_type: directory
+            recurse: false
+          register: _osp_full_wipe_dirs
+
+        - name: Remove the OpenSpecimen trees (Tomcat binaries + all instances)
           ansible.builtin.file:
-            path: /usr/local/openspecimen
+            path: "{{ item }}"
             state: absent
+          loop: "{{ _osp_full_wipe_dirs.files | map(attribute='path') | list }}"
 
         - name: Purge MySQL + Java packages (Debian)
           ansible.builtin.apt:

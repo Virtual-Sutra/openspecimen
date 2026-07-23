@@ -30,8 +30,10 @@
     # Must be shimmed here (not left to the openspecimen role's default): the TOMCAT
     # role renders context.xml BEFORE the openspecimen role is include_role'd, so an
     # openspecimen-role default is out of scope and the block would fall back to an
-    # undefined var at render time. Mirrors roles/openspecimen/defaults/main.yml.
-    openspecimen_datasource_name:       "jdbc/openspecimen"
+    # undefined var at render time. Mirrors roles/openspecimen/defaults/main.yml
+    # (jdbc/<instance_name>) so the datasource stays consistent with the WAR, config
+    # and service names; default instance 'openspecimen' → jdbc/openspecimen (unchanged).
+    openspecimen_datasource_name:       "jdbc/{{ openspecimen_instance_name | default('openspecimen') }}"
     catalina_home:                      "{{ _instance.catalina_home }}"
     catalina_base:                      "{{ _instance.catalina_base }}"
     mysql_db_name:                      "{{ _instance.db_name }}"

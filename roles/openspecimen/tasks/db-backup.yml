@@ -20,7 +20,7 @@
 
 - name: Ensure DB backup directory exists
   ansible.builtin.file:
-    path: "{{ db_backup_dir | default('/usr/local/openspecimen/db-backups') }}"
+    path: "{{ db_backup_dir | default(openspecimen_instance_dir | default('/usr/local/openspecimen') ~ '/db-backups') }}"
     state: directory
     owner: "{{ tomcat_user }}"
     group: "{{ tomcat_user }}"
@@ -28,7 +28,7 @@
 
 - name: Set DB backup file path
   ansible.builtin.set_fact:
-    _db_backup_file: "{{ db_backup_dir | default('/usr/local/openspecimen/db-backups') }}/{{ _db_backup_ts.stdout }}_{{ mysql_db_name }}.sql.gz"
+    _db_backup_file: "{{ db_backup_dir | default(openspecimen_instance_dir | default('/usr/local/openspecimen') ~ '/db-backups') }}/{{ _db_backup_ts.stdout }}_{{ mysql_db_name }}.sql.gz"
 
 - name: Dump database (consistent, gzipped)
   ansible.builtin.shell: |

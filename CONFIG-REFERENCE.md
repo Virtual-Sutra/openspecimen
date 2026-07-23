@@ -207,7 +207,7 @@ directory written by the `update-config.sh` operator script, not a snapshot.
 |----------|---------|-------|
 | `db_backup_enabled` | `true` | Auto-dump the DB into the upgrade backup (local MySQL, WAR-changing upgrades). `false` → artifact-only rollback. |
 | `db_backup_auto_max_mb` | `2048` | DBs larger than this halt the deploy; back up manually (`db-backup.yml` / RDS snapshot) then re-run with `-e db_backup_confirmed=true`. |
-| `db_backup_dir` | `/usr/local/openspecimen/db-backups` | Output dir for the standalone `db-backup.yml` / source for `db-restore.yml`. |
+| `db_backup_dir` | `/usr/local/<instance_name>/db-backups` (default `/usr/local/openspecimen/db-backups`) | Output dir for the standalone `db-backup.yml` / source for `db-restore.yml`; per-instance so a co-located instance's dumps stay in its own tree. |
 
 ---
 
