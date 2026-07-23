@@ -35,6 +35,12 @@
     # (jdbc/<instance_name>) so the datasource stays consistent with the WAR, config
     # and service names; default instance 'openspecimen' → jdbc/openspecimen (unchanged).
     openspecimen_datasource_name:       "jdbc/{{ openspecimen_instance_name | default('openspecimen') }}"
+    # Same render-order shim for apache_enabled: the apache role's own default
+    # (auto-enable when openspecimen_app_url is set) is out of scope at the include
+    # gate below, which would otherwise fall back to default(false) and silently skip
+    # Apache for an app_url-only customer. Mirror the role default here; an explicit
+    # inventory apache_enabled (true/false) still wins.
+    apache_enabled:                     "{{ apache_enabled | default((_instance.app_url | default('') | trim | length) > 0) }}"
     catalina_home:                      "{{ _instance.catalina_home }}"
     catalina_base:                      "{{ _instance.catalina_base }}"
     mysql_db_name:                      "{{ _instance.db_name }}"
