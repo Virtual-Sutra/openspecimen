@@ -3,6 +3,10 @@ _apache_package:  httpd
 _apache_service:  httpd
 _apache_conf_dir: /etc/httpd/conf.d
 _apache_conf_link: ""
+# Domain mode: RedHat has no 000-default equivalent - conf.d/*.conf auto-loads at the
+# top level, so we write per-instance vhost blocks into this managed file. The stock
+# welcome.conf is neutralised (domain block, RedHat-only) so it can't overlap on :80.
+_apache_default_conf: /etc/httpd/conf.d/openspecimen.conf
 _apache_log_dir:  /var/log/httpd
 _apache_webroot:  /var/www/html
 # RedHat httpd auto-loads mod_proxy / mod_proxy_http / mod_proxy_ajp / mod_headers
