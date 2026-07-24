@@ -303,6 +303,21 @@
     # :443 hits a dead port - derive scheme+port from apache_enable_ssl. Else (no
     # Apache) probe app-props on localhost:port+context directly on Tomcat.
     # --max-time bounds a slow response.
+    # The localhost probe assumes the instance serves on the INVENTORY
+    # openspecimen_port + context. That holds for a FRESH Ansible deploy (server.xml
+    # is rendered from inventory) but NOT when reusing an existing on-host config
+    # (_reuse_existing_config: db_managed=false with a live datasource) - there the
+    # server.xml port-patch is skipped, so it keeps its legacy ports and an
+    # inventory-derived probe hits the wrong port/context, failing 90x even though
+    # the app serves (false negative). Skip the localhost probe on reuse: startup is
+    # already confirmed via catalina.out and the opt-in public-URL check below still
+    # validates end-to-end serving through the (hand-managed) front end.
+    - name: "[{{ _instance.name }}] Decide whether the localhost readiness probe applies"
+      ansible.builtin.set_fact:
+        _do_localhost_readiness: >-
+          {{ (openspecimen_readiness_http_check | default(true) | bool)
+             and not (_reuse_existing_config | default(false) | bool) }}
+
     - name: "[{{ _instance.name }}] Build the readiness-check command"
       ansible.builtin.set_fact:
         _ready_cmd: >-
@@ -318,7 +333,7 @@
           {%- else -%}
           curl -sf --max-time {{ _to }} -o /dev/null -w "%{http_code}" http://localhost:{{ openspecimen_port }}{{ openspecimen_context_path | default('/openspecimen') }}/rest/ng/config-settings/app-props | grep -qE '^(200|302|401|403)$'
           {%- endif %}
-      when: openspecimen_readiness_http_check | default(true) | bool
+      when: _do_localhost_readiness | bool
 
     - name: "[{{ _instance.name }}] Wait until OpenSpecimen serves the app (post-restart)"
       ansible.builtin.shell: "{{ _ready_cmd }}"
@@ -328,15 +343,18 @@
       delay: "{{ openspecimen_health_delay | default(10) | int }}"
       changed_when: false
       become: true
-      when: openspecimen_readiness_http_check | default(true) | bool
+      when: _do_localhost_readiness | bool
 
-    - name: "[{{ _instance.name }}] Local HTTP readiness gate DISABLED (openspecimen_readiness_http_check=false)"
+    - name: "[{{ _instance.name }}] Local HTTP readiness gate DISABLED"
       ansible.builtin.debug:
         msg: >-
-          Skipped the local HTTP readiness probe. App startup was already confirmed via
-          catalina.out ("Server startup in"). Enable openspecimen_verify_app_url to still
-          validate serving over the public URL below.
-      when: not (openspecimen_readiness_http_check | default(true) | bool)
+          Skipped the local HTTP readiness probe
+          ({{ 'config reuse - inventory port/context not applied to the existing server.xml'
+              if (_reuse_existing_config | default(false) | bool)
+              else 'openspecimen_readiness_http_check=false' }}).
+          App startup was already confirmed via catalina.out ("Server startup in").
+          Enable openspecimen_verify_app_url to still validate serving over the public URL below.
+      when: not (_do_localhost_readiness | bool)
 
     - name: "[{{ _instance.name }}] Readiness gate passed - move to public-URL verification"
       ansible.builtin.set_fact:
