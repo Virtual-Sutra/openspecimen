@@ -105,14 +105,26 @@ probes `app_url/ui-app/` through the **local** Apache (`curl --resolve <host>:<p
 probes `localhost:<port>` and accepts `200|302|401|403`. So a timeout means the
 app truly isn't serving through that path - not a code/URL mismatch.
 
+**Config-reuse upgrades skip this probe.** On a `db_managed: false` upgrade that
+reuses existing on-host config (`_reuse_existing_config`), the tomcat role does
+**not** re-patch `server.xml`, so the instance keeps its legacy ports/context -
+which need not match inventory `openspecimen_port`. Probing the inventory port
+would false-negative even though the app serves, so the localhost gate is
+auto-skipped on reuse (startup is still confirmed via `catalina.out`). Set
+`openspecimen_verify_app_url: true` on those hosts for an end-to-end check through
+the front end. The probe still runs (and is authoritative) on **fresh** deploys,
+where `server.xml` is rendered from inventory.
+
 **Common causes:**
 
 | Cause | Fix |
 |-------|-----|
 | Wrong `openspecimen_port` | Check `inventory/group_vars/all.yml`; default is `8080` |
 | Wrong `openspecimen_app_url` | If set, it must match the actual URL Tomcat answers on |
+| **Co-located instances share a port** | Two instances on one VM that both default to `8080`/`8009`/`8005` collide: the probe for one hits the other's Tomcat (404 on its context) and hangs. Give each its **own** `openspecimen_port` / `openspecimen_ajp_port` / `openspecimen_shutdown_port` on a fresh deploy. (Legacy reuse hosts keep their existing distinct ports and skip the probe - see above.) |
 | Database connection failure | Check `catalina.out` on the target; verify the DB password passed via `-e mysql_db_password` |
 | Tomcat startup too slow | Increase `openspecimen_health_retries` or `openspecimen_health_delay` in `group_vars` |
+| `CATALINA_PID` dir missing (`catalina.sh: cannot create .../bin/pid.txt: Directory nonexistent`) | The instance's `CATALINA_BASE/bin` wasn't created (partial/out-of-band start). `sudo install -d -o openspecimen -g openspecimen <base>/bin` then restart, or re-run the deploy (the base tree is created idempotently). |
 
 To check Tomcat logs on the target (single default instance):
 
