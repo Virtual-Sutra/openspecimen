@@ -210,6 +210,14 @@ directory written by the `update-config.sh` operator script, not a snapshot.
 | `db_backup_auto_max_mb` | `2048` | DBs larger than this halt the deploy; back up manually (`db-backup.yml` / RDS snapshot) then re-run with `-e db_backup_confirmed=true`. |
 | `db_backup_dir` | `openspecimen_instance_dir/db-backups` (default `/usr/local/openspecimen/db-backups`) | Output dir for the standalone `db-backup.yml` / source for `db-restore.yml`; per-instance so a co-located instance's dumps stay in its own tree. |
 
+**Post-restart health gates:**
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `openspecimen_readiness_http_check` | `true` | Run the post-restart localhost probe (`app-props` on Tomcat, or `/ui-app/` through local Apache). **Auto-skipped on config-reuse upgrades** (`db_managed: false` + existing on-host config), where the reused `server.xml` keeps legacy ports/context that need not match inventory - startup is still confirmed via `catalina.out`. Set `false` to disable manually (e.g. a very slow VM). |
+| `openspecimen_health_retries` / `openspecimen_health_delay` | `90` / `10` | Retry count and seconds between attempts for the localhost probe. |
+| `openspecimen_verify_app_url` | `false` | Opt-in end-to-end check of `app_url/ui-app/` through the real front end after readiness. Recommended for **config-reuse / co-located** hosts (where the localhost probe is skipped): a 4xx/5xx fails the deploy; a no-connect is a non-fatal warning unless `openspecimen_app_url_check_fatal: true`. |
+
 ---
 
 ## apache role
