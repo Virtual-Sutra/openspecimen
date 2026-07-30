@@ -915,6 +915,64 @@
       ansible.builtin.debug:
         var: _catalina_tail.stdout_lines
 
+    # The OpenSpecimen application log (data/logs/os.<instance>.log) is written by
+    # the app itself, separately from Tomcat's catalina.out - an ERROR/Exception
+    # raised inside the app (as opposed to a Tomcat-level listener/deploy failure)
+    # can show up here with more detail than catalina.out carries. Pull it as a
+    # second diagnostic source whenever a startup failure was already detected
+    # above, not as a replacement for the catalina.out checks.
+    - name: Extract failure trail from the OpenSpecimen app log
+      ansible.builtin.shell: |
+        set -o pipefail
+        LOG="{{ openspecimen_data_dir }}/logs/os.{{ _os_instance_name }}.log"
+        [ -f "$LOG" ] || { echo "(os.{{ _os_instance_name }}.log not found)"; exit 0; }
+        grep -nE 'ERROR|Exception|Caused by:|Migration failed|liquibase\.exception' "$LOG" \
+          | tail -40 || true
+      vars:
+        # Same fallback the "Record failure diagnostics" task below uses - guards
+        # against an undefined-variable Jinja error if openspecimen_instance_name is
+        # ever unset (no hard role default; the group_vars default covers normal
+        # inventory runs but not every -e/ad-hoc invocation).
+        _os_instance_name: "{{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}"
+      args:
+        executable: /bin/bash
+      become: true
+      register: _app_log_trail
+      changed_when: false
+
+    - name: Print OpenSpecimen app log failure trail
+      ansible.builtin.debug:
+        var: _app_log_trail.stdout_lines
+
+    # Written on the control node into deploy_report_dir when the caller passes it
+    # (no-op for CLI runs) - same mechanism as .component-versions-*.json above, so
+    # the CI (Jenkins) email can attach the failure trail instead of it only being
+    # visible in the console log. Named per instance (email globs
+    # .failure-diagnostics-*.txt) so a multi-instance run's failures don't overwrite
+    # each other.
+    - name: Record failure diagnostics for the CI email
+      ansible.builtin.copy:
+        content: |
+          Customer:  {{ inventory_hostname }}
+          Instance:  {{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}
+          Release:   {{ openspecimen_release }}
+          Service:   {{ openspecimen_service_name | default('openspecimen') }} ({{ catalina_base }})
+
+          === Migration / startup failure trail (catalina.out) ===
+          {{ _migration_trail.stdout | default('(none)') }}
+
+          === OpenSpecimen app log failure trail (data/logs/os.{{ openspecimen_instance_name }}.log) ===
+          {{ _app_log_trail.stdout | default('(none)') }}
+
+          === Last 100 catalina.out lines ===
+          {{ _catalina_tail.stdout | default('(none)') }}
+        dest: "{{ deploy_report_dir }}/.failure-diagnostics-{{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}.txt"
+        mode: '0644'
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      when: deploy_report_dir | default('') | trim | length > 0
+
     - name: Fail after diagnostics
       ansible.builtin.fail:
         msg: |
@@ -947,6 +1005,7 @@
           Diagnostics:
             - Full service status: shown above
             - Last 100 catalina.out lines: shown above
+            - App log failure trail (data/logs/os.{{ openspecimen_instance_name }}.log): shown above
             - Full log:  sudo journalctl -u {{ openspecimen_service_name | default('openspecimen') }} --since '{{ openspecimen_health_lookback_min | default(20) }} min ago'
 
 # Phase 2 (external public-URL reachability) is intentionally NOT here. It now
