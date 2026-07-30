@@ -959,13 +959,13 @@
           Service:   {{ openspecimen_service_name | default('openspecimen') }} ({{ catalina_base }})
 
           === Migration / startup failure trail (catalina.out) ===
-          {{ _migration_trail.stdout | default('(none)') }}
+          {{ _migration_trail.stdout | default('(none)', true) }}
 
           === OpenSpecimen app log failure trail (data/logs/os.{{ openspecimen_instance_name }}.log) ===
-          {{ _app_log_trail.stdout | default('(none)') }}
+          {{ _app_log_trail.stdout | default('(none)', true) }}
 
           === Last 100 catalina.out lines ===
-          {{ _catalina_tail.stdout | default('(none)') }}
+          {{ _catalina_tail.stdout | default('(none)', true) }}
         dest: "{{ deploy_report_dir }}/.failure-diagnostics-{{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}.txt"
         mode: '0644'
       delegate_to: localhost
