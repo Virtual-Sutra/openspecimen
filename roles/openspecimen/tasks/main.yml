@@ -922,22 +922,25 @@
     # diagnostic source whenever a startup failure was already detected above, not
     # as a replacement for the catalina.out checks. Globs *os*.log rather than a
     # fixed os.<instance>.log name - the app can name its log after the node rather
-    # than the instance (HA), so a fixed name risks silently matching nothing;
-    # grep across whatever matches instead, and grep prefixes each hit with its
-    # filename when given more than one, so the trail stays attributable.
+    # than the instance (HA), so a fixed name risks silently matching nothing.
+    # OS_DATA_DIR comes via environment, and the body avoids bash arrays - same as
+    # the paid/customer plugin-tiering tasks above (environment vars + no bash
+    # arrays, to satisfy split_args): an inlined {{ }} AND `arr=(...)`/${arr[@]}
+    # each independently trip Ansible's split_args on the free-form command.
     - name: Extract failure trail from the OpenSpecimen app log(s)
       ansible.builtin.shell: |
         set -o pipefail
-        shopt -s nullglob
-        logs=( "{{ openspecimen_data_dir }}/logs/"*os*.log )
-        if [ ${#logs[@]} -eq 0 ]; then
-          echo "(no {{ openspecimen_data_dir }}/logs/*os*.log files found)"
+        if ! ls "$OS_DATA_DIR"/logs/*os*.log >/dev/null 2>&1; then
+          echo "(no $OS_DATA_DIR/logs/*os*.log files found)"
           exit 0
         fi
-        grep -nE 'ERROR|Exception|Caused by:|Migration failed|liquibase\.exception' "${logs[@]}" \
-          | tail -40 || true
+        for f in "$OS_DATA_DIR"/logs/*os*.log; do
+          grep -nH -E 'ERROR|Exception|Caused by:|Migration failed|liquibase\.exception' "$f" || true
+        done | tail -40
       args:
         executable: /bin/bash
+      environment:
+        OS_DATA_DIR: "{{ openspecimen_data_dir }}"
       become: true
       register: _app_log_trail
       changed_when: false
