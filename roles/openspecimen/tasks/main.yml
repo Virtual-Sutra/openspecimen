@@ -949,6 +949,48 @@
       ansible.builtin.debug:
         var: _app_log_trail.stdout_lines
 
+    # The trails/tail above cover the common failure shapes, but a failure that
+    # doesn't match any of those grep patterns needs the whole file. Fetched onto
+    # the control node (deploy_report_dir) alongside .failure-diagnostics-*.txt so
+    # the CI email can attach the complete files, not just excerpts. failed_when:
+    # false - catalina.out may legitimately not exist yet (very early startup
+    # failure); this must never mask the real failure below.
+    - name: Fetch full catalina.out for the CI email
+      ansible.builtin.fetch:
+        src: "{{ catalina_base }}/logs/catalina.out"
+        dest: "{{ deploy_report_dir }}/catalina-{{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}.out"
+        flat: true
+      become: true
+      failed_when: false
+      changed_when: false
+      when: deploy_report_dir | default('') | trim | length > 0
+
+    # Enumerated first (rather than fetching a glob directly - fetch takes a
+    # single src) so each matched file can be fetched individually below. Same
+    # *os*.log glob rationale as the trail extraction above (app can name its
+    # log after the node, not the instance, under HA).
+    - name: Find OpenSpecimen app log files for the CI email
+      ansible.builtin.find:
+        paths: "{{ openspecimen_data_dir }}/logs"
+        patterns: "*os*.log"
+      become: true
+      register: _app_log_files
+      failed_when: false
+      when: deploy_report_dir | default('') | trim | length > 0
+
+    - name: Fetch full OpenSpecimen app log(s) for the CI email
+      ansible.builtin.fetch:
+        src: "{{ item.path }}"
+        dest: "{{ deploy_report_dir }}/os-{{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}-{{ item.path | basename }}"
+        flat: true
+      loop: "{{ _app_log_files.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      become: true
+      failed_when: false
+      changed_when: false
+      when: deploy_report_dir | default('') | trim | length > 0
+
     # Written on the control node into deploy_report_dir when the caller passes it
     # (no-op for CLI runs) - same mechanism as .component-versions-*.json above, so
     # the CI (Jenkins) email can attach the failure trail instead of it only being
@@ -971,6 +1013,8 @@
 
           === Last 100 catalina.out lines ===
           {{ _catalina_tail.stdout | default('(none)', true) }}
+
+          (Full catalina.out and app log file(s) are attached separately, if fetched successfully.)
         dest: "{{ deploy_report_dir }}/.failure-diagnostics-{{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}.txt"
         mode: '0644'
       delegate_to: localhost
