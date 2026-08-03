@@ -951,45 +951,59 @@
 
     # The trails/tail above cover the common failure shapes, but a failure that
     # doesn't match any of those grep patterns needs the whole file. Fetched onto
-    # the control node (deploy_report_dir) alongside .failure-diagnostics-*.txt so
-    # the CI email can attach the complete files, not just excerpts. failed_when:
-    # false - catalina.out may legitimately not exist yet (very early startup
-    # failure); this must never mask the real failure below.
-    - name: Fetch full catalina.out for the CI email
-      ansible.builtin.fetch:
-        src: "{{ catalina_base }}/logs/catalina.out"
-        dest: "{{ deploy_report_dir }}/catalina-{{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}.out"
-        flat: true
-      become: true
-      failed_when: false
-      changed_when: false
+    # the control node (deploy_report_dir) so the CI email can attach the complete
+    # files, not just excerpts - a separate (non-dot-prefixed) naming scheme from
+    # .failure-diagnostics-*.txt/.component-versions-*.json on purpose: those are
+    # read back as text and round-tripped through a JSON env var across the CI
+    # caller's workspace-clean step, whereas these are real files handed to that
+    # same caller via its own native stash/unstash (too large/binary-unsafe for
+    # the JSON round-trip) - two different hand-off mechanisms, so two different
+    # naming families. Same per-instance-only disambiguation caveat as
+    # .failure-diagnostics-*.txt above: a multi-host run sharing the default
+    # instance name ('openspecimen') would collide in deploy_report_dir - an
+    # existing, accepted limitation of that mechanism, not introduced here.
+    - name: Fetch full failure log files for the CI email
       when: deploy_report_dir | default('') | trim | length > 0
+      become: true
+      block:
+        # failed_when: false - catalina.out may legitimately not exist yet (very
+        # early startup failure); this must never mask the real failure below.
+        # No size cap (full file, as-is): catalina.out is truncated immediately
+        # before every service (re)start (see "Truncate catalina.out before
+        # (re)start" above), so this is naturally bounded to one deploy attempt,
+        # not the instance's entire lifetime.
+        - name: Fetch full catalina.out for the CI email
+          ansible.builtin.fetch:
+            src: "{{ catalina_base }}/logs/catalina.out"
+            dest: "{{ deploy_report_dir }}/catalina-{{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}.out"
+            flat: true
+          failed_when: false
+          changed_when: false
 
-    # Enumerated first (rather than fetching a glob directly - fetch takes a
-    # single src) so each matched file can be fetched individually below. Same
-    # *os*.log glob rationale as the trail extraction above (app can name its
-    # log after the node, not the instance, under HA).
-    - name: Find OpenSpecimen app log files for the CI email
-      ansible.builtin.find:
-        paths: "{{ openspecimen_data_dir }}/logs"
-        patterns: "*os*.log"
-      become: true
-      register: _app_log_files
-      failed_when: false
-      when: deploy_report_dir | default('') | trim | length > 0
+        # Enumerated first (rather than fetching a glob directly - fetch takes a
+        # single src) so each matched file can be fetched individually below.
+        # Same *os*.log glob rationale as the trail extraction above (app can
+        # name its log after the node, not the instance, under HA).
+        - name: Find OpenSpecimen app log files for the CI email
+          ansible.builtin.find:
+            paths: "{{ openspecimen_data_dir }}/logs"
+            patterns: "*os*.log"
+          register: _app_log_files
+          failed_when: false
 
-    - name: Fetch full OpenSpecimen app log(s) for the CI email
-      ansible.builtin.fetch:
-        src: "{{ item.path }}"
-        dest: "{{ deploy_report_dir }}/os-{{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}-{{ item.path | basename }}"
-        flat: true
-      loop: "{{ _app_log_files.files | default([]) }}"
-      loop_control:
-        label: "{{ item.path | basename }}"
-      become: true
-      failed_when: false
-      changed_when: false
-      when: deploy_report_dir | default('') | trim | length > 0
+        # No size cap here either (full file, as-is, unlike catalina.out this has
+        # no truncate-on-restart equivalent in this role) - deliberate: fidelity
+        # over a bounded transfer, for the rare failure-diagnosis path this is.
+        - name: Fetch full OpenSpecimen app log(s) for the CI email
+          ansible.builtin.fetch:
+            src: "{{ item.path }}"
+            dest: "{{ deploy_report_dir }}/os-{{ openspecimen_instance_name | default(openspecimen_service_name | default('openspecimen'), true) }}-{{ item.path | basename }}"
+            flat: true
+          loop: "{{ _app_log_files.files | default([]) }}"
+          loop_control:
+            label: "{{ item.path | basename }}"
+          failed_when: false
+          changed_when: false
 
     # Written on the control node into deploy_report_dir when the caller passes it
     # (no-op for CLI runs) - same mechanism as .component-versions-*.json above, so
