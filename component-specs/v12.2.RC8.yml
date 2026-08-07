@@ -1,0 +1,27 @@
+---
+# Component version spec — OpenSpecimen v12.2.RC8.
+# Same component versions as v12.2.RC12.yml (RC6/RC8/RC10/RC12 share one
+# validated baseline) - see _template.yml for the general format.
+
+component_spec:
+  release: "openspecimen_v12.2.RC8"
+
+  # Pinned exact — installed by the tomcat role (#91). 3-part download version
+  # (archive.apache.org artifact); Tomcat reports it as server number 9.0.111.0.
+  tomcat: "9.0.111"
+
+  # OS packages — supported track + the build validated on Ubuntu 24.04.
+  java:
+    track: "17"
+    validated: "17.0.19"
+  mysql:
+    track: "8.4"           # 8.4 LTS - latest patch from the MySQL Community repo
+    validated: "8.4"
+  apache:
+    track: "2.4"
+    validated: "2.4.58"
+
+# Connectors ship in the release zip (not pinned here). Uncomment and set if a
+# value is available (read from tomcat-as/lib/ or the release zip):
+# mysql_connector: "x.y.z"
+# oracle_jdbc: "x.y.z"
