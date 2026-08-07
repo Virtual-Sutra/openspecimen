@@ -1,6 +1,10 @@
 ---
-# Rollback flow - included from top-level rollback.yml (explicit) or site.yml
-# (auto, when the requested release is older than installed).
+# Rollback flow - included from: top-level rollback.yml (explicit, operator-
+# triggered); site.yml/direction.yml (auto, when the requested release is older
+# than installed - passes target_version); or this role's own main.yml rescue
+# block (auto-restore-on-failed-upgrade, #92/ADR-004 - passes backup_timestamp
+# for the exact backup this failed run itself took, so there is no resolution
+# ambiguity).
 # Backup selection (precedence): backup_timestamp > target_version (.release match,
 # used by auto-rollback) > most recent (mtime).
 # Restores the prior backup END TO END - WAR, config, plugins, and (local MySQL) the
@@ -163,7 +167,15 @@
     - db_type | default('mysql') == 'mysql'
 
 # ── 3. Stop the service ──────────────────────────────────────────────────────
-
+# Unconditional stop for the full restore window, unbounded by DB size - unlike
+# the forward pre-upgrade backup (db_backup_auto_max_mb gates that to avoid an
+# SLA-busting inline dump), there is no equivalent size-based gate here. A
+# large-DB restore therefore means a longer guaranteed-down window than the
+# forward path risks. Deliberate for now, not an oversight: auto-restore-on-
+# failure (#92/ADR-004) was chosen to run automatically with no confirmation
+# step, and a restore-side size gate would reintroduce exactly the kind of
+# halt-and-wait behaviour that decision rejected. Revisit if large-DB auto-
+# restore downtime proves too long in practice.
 - name: Stop openspecimen service
   ansible.builtin.systemd:
     name: "{{ openspecimen_service_name | default('openspecimen') }}"
@@ -362,16 +374,52 @@
     state: started
     daemon_reload: true
 
-- name: Wait for the app to respond
-  ansible.builtin.shell: >
-    curl -sf -o /dev/null -w "%{http_code}"
-    http://localhost:{{ openspecimen_port }}{{ openspecimen_context_path | default('/openspecimen') }}/rest/ng/config-settings/app-props
-    | grep -qE '^(200|401)$'
-  register: _rollback_health
-  until: _rollback_health.rc == 0
-  retries: 30
-  delay: 10
-  changed_when: false
+# retries/delay match the main deploy's own startup wait (roles/openspecimen/
+# tasks/main.yml "Wait for Tomcat startup completion") - this task didn't
+# before, and now that a failed forward upgrade can cascade straight into this
+# wait (auto-restore-on-failure, #92/ADR-004), a narrower timeout here would
+# spuriously fail a restore whose only problem is a slower-starting old
+# version. On timeout, dump the same diagnostics the main deploy's readiness
+# gate does (service status + catalina.out tail) instead of a bare curl
+# failure - every caller of rollback.yml (explicit, auto-downgrade, auto-
+# restore-on-failure) benefits, not just the new one.
+- name: Wait for the app to respond after rollback
+  block:
+    - name: Wait for the app to respond
+      ansible.builtin.shell: >
+        curl -sf -o /dev/null -w "%{http_code}"
+        http://localhost:{{ openspecimen_port }}{{ openspecimen_context_path | default('/openspecimen') }}/rest/ng/config-settings/app-props
+        | grep -qE '^(200|401)$'
+      register: _rollback_health
+      until: _rollback_health.rc == 0
+      retries: 90
+      delay: 10
+      changed_when: false
+  rescue:
+    - name: Show service status after a failed rollback readiness wait
+      ansible.builtin.shell: systemctl status {{ openspecimen_service_name | default('openspecimen') }} --no-pager -l 2>&1 || true
+      register: _rollback_service_status
+      changed_when: false
+
+    - name: Tail catalina.out after a failed rollback readiness wait
+      ansible.builtin.shell: "tail -100 {{ catalina_base }}/logs/catalina.out 2>&1 || echo '(catalina.out not found)'"
+      register: _rollback_catalina_tail
+      changed_when: false
+
+    - name: Fail with rollback readiness diagnostics
+      ansible.builtin.fail:
+        msg: |
+          ✗ Restored to {{ _restore_path | basename }}, but the app did not
+            respond within {{ (90 * 10 / 60) | int }} minutes of restart.
+
+          Customer: {{ inventory_hostname }}
+          Restored: {{ _restore_path | basename }} ({{ 'DB included' if (_db_restored | default(false)) else 'WAR/config/plugins only, no DB' }})
+
+          Service status:
+          {{ _rollback_service_status.stdout | default('(unavailable)') }}
+
+          Last 100 catalina.out lines:
+          {{ _rollback_catalina_tail.stdout | default('(unavailable)') }}
 
 - name: Rollback complete
   ansible.builtin.debug:

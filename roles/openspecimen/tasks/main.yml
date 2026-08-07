@@ -262,6 +262,30 @@
     - (_db_size_mb_val | int) > (db_backup_auto_max_mb | default(2048) | int)
     - not (db_backup_confirmed | default(false) | bool)
 
+# Explicit, operator-facing reason whenever the automatic DB dump above will NOT
+# run - otherwise the skip is silent (a bare Ansible "skipping" line), and an
+# operator reading the log has no way to tell "no DB backup was taken" from
+# "there was nothing to back up". Three independent skip reasons, checked in the
+# same order the gates above check them.
+- name: Log DB backup skip reason (no MySQL dump will be taken this upgrade)
+  ansible.builtin.debug:
+    msg: >-
+      {% if not (db_managed | default(true) | bool) -%}
+      Skipping automatic MySQL backup: db_managed=false (externally managed DB -
+      RDS/Oracle). Take a snapshot via your DB provider's own tooling before this
+      upgrade if you want a database rollback point; rollback.yml will restore
+      WAR/config/plugins only.
+      {%- elif (db_type | default('mysql')) != 'mysql' -%}
+      Skipping automatic MySQL backup: db_type={{ db_type }} (not mysql).
+      {%- elif not (db_backup_enabled | default(true) | bool) -%}
+      Skipping automatic MySQL backup: db_backup_enabled=false. rollback.yml will
+      restore WAR/config/plugins only, not the database.
+      {%- endif %}
+  when:
+    - openspecimen_install_type == 'upgrade'
+    - not (_plugins_only_change | default(false) or _config_only_change | default(false))
+    - not (db_managed | default(true) | bool and (db_type | default('mysql') == 'mysql') and db_backup_enabled | default(true) | bool)
+
 - name: Stop service for upgrade backup
   ansible.builtin.systemd:
     name: "{{ openspecimen_service_name | default('openspecimen') }}"
@@ -1036,7 +1060,61 @@
       changed_when: false
       when: deploy_report_dir | default('') | trim | length > 0
 
-    - name: Fail after diagnostics
+    # ── Auto-restore to the pre-upgrade backup (#92, ADR-004) ──────────────────
+    # Eligible exactly when "Backup old WAR" above actually ran and took a backup
+    # to restore from - same gate, on purpose: openspecimen_install_type ==
+    # 'upgrade' and not a plugins/config-only fast path (which never backs up the
+    # WAR). A fresh install failing has no prior state to restore to.
+    # Scoped to readiness-gate failure ONLY, not the WAR/plugin-extraction rescue
+    # blocks earlier in this file - those fail before the service is touched, so
+    # there is nothing live to roll back yet.
+    - name: Determine whether an auto-restore is possible
+      ansible.builtin.set_fact:
+        _auto_restore_eligible: >-
+          {{ (openspecimen_install_type == 'upgrade')
+             and not (_plugins_only_change | default(false) or _config_only_change | default(false)) }}
+
+    # Passes backup_timestamp explicitly (this run's own backup_ts, computed
+    # above before the upgrade started) rather than letting rollback.yml resolve
+    # "most recent" or "matching version" - we already know exactly which backup
+    # belongs to this failed attempt, so there is no ambiguity to resolve.
+    # rollback.yml itself: stops the service, restores DB (if a dump exists -
+    # warns and skips otherwise, e.g. db_managed=false or a large-DB manual-
+    # backup upgrade), WAR, plugins, connector jar, config, and the release
+    # marker, then restarts and waits for the app to respond. Sets _db_restored
+    # for the failure message below.
+    #
+    # Wrapped in its own rescue: a failure INSIDE the restore itself (mysql
+    # restore erroring mid-stream, the narrower post-restore readiness wait
+    # timing out on a slower-starting old version) must never (a) silently
+    # swallow the composed failure message below in favour of a bare
+    # rollback.yml error, or (b) be mistaken for "nothing was attempted" - an
+    # interrupted `--add-drop-database` restore can leave the schema
+    # dropped/half-populated, a WORSE state than the failed upgrade alone.
+    # _auto_restore_failed distinguishes this from a clean success below so the
+    # operator gets explicit "do not assume this host is safe" guidance instead
+    # of either a false "restored" claim or a confusing raw stack trace.
+    - name: Auto-restore to the pre-upgrade backup after a failed startup
+      when: _auto_restore_eligible
+      block:
+        - name: Log auto-restore start
+          ansible.builtin.debug:
+            msg: >-
+              ✗ Upgrade to {{ openspecimen_release }} failed to start on
+              {{ inventory_hostname }}. Auto-restoring to the pre-upgrade backup
+              ({{ backup_ts.stdout }}) taken at the start of this run...
+
+        - name: Run rollback tasks against this run's own pre-upgrade backup
+          ansible.builtin.include_tasks: rollback.yml
+          vars:
+            backup_timestamp: "{{ backup_ts.stdout }}"
+      rescue:
+        - name: Capture the auto-restore failure (surfaced in the message below, not raised directly)
+          ansible.builtin.set_fact:
+            _auto_restore_failed: true
+            _auto_restore_error: "{{ ansible_failed_result.msg | default(ansible_failed_result.stdout | default('(no error detail captured)'), true) }}"
+
+    - name: Fail after diagnostics (and auto-restore, if one was attempted)
       ansible.builtin.fail:
         msg: |
           ✗ OpenSpecimen failed to start (a startup failure was logged, or it did
@@ -1045,6 +1123,33 @@
           Customer:  {{ inventory_hostname }}
           Release:   {{ openspecimen_release }}
           Service:   {{ openspecimen_service_name | default('openspecimen') }} ({{ catalina_base }})
+
+          {% if _auto_restore_eligible and (_auto_restore_failed | default(false)) -%}
+          ⚠ AUTO-RESTORE ITSELF FAILED - DO NOT ASSUME THIS HOST IS SAFE.
+            The pre-upgrade backup ({{ backup_ts.stdout }}) restore was interrupted
+            partway through:
+              {{ _auto_restore_error | default('(no error detail captured)') }}
+            Because the DB restore uses --add-drop-database, an interruption can
+            leave the schema DROPPED or PARTIALLY POPULATED - worse than the
+            failed upgrade alone. Do not assume the previous version's data is
+            intact. Before anything else:
+              1. Check the database directly: mysql -h {{ mysql_db_host }} -u {{ mysql_db_user }} -p -e 'show tables;' {{ mysql_db_name }}
+              2. Check service state: systemctl status {{ openspecimen_service_name | default('openspecimen') }}
+              3. Manually re-run the restore against the same backup once the above is understood:
+                   ansible-playbook -i inventory/customers/{{ inventory_hostname }}/ rollback.yml -e backup_timestamp={{ backup_ts.stdout }}
+          {% elif _auto_restore_eligible -%}
+          Auto-restore: this host was automatically rolled back to the pre-upgrade
+            backup ({{ backup_ts.stdout }}) -
+            {{ 'the database was restored with it' if (_db_restored | default(false)) else 'WAR/config/plugins only - the database was NOT restored (see the rollback output above for why)' }}.
+            The service should be back up and serving the PREVIOUS version now.
+            This job still reports FAILURE: the requested upgrade to
+            {{ openspecimen_release }} did not succeed, even though the host self-recovered.
+          {% else -%}
+          Auto-restore: NOT attempted -
+            {{ 'this is a fresh install with no prior backup to restore to.' if openspecimen_install_type != 'upgrade' else 'this was a plugins/config-only fast-path change with no WAR backup to restore from.' }}
+            The host may be left with the failed change partially applied - check
+            the diagnostics above and consider a manual rollback.yml run.
+          {% endif %}
 
           What likely happened (most common):
             1. Database migration failure (Liquibase)
