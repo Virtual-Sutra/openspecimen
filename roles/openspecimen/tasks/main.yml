@@ -1082,10 +1082,18 @@
     # warns and skips otherwise, e.g. db_managed=false or a large-DB manual-
     # backup upgrade), WAR, plugins, connector jar, config, and the release
     # marker, then restarts and waits for the app to respond. Sets _db_restored
-    # for the failure message below. A failure INSIDE this restore (e.g. the
-    # resolved backup is somehow incomplete) surfaces rollback.yml's own
-    # operator-guidance error directly and stops here - not layered with a
-    # second rescue in this first version.
+    # for the failure message below.
+    #
+    # Wrapped in its own rescue: a failure INSIDE the restore itself (mysql
+    # restore erroring mid-stream, the narrower post-restore readiness wait
+    # timing out on a slower-starting old version) must never (a) silently
+    # swallow the composed failure message below in favour of a bare
+    # rollback.yml error, or (b) be mistaken for "nothing was attempted" - an
+    # interrupted `--add-drop-database` restore can leave the schema
+    # dropped/half-populated, a WORSE state than the failed upgrade alone.
+    # _auto_restore_failed distinguishes this from a clean success below so the
+    # operator gets explicit "do not assume this host is safe" guidance instead
+    # of either a false "restored" claim or a confusing raw stack trace.
     - name: Auto-restore to the pre-upgrade backup after a failed startup
       when: _auto_restore_eligible
       block:
@@ -1100,6 +1108,11 @@
           ansible.builtin.include_tasks: rollback.yml
           vars:
             backup_timestamp: "{{ backup_ts.stdout }}"
+      rescue:
+        - name: Capture the auto-restore failure (surfaced in the message below, not raised directly)
+          ansible.builtin.set_fact:
+            _auto_restore_failed: true
+            _auto_restore_error: "{{ ansible_failed_result.msg | default(ansible_failed_result.stdout | default('(no error detail captured)'), true) }}"
 
     - name: Fail after diagnostics (and auto-restore, if one was attempted)
       ansible.builtin.fail:
@@ -1111,7 +1124,20 @@
           Release:   {{ openspecimen_release }}
           Service:   {{ openspecimen_service_name | default('openspecimen') }} ({{ catalina_base }})
 
-          {% if _auto_restore_eligible -%}
+          {% if _auto_restore_eligible and (_auto_restore_failed | default(false)) -%}
+          ⚠ AUTO-RESTORE ITSELF FAILED - DO NOT ASSUME THIS HOST IS SAFE.
+            The pre-upgrade backup ({{ backup_ts.stdout }}) restore was interrupted
+            partway through:
+              {{ _auto_restore_error | default('(no error detail captured)') }}
+            Because the DB restore uses --add-drop-database, an interruption can
+            leave the schema DROPPED or PARTIALLY POPULATED - worse than the
+            failed upgrade alone. Do not assume the previous version's data is
+            intact. Before anything else:
+              1. Check the database directly: mysql -h {{ mysql_db_host }} -u {{ mysql_db_user }} -p -e 'show tables;' {{ mysql_db_name }}
+              2. Check service state: systemctl status {{ openspecimen_service_name | default('openspecimen') }}
+              3. Manually re-run the restore against the same backup once the above is understood:
+                   ansible-playbook -i inventory/customers/{{ inventory_hostname }}/ rollback.yml -e backup_timestamp={{ backup_ts.stdout }}
+          {% elif _auto_restore_eligible -%}
           Auto-restore: this host was automatically rolled back to the pre-upgrade
             backup ({{ backup_ts.stdout }}) -
             {{ 'the database was restored with it' if (_db_restored | default(false)) else 'WAR/config/plugins only - the database was NOT restored (see the rollback output above for why)' }}.
