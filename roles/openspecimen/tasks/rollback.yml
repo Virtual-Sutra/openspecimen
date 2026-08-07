@@ -166,6 +166,17 @@
     - db_managed | default(true) | bool
     - db_type | default('mysql') == 'mysql'
 
+- name: Log DB restore start
+  ansible.builtin.debug:
+    msg: >-
+      Restoring database {{ mysql_db_name }} from
+      {{ (_db_dump.files | first).path }}
+      ({{ ((_db_dump.files | first).size / 1024 / 1024) | round(1) }} MB gzipped) ...
+  when:
+    - db_managed | default(true) | bool
+    - db_type | default('mysql') == 'mysql'
+    - (_db_dump.matched | default(0)) > 0
+
 # ── 3. Stop the service ──────────────────────────────────────────────────────
 # Unconditional stop for the full restore window, unbounded by DB size - unlike
 # the forward pre-upgrade backup (db_backup_auto_max_mb gates that to avoid an
@@ -193,6 +204,16 @@
   args:
     executable: /bin/bash
   no_log: true
+  when:
+    - db_managed | default(true) | bool
+    - db_type | default('mysql') == 'mysql'
+    - (_db_dump.matched | default(0)) > 0
+
+- name: Log DB restore confirmation
+  ansible.builtin.debug:
+    msg: >-
+      ✓ Database {{ mysql_db_name }} restored from
+      {{ (_db_dump.files | first).path | basename }}.
   when:
     - db_managed | default(true) | bool
     - db_type | default('mysql') == 'mysql'

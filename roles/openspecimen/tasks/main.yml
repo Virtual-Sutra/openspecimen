@@ -331,6 +331,19 @@
 # so they fall through here without an SLA-busting inline dump.
 # --add-drop-database --databases makes the restore drop+recreate the schema
 # cleanly (removes tables added by migrations after the backup).
+- name: Log DB backup start
+  ansible.builtin.debug:
+    msg: >-
+      Backing up database {{ mysql_db_name }} ({{ _db_size_mb_val | default('?') }} MB) to
+      {{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/db/{{ mysql_db_name }}.sql.gz ...
+  when:
+    - openspecimen_install_type == 'upgrade'
+    - not (_plugins_only_change | default(false) or _config_only_change | default(false))
+    - db_managed | default(true) | bool
+    - db_type | default('mysql') == 'mysql'
+    - db_backup_enabled | default(true) | bool
+    - (_db_size_mb_val | default(0) | int) <= (db_backup_auto_max_mb | default(2048) | int)
+
 - name: Back up database (mysqldump) on upgrade
   ansible.builtin.shell: |
     set -o pipefail
@@ -347,6 +360,26 @@
     - db_type | default('mysql') == 'mysql'
     - db_backup_enabled | default(true) | bool
     - (_db_size_mb_val | default(0) | int) <= (db_backup_auto_max_mb | default(2048) | int)
+
+- name: Stat the database backup just taken
+  ansible.builtin.stat:
+    path: "{{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/db/{{ mysql_db_name }}.sql.gz"
+  register: _db_backup_stat
+  when:
+    - openspecimen_install_type == 'upgrade'
+    - not (_plugins_only_change | default(false) or _config_only_change | default(false))
+    - db_managed | default(true) | bool
+    - db_type | default('mysql') == 'mysql'
+    - db_backup_enabled | default(true) | bool
+    - (_db_size_mb_val | default(0) | int) <= (db_backup_auto_max_mb | default(2048) | int)
+
+- name: Log DB backup confirmation
+  ansible.builtin.debug:
+    msg: >-
+      ✓ Database backup written:
+      {{ openspecimen_backup_dir }}/{{ backup_ts.stdout }}/db/{{ mysql_db_name }}.sql.gz
+      ({{ (_db_backup_stat.stat.size / 1024 / 1024) | round(1) }} MB gzipped)
+  when: _db_backup_stat.stat.exists | default(false)
 
 # Remove orphan JARs before the backup mv, else the backup snapshots them and a
 # rollback resurrects a plugin the operator just removed from inventory.
