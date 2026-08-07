@@ -1,6 +1,10 @@
 ---
-# Rollback flow - included from top-level rollback.yml (explicit) or site.yml
-# (auto, when the requested release is older than installed).
+# Rollback flow - included from: top-level rollback.yml (explicit, operator-
+# triggered); site.yml/direction.yml (auto, when the requested release is older
+# than installed - passes target_version); or this role's own main.yml rescue
+# block (auto-restore-on-failed-upgrade, #92/ADR-004 - passes backup_timestamp
+# for the exact backup this failed run itself took, so there is no resolution
+# ambiguity).
 # Backup selection (precedence): backup_timestamp > target_version (.release match,
 # used by auto-rollback) > most recent (mtime).
 # Restores the prior backup END TO END - WAR, config, plugins, and (local MySQL) the
