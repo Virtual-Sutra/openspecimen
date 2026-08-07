@@ -1,12 +1,12 @@
 ---
-# Component version spec — OpenSpecimen v12.2.RC13.
+# Component version spec — OpenSpecimen v12.2.RC14.
 # Captured post-install from a running deployment (Ubuntu 24.04). See _template.yml.
 
 component_spec:
-  release: "openspecimen_v12.2.RC13"
+  release: "openspecimen_v12.2.RC14"
 
   # Pinned exact — installed by the tomcat role (#91). 3-part download version
-  # (archive.apache.org artifact); Tomcat reports it as server number 9.0.118.0.
+  # (archive.apache.org artifact); Tomcat reports it as server number 9.0.120.0.
   tomcat: "9.0.120"
 
   # OS packages — supported track + the build validated on Ubuntu 24.04.
