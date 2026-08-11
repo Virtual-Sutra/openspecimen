@@ -1,0 +1,15 @@
+---
+# ── Test profile: ocserv AnyConnect PoC target (Ubuntu 22.04, ADR-011) ───────
+# Same Debian/Ubuntu code path as the other local test profiles - the only
+# thing this profile validates differently is reachability: this host is only
+# reachable through an operator-connected VPN tunnel, not directly. See ./hosts
+# for connection notes.
+#
+# openspecimen_release is NOT set here - always supplied at run time
+# (Jenkins RELEASE_FILE dropdown, or -e openspecimen_release=<name> on the CLI).
+
+# vpn_required tells site.yml's pre-flight play (ADR-011) to verify the target's
+# SSH port answers before the main play starts, instead of failing deep inside
+# the implicit "Gathering Facts" step with a generic timeout. It's purely a
+# fail-fast signal - nothing here drives the VPN tunnel itself.
+vpn_required: true

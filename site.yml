@@ -25,6 +25,42 @@
 # server.xml/context.xml over the shared conf - the reuse safety-net catches the
 # lost datasource and fails with guidance; re-onboard such a host.
 
+# ── VPN-gated targets (ADR-011) - fail fast, not deep in the run ───────────────
+# vpn_required (customer group_vars, opt-in, default false) marks a target that's
+# only reachable once an operator has manually connected a VPN tunnel on the
+# controller - Ansible/Jenkins never drives the tunnel itself (see docs/vpn/).
+# `connection: local` + `gather_facts: false` runs this BEFORE the main play's
+# implicit fact-gathering would otherwise be the first thing to hit the target -
+# without it, a down tunnel fails deep inside "Gathering Facts" with a generic
+# SSH timeout instead of this play's explicit message. This only probes the raw
+# TCP port (cheap, no SSH auth/become involved) - it catches "tunnel isn't up
+# at all", not slow-but-connected auth/privilege-escalation, which the
+# ansible_become_timeout override (see inventory/customers/*/hosts) covers.
+- name: Pre-flight - verify VPN-gated targets are reachable
+  hosts: openspecimen
+  gather_facts: false
+  connection: local
+  tags: [always]
+  tasks:
+    - name: Wait for the target's SSH port to answer
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: "{{ ansible_port | default(22) }}"
+        timeout: "{{ vpn_preflight_timeout | default(15) }}"
+      when: vpn_required | default(false) | bool
+      register: _vpn_preflight
+      ignore_errors: true
+
+    - name: Fail with guidance when the VPN-gated target is unreachable
+      ansible.builtin.fail:
+        msg: >-
+          Cannot reach {{ inventory_hostname }} ({{ ansible_host | default(inventory_hostname) }}:{{ ansible_port | default(22) }}).
+          vpn_required is set for this customer - confirm an operator has
+          connected the VPN tunnel on this controller, then re-run. See docs/vpn/.
+      when:
+        - vpn_required | default(false) | bool
+        - _vpn_preflight is failed
+
 - name: Deploy OpenSpecimen
   hosts: openspecimen
   become: true

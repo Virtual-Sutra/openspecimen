@@ -1,0 +1,32 @@
+# ── VPN-gated test profile: ocserv AnyConnect PoC target (ADR-011) ──────────
+# Validates the "reach a target only reachable through a VPN tunnel" shape
+# from ADR-011 / .planning/design/011-vpn-connectivity-design.md (in the
+# openspecimen-ansible repo). Unlike the other hosts-*.sample profiles, this
+# target's firewall only allows SSH from the ocserv VPN server's own IP - it's
+# only reachable while an operator has manually connected an openconnect
+# tunnel wherever this playbook runs from. Ansible/Jenkins never brings the
+# tunnel up itself - see infra-orbstack's vpn/ component and
+# docs/vpn/ocserv-anyconnect-poc.md for how to connect it.
+#
+# ansible_host is the target's real OrbStack IP (not .orb.local). Re-check
+# with `orbctl list` if the VM is ever recreated.
+#
+# Usage (after the operator has connected the VPN tunnel):
+#   ansible-playbook -i inventory/customers/ocserv-openspecimen/ site.yml \
+#     -e mysql_db_password=localtest
+# ─────────────────────────────────────────────────────────────────────────────
+
+[openspecimen]
+ocserv-openspecimen  ansible_host=192.168.139.125  ansible_user=ubuntu
+
+[all:vars]
+ansible_python_interpreter   = /usr/bin/python3
+ansible_ssh_private_key_file = ~/.orbstack/ssh/id_ed25519
+
+# 60s (default 10s): this target's VPN tunnel sees materially higher round-trip
+# latency than a direct/EICE connection - the default was tight enough to fail
+# privilege escalation before the connection even finished setting up. Scoped to
+# this customer only, not a global ansible.cfg change - direct/EICE customers
+# should keep failing fast on a genuinely unreachable host.
+ansible_timeout        = 60
+ansible_become_timeout = 60
