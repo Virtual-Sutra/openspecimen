@@ -39,9 +39,13 @@
       community.mysql.mysql_user:
         name: "{{ _instance.db_user }}"
         password: "{{ _instance.db_password }}"
-        priv:
-          "{{ _instance.db_name }}.*": ALL
-          "*.*": "PROCESS,SHOW_ROUTINE"
+        # String form, not a dict - a dict key here (`"{{ _instance.db_name
+        # }}.*": ALL`) does NOT get Jinja-templated by this module, so the
+        # GRANT silently lands on a database literally named
+        # "{{ _instance.db_name }}" instead of the real one. Confirmed live:
+        # `SHOW GRANTS` showed exactly that literal string as the db name,
+        # and the real database was left with no ALL-privileges grant at all.
+        priv: "{{ _instance.db_name }}.*:ALL/*.*:PROCESS,SHOW_ROUTINE"
         host: "{{ mysql_grant_host }}"
         state: present
         login_unix_socket: "{{ _mysql_socket }}"
@@ -56,9 +60,13 @@
       community.mysql.mysql_user:
         name: "{{ _instance.db_user }}"
         password: "{{ _instance.db_password }}"
-        priv:
-          "{{ _instance.db_name }}.*": ALL
-          "*.*": "PROCESS,SHOW_ROUTINE"
+        # String form, not a dict - a dict key here (`"{{ _instance.db_name
+        # }}.*": ALL`) does NOT get Jinja-templated by this module, so the
+        # GRANT silently lands on a database literally named
+        # "{{ _instance.db_name }}" instead of the real one. Confirmed live:
+        # `SHOW GRANTS` showed exactly that literal string as the db name,
+        # and the real database was left with no ALL-privileges grant at all.
+        priv: "{{ _instance.db_name }}.*:ALL/*.*:PROCESS,SHOW_ROUTINE"
         host: localhost
         state: present
         login_unix_socket: "{{ _mysql_socket }}"
