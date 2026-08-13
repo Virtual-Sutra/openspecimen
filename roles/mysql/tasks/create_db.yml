@@ -8,11 +8,44 @@
     state: present
     login_unix_socket: "{{ _mysql_socket }}"
 
+# ADR-012: mysql_grant_host resolves to the app host's ansible_host for
+# split-host customers - but an EICE/EC2-instance-ID app host's ansible_host
+# IS the instance ID, not a routable address, so a grant against it would be
+# silently useless. Fail fast here with the fix instead of writing that grant.
+- name: Fail fast when mysql_grant_host looks like an EC2 instance ID
+  ansible.builtin.fail:
+    msg: >-
+      mysql_grant_host resolved to '{{ mysql_grant_host }}', which looks like
+      an EC2 instance ID, not a routable address - GRANT can't authenticate
+      against it. This customer's OpenSpecimen host is EICE/EC2-based, where
+      ansible_host is an instance ID. Set mysql_grant_host_override explicitly
+      in this customer's 20-customer.yml, to the app host's real VPC-private IP.
+  when:
+    - _mysql_split_host
+    - mysql_grant_host is match('^i-[0-9a-f]{8,17}$')
+
 - name: "Create OpenSpecimen database user ({{ _instance.db_user }})"
-  community.mysql.mysql_user:
-    name: "{{ _instance.db_user }}"
-    password: "{{ _instance.db_password }}"
-    priv: "{{ _instance.db_name }}.*:ALL"
-    host: localhost
-    state: present
-    login_unix_socket: "{{ _mysql_socket }}"
+  block:
+    - name: "Grant privileges to {{ _instance.db_user }}@{{ mysql_grant_host }}"
+      community.mysql.mysql_user:
+        name: "{{ _instance.db_user }}"
+        password: "{{ _instance.db_password }}"
+        priv: "{{ _instance.db_name }}.*:ALL"
+        host: "{{ mysql_grant_host }}"
+        state: present
+        login_unix_socket: "{{ _mysql_socket }}"
+  rescue:
+    # Surface the exact MySQL error and the resolved grant host inline -
+    # a malformed mysql_grant_host_override or a stale conflicting grant
+    # from a prior topology change must be diagnosable from the console
+    # alone, not require re-deriving mysql_grant_host by hand.
+    - name: Report GRANT failure with actionable detail
+      ansible.builtin.fail:
+        msg: >-
+          Failed to GRANT privileges for {{ _instance.db_user }}@{{ mysql_grant_host }}
+          on {{ _instance.db_name }}: {{ (ansible_failed_result.msg | default('unknown error')) }}.
+          mysql_grant_host resolved to '{{ mysql_grant_host }}' - confirm this is a valid
+          MySQL grant host (IP, hostname, or CIDR) MySQL will actually see the connection
+          from, and that no conflicting grant already exists for this user from a prior
+          topology (e.g. a stale 'localhost' grant left over from before this customer
+          switched to split-host, or vice versa).

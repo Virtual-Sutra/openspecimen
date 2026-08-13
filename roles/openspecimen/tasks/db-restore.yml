@@ -28,12 +28,24 @@
       {{ db_backup_dir | default(openspecimen_instance_dir ~ '/db-backups') }}.
   when: not (db_restore_confirm | default(false) | bool)
 
+# ADR-012: resolves _mysql_target_host (self, unless mysql_host is set) and
+# fails fast if a dedicated MySQL host is configured but unreachable, before
+# any restore work starts. The dump lives on the MySQL host for split-host
+# (db-backup.yml wrote it there) - find/stat below must look there too.
+- name: Resolve the MySQL target host
+  ansible.builtin.import_tasks: "{{ playbook_dir }}/tasks/resolve-mysql-target.yml"
+
 - name: Find newest dump in db_backup_dir (when db_backup_file not given)
   ansible.builtin.find:
     paths:    "{{ db_backup_dir | default(openspecimen_instance_dir ~ '/db-backups') }}"
     patterns: "*.sql.gz"
   register: _db_dumps
   when: not (db_backup_file is defined and db_backup_file | trim)
+  delegate_to: "{{ _mysql_target_host }}"
+  vars:
+    ansible_user: "{{ _mysql_conn_user if _mysql_split_host else omit }}"
+    ansible_ssh_private_key_file: "{{ _mysql_conn_key if (_mysql_split_host and not _mysql_is_ec2) else omit }}"
+    ansible_ssh_common_args: "{{ _mysql_conn_proxy if (_mysql_split_host and _mysql_is_ec2) else omit }}"
 
 - name: Resolve dump file to restore
   ansible.builtin.set_fact:
@@ -59,6 +71,11 @@
   ansible.builtin.stat:
     path: "{{ _restore_dump }}"
   register: _restore_dump_stat
+  delegate_to: "{{ _mysql_target_host }}"
+  vars:
+    ansible_user: "{{ _mysql_conn_user if _mysql_split_host else omit }}"
+    ansible_ssh_private_key_file: "{{ _mysql_conn_key if (_mysql_split_host and not _mysql_is_ec2) else omit }}"
+    ansible_ssh_common_args: "{{ _mysql_conn_proxy if (_mysql_split_host and _mysql_is_ec2) else omit }}"
 
 - name: Fail if the dump file is missing
   ansible.builtin.fail:
@@ -79,13 +96,22 @@
   failed_when: false
 
 - name: Restore database from dump
+  # -h 127.0.0.1 (not mysql_db_host): once delegated, this task runs ON the
+  # MySQL host itself, reading the dump from its own local filesystem and
+  # connecting via its own loopback - correct for both topologies, since
+  # delegate_to is a no-op when co-located.
   ansible.builtin.shell: |
     set -o pipefail
     gunzip -c "{{ _restore_dump }}" \
-      | mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' -h {{ mysql_db_host }}
+      | mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' -h 127.0.0.1
   args:
     executable: /bin/bash
   no_log: true
+  delegate_to: "{{ _mysql_target_host }}"
+  vars:
+    ansible_user: "{{ _mysql_conn_user if _mysql_split_host else omit }}"
+    ansible_ssh_private_key_file: "{{ _mysql_conn_key if (_mysql_split_host and not _mysql_is_ec2) else omit }}"
+    ansible_ssh_common_args: "{{ _mysql_conn_proxy if (_mysql_split_host and _mysql_is_ec2) else omit }}"
 
 - name: Restore complete - service left stopped
   ansible.builtin.debug:

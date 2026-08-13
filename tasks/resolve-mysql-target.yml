@@ -1,0 +1,67 @@
+---
+# Resolve where MySQL actually runs and how to reach it (ADR-012, split-host).
+# Included from site.yml (before the mysql role runs) and from the DB
+# backup/restore task files - the one place this topology decision lives, so
+# provisioning and backup/restore always agree on the target.
+#
+# Co-located (mysql_host undefined): _mysql_target_host == inventory_hostname,
+# so delegate_to at every call site becomes a documented no-op and the
+# connection vars below all evaluate to omit - byte-identical to before this
+# file existed.
+- name: Resolve the MySQL target host
+  ansible.builtin.set_fact:
+    _mysql_target_host: "{{ mysql_host | default(inventory_hostname, true) }}"
+    _mysql_split_host:  "{{ mysql_host is defined }}"
+    _mysql_is_ec2:      "{{ (mysql_host | default('')) is match('^i-[0-9a-f]{8,17}$') }}"
+
+# Connection params for the delegated hop, computed once. Only meaningful
+# (and only ever consumed) when _mysql_split_host - each call site's own
+# vars: block decides whether to apply them via `if _mysql_split_host ...
+# else omit`, never by referencing ansible_user/ansible_ssh_private_key_file/
+# ansible_ssh_common_args inside their own definition (that self-reference
+# does not reliably fall through to the enclosing play's value - learned the
+# hard way earlier in this same change, see mysql_grant_host).
+- name: Compute MySQL delegated-connection parameters
+  ansible.builtin.set_fact:
+    _mysql_conn_user: "{{ mysql_ssh_user | default('ubuntu') }}"
+    _mysql_conn_key: >-
+      {{ mysql_ssh_private_key_file
+         | default('~/.ssh/' ~ (customer | default(openspecimen_instance_name | default('openspecimen'))) ~ '-mysql-deploy', true) }}
+    _mysql_conn_proxy: >-
+      {{ '-o ProxyCommand="aws --region ' ~ (aws_region | default(''))
+         ~ ' ec2-instance-connect open-tunnel --instance-id ' ~ mysql_host
+         ~ ' --remote-port %p"' }}
+  when: _mysql_split_host
+
+# Fail fast with a clear, specific message instead of letting a network-layer
+# failure surface as a raw SSH connection-timeout stack trace from deep inside
+# whatever task happens to be first to actually delegate. Port-only (no auth
+# attempted here) - a network-reachable-but-auth-failing host still passes
+# this and fails later with its own (also clear) SSH error, correctly
+# distinguishing "can't reach it at all" from "reached it, wrong key".
+# Skipped for an EICE target: the tunnel itself only exists for the duration
+# of the delegated connection, so there is nothing to probe here.
+- name: Verify the MySQL host is reachable before attempting to use it
+  ansible.builtin.wait_for:
+    host: "{{ mysql_host }}"
+    port: 22
+    timeout: 10
+  delegate_to: localhost
+  become: false
+  when:
+    - _mysql_split_host
+    - not _mysql_is_ec2
+  register: _mysql_reachability
+  failed_when: false
+
+- name: Fail with an actionable message when the MySQL host is unreachable
+  ansible.builtin.fail:
+    msg: >-
+      MySQL host '{{ mysql_host }}' is not reachable on port 22 - check the
+      VPN tunnel/network path and that the host is up before retrying. (Key
+      auth was not even attempted; this is a network-layer failure, not a
+      credentials problem.)
+  when:
+    - _mysql_split_host
+    - not _mysql_is_ec2
+    - _mysql_reachability is failed or (_mysql_reachability.elapsed | default(0)) >= 10

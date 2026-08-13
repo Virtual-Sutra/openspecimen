@@ -83,6 +83,26 @@
                  | map(attribute='content') | map('b64decode') | map('trim')
                  | select('equalto', '') | list | length > 0) }}
 
+    # ADR-012: mysql_host (dedicated, Ansible-managed MySQL VM) and
+    # db_managed=false (fully external/unmanaged - RDS/Oracle/DBA-owned) are
+    # mutually exclusive topologies. Nothing else would catch this
+    # combination - it would silently attempt to skip AND provision MySQL.
+    - name: Fail fast when db_managed=false and mysql_host are both set
+      ansible.builtin.fail:
+        msg: >-
+          db_managed=false (fully external/unmanaged DB) and mysql_host
+          (dedicated, Ansible-managed MySQL VM, ADR-012) are mutually
+          exclusive - set at most one. If MySQL should be Ansible-managed on
+          its own VM, remove db_managed=false. If it's genuinely external
+          (RDS/Oracle/DBA-owned), remove mysql_host.
+      when:
+        - not (db_managed | default(true) | bool)
+        - mysql_host is defined
+
+    - name: Resolve the MySQL target host
+      ansible.builtin.import_tasks: tasks/resolve-mysql-target.yml
+      tags: [always]
+
   roles:
     # ── Base roles - fresh install only (skipped on fast upgrades)
     - role: common
@@ -93,6 +113,19 @@
         - _full_deploy
         - db_managed | default(true)
       tags: [base]
+      # ADR-012: delegate to the dedicated MySQL VM when mysql_host is set;
+      # default(omit) means no delegation at all when it's unset (undefined,
+      # not falsy) - the role then runs on the current host exactly as
+      # before this var existed. Connection params for the delegated hop are
+      # never set by self-referencing their own name (ansible_user inside
+      # ansible_user's own definition does not reliably fall through to the
+      # enclosing play's value) - each references a distinctly-named fact
+      # computed once in resolve-mysql-target.yml above.
+      delegate_to: "{{ mysql_host | default(omit) }}"
+      vars:
+        ansible_user: "{{ _mysql_conn_user if _mysql_split_host else omit }}"
+        ansible_ssh_private_key_file: "{{ _mysql_conn_key if (_mysql_split_host and not _mysql_is_ec2) else omit }}"
+        ansible_ssh_common_args: "{{ _mysql_conn_proxy if (_mysql_split_host and _mysql_is_ec2) else omit }}"
     # java + tomcat are per-instance (installed in deploy-instance.yml) so instances
     # can run different OpenSpecimen/Tomcat/Java versions side by side; only shared
     # layers (OS packages, MySQL server) stay host-level.
@@ -106,7 +139,8 @@
     - name: Record MySQL (host-level base) stage status for the deploy report
       ansible.builtin.set_fact:
         _mysql_stage: >-
-          {{ 'ok (installed/updated this run)'
+          {{ ('ok (installed/updated this run, on dedicated host ' ~ mysql_host ~ ', ADR-012)'
+                if _mysql_split_host else 'ok (installed/updated this run)')
              if (_full_deploy and (db_managed | default(true)))
              else ('skipped (external DB - db_managed=false: RDS/Oracle)'
                    if not (db_managed | default(true))

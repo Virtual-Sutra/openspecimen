@@ -19,3 +19,23 @@ _mysql_backup_path: "{{ _mysql_backup_dir }}/all-databases-{{ ansible_date_time.
 # Retention: keep this many most-recent dumps, prune older ones so timestamped
 # backups don't fill /var over successive deploys.
 _mysql_backup_keep: 7
+
+# ── Split-host (ADR-012) ────────────────────────────────────────────────────
+# mysql_host set (customer 20-customer.yml) = this role runs delegated to a
+# dedicated MySQL VM instead of co-located on the OpenSpecimen host - see
+# site.yml's "Provision MySQL" task. Unset = today's co-located behavior,
+# byte-identical to before this var existed.
+_mysql_split_host: "{{ mysql_host is defined }}"
+
+# GRANT host scope for the OpenSpecimen DB user. 'localhost' (unchanged) when
+# co-located; the app host's own resolved address when split-host - never '%'.
+# ansible_host here is the CURRENT play's host (OpenSpecimen), since this role
+# always executes within that play's context (see site.yml) even when its
+# tasks are delegated elsewhere for split-host.
+# Override with mysql_grant_host_override (matches the *_override convention
+# above) only when ansible_host isn't the address MySQL will see connections
+# FROM - e.g. NAT, or an EC2-instance-ID app host (EICE), which create_db.yml
+# fails fast on rather than writing a grant against a non-routable value.
+mysql_grant_host: >-
+  {{ mysql_grant_host_override | default(ansible_host, true)
+     if _mysql_split_host else 'localhost' }}

@@ -190,11 +190,18 @@ tomcat_pool_abandon_pct:             60
 mysql_db_name:       openspecimen
 mysql_db_user:       openspecimen
 mysql_db_password:   ~                    # required - pass via -e mysql_db_password=<password>
-mysql_bind_address:  "127.0.0.1"
 
-# Host seen by Tomcat's JDBC URL. Use 127.0.0.1 when DB is on the same VM;
-# set to the RDS endpoint hostname when using RDS.
-mysql_db_host:       "127.0.0.1"
+# 127.0.0.1 (unchanged) unless mysql_host is set (ADR-012, split-host - a
+# dedicated MySQL VM), in which case 0.0.0.0 so the OpenSpecimen host can
+# actually reach it. Must stay this exact conditional form - a flat literal
+# change here would expose every co-located customer's MySQL to the network.
+mysql_bind_address: "{{ '0.0.0.0' if mysql_host is defined else '127.0.0.1' }}"
+
+# Host seen by Tomcat's JDBC URL. 127.0.0.1 (unchanged) when co-located; set
+# to the RDS endpoint hostname when using RDS; defaults to mysql_host (ADR-012,
+# split-host) when that's set - override explicitly only if the JDBC path
+# differs from the SSH target (uncommon).
+mysql_db_host: "{{ mysql_host | default('127.0.0.1') }}"
 
 # mysql_innodb_buffer_pool_size is auto-sized from instance RAM in
 # roles/mysql/defaults/main.yml (25% of RAM on shared VM).

@@ -155,6 +155,18 @@
       - "Backup mtime  : {{ '%Y-%m-%d %H:%M:%S' | strftime(_restore_stat.stat.mtime) }}"
       - "WAR size      : {{ (_war_stat.stat.size / 1024 / 1024) | round(1) }} MB"
 
+# ADR-012: resolves _mysql_target_host (self, unless mysql_host is set). The
+# pre-upgrade backup gate (main.yml) wrote this dump to the same
+# {{ openspecimen_backup_dir }}/<ts>/db/ path but on the MySQL host itself
+# for split-host - probe/restore below must look there too, and fail fast if
+# that host is now unreachable, before assuming "no dump" when it's really
+# "can't reach where the dump is".
+- name: Resolve the MySQL target host
+  ansible.builtin.import_tasks: "{{ playbook_dir }}/tasks/resolve-mysql-target.yml"
+  when:
+    - db_managed | default(true) | bool
+    - db_type | default('mysql') == 'mysql'
+
 # Probe the backup's DB dump (local MySQL). RDS/Oracle/large-DB upgrades have no
 # local dump - those warn below and need a snapshot/manual DB restore.
 - name: Probe database dump in backup
@@ -165,6 +177,11 @@
   when:
     - db_managed | default(true) | bool
     - db_type | default('mysql') == 'mysql'
+  delegate_to: "{{ _mysql_target_host }}"
+  vars:
+    ansible_user: "{{ _mysql_conn_user if _mysql_split_host else omit }}"
+    ansible_ssh_private_key_file: "{{ _mysql_conn_key if (_mysql_split_host and not _mysql_is_ec2) else omit }}"
+    ansible_ssh_common_args: "{{ _mysql_conn_proxy if (_mysql_split_host and _mysql_is_ec2) else omit }}"
 
 - name: Log DB restore start
   ansible.builtin.debug:
@@ -197,10 +214,14 @@
 # written after it - inherent to a full rollback). Local MySQL only; the dump used
 # --add-drop-database (drops+recreates cleanly). RDS/Oracle have no local dump.
 - name: Restore database from backup dump
+  # -h 127.0.0.1 (not mysql_db_host): once delegated, this task runs ON the
+  # MySQL host itself, reading the dump from its own local filesystem and
+  # connecting via its own loopback - correct for both topologies, since
+  # delegate_to is a no-op when co-located.
   ansible.builtin.shell: |
     set -o pipefail
     gunzip -c "{{ (_db_dump.files | first).path }}" \
-      | mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' -h {{ mysql_db_host }}
+      | mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' -h 127.0.0.1
   args:
     executable: /bin/bash
   no_log: true
@@ -208,6 +229,11 @@
     - db_managed | default(true) | bool
     - db_type | default('mysql') == 'mysql'
     - (_db_dump.matched | default(0)) > 0
+  delegate_to: "{{ _mysql_target_host }}"
+  vars:
+    ansible_user: "{{ _mysql_conn_user if _mysql_split_host else omit }}"
+    ansible_ssh_private_key_file: "{{ _mysql_conn_key if (_mysql_split_host and not _mysql_is_ec2) else omit }}"
+    ansible_ssh_common_args: "{{ _mysql_conn_proxy if (_mysql_split_host and _mysql_is_ec2) else omit }}"
 
 - name: Log DB restore confirmation
   ansible.builtin.debug:
