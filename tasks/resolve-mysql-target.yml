@@ -5,8 +5,8 @@
 # provisioning and backup/restore always agree on the target.
 #
 # Co-located (mysql_host undefined): _mysql_target_host == inventory_hostname,
-# so delegate_to at every call site becomes a documented no-op and the
-# connection vars below all evaluate to omit - byte-identical to before this
+# so delegate_to at every call site becomes a documented no-op (self-
+# delegation, no host gets registered below) - byte-identical to before this
 # file existed.
 - name: Resolve the MySQL target host
   ansible.builtin.set_fact:
@@ -14,24 +14,40 @@
     _mysql_split_host:  "{{ mysql_host is defined }}"
     _mysql_is_ec2:      "{{ (mysql_host | default('')) is match('^i-[0-9a-f]{8,17}$') }}"
 
-# Connection params for the delegated hop, computed once. Only meaningful
-# (and only ever consumed) when _mysql_split_host - each call site's own
-# vars: block decides whether to apply them via `if _mysql_split_host ...
-# else omit`, never by referencing ansible_user/ansible_ssh_private_key_file/
-# ansible_ssh_common_args inside their own definition (that self-reference
-# does not reliably fall through to the enclosing play's value - learned the
-# hard way earlier in this same change, see mysql_grant_host).
-- name: Compute MySQL delegated-connection parameters
-  ansible.builtin.set_fact:
-    _mysql_conn_user: "{{ mysql_ssh_user | default('ubuntu') }}"
-    _mysql_conn_key: >-
-      {{ mysql_ssh_private_key_file
-         | default('~/.ssh/' ~ (customer | default(openspecimen_instance_name | default('openspecimen'))) ~ '-mysql-deploy', true) }}
-    _mysql_conn_proxy: >-
-      {{ '-o ProxyCommand="aws --region ' ~ (aws_region | default(''))
-         ~ ' ec2-instance-connect open-tunnel --instance-id ' ~ mysql_host
-         ~ ' --remote-port %p"' }}
+# Register the dedicated MySQL host as a real delegation target, with its own
+# connection vars as genuine per-host vars (module params - a legitimate use
+# of `omit`). Every call site below then just does `delegate_to:
+# "{{ _mysql_target_host }}"` with NO vars: override at all.
+#
+# This is deliberate, not incidental: an earlier version of this file computed
+# _mysql_conn_user/_mysql_conn_key/_mysql_conn_proxy as plain facts and had
+# each call site apply them through a task-level `vars:` block (`ansible_user:
+# "{{ _mysql_conn_user if _mysql_split_host else omit }}"`, etc.). That's
+# broken - assigning `omit` to a magic connection var (ansible_user,
+# ansible_ssh_private_key_file, ansible_ssh_common_args) via a task/role
+# `vars:` block does NOT fall through to the enclosing host's own value the
+# way a module parameter does; it silently corrupts the connection to use no
+# key/user/proxy at all. That fired for every co-located customer (mysql_host
+# unset) on every task carrying that vars: block. add_host avoids this
+# entirely: co-located call sites never set these keys anywhere, so they use
+# the play's own connection unmodified (self-delegation, byte-identical to
+# before this file existed); split-host call sites delegate to a host that
+# already carries real values as its own hostvars.
+- name: Register the dedicated MySQL host as a delegation target
+  ansible.builtin.add_host:
+    name: "{{ mysql_host }}"
+    ansible_host: "{{ mysql_host }}"
+    ansible_user: "{{ mysql_ssh_user | default('ubuntu') }}"
+    ansible_ssh_private_key_file: >-
+      {{ (mysql_ssh_private_key_file
+          | default('~/.ssh/' ~ (customer | default(openspecimen_instance_name | default('openspecimen'))) ~ '-mysql-deploy', true))
+         if not _mysql_is_ec2 else omit }}
+    ansible_ssh_common_args: >-
+      {{ ('-o ProxyCommand="aws --region ' ~ (aws_region | default(''))
+          ~ ' ec2-instance-connect open-tunnel --instance-id ' ~ mysql_host
+          ~ ' --remote-port %p"') if _mysql_is_ec2 else omit }}
   when: _mysql_split_host
+  changed_when: false
 
 # Fail fast with a clear, specific message instead of letting a network-layer
 # failure surface as a raw SSH connection-timeout stack trace from deep inside
