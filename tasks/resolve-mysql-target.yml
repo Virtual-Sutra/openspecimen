@@ -77,19 +77,29 @@
     # play's own connection unmodified (self-delegation, byte-identical to
     # before this file existed); split-host call sites delegate to a host
     # that already carries real values as its own hostvars.
+    # ControlMaster/ControlPersist matter here specifically (not added
+    # repo-wide) because this is the one connection ADR-012 expects to
+    # routinely run over a slower link than the rest of this codebase's
+    # EC2/LAN targets - VPN/on-prem is the primary split-host use case.
+    # Confirmed live over a local VPN PoC tunnel: a cold connection took
+    # ~15s, tripping Ansible's default 12s become-prompt timeout on
+    # ordinary tasks (a plain `sudo whoami` took 15s cold, <1s reused).
+    # Multiplexing pays that cost once per play instead of once per task.
     - name: Register the dedicated MySQL host as a delegation target
       ansible.builtin.add_host:
         name: "{{ mysql_host }}"
         ansible_host: "{{ mysql_host }}"
         ansible_user: "{{ mysql_ssh_user | default('ubuntu') }}"
+        ansible_become_timeout: 60
         ansible_ssh_private_key_file: >-
           {{ (mysql_ssh_private_key_file
               | default('~/.ssh/' ~ (customer | default(openspecimen_instance_name | default('openspecimen'))) ~ '-mysql-deploy', true))
              if not _mysql_is_ec2 else omit }}
         ansible_ssh_common_args: >-
-          {{ ('-o ProxyCommand="aws --region ' ~ (aws_region | default(''))
-              ~ ' ec2-instance-connect open-tunnel --instance-id ' ~ mysql_host
-              ~ ' --remote-port %p"') if _mysql_is_ec2 else omit }}
+          {{ (('-o ProxyCommand="aws --region ' ~ (aws_region | default(''))
+               ~ ' ec2-instance-connect open-tunnel --instance-id ' ~ mysql_host
+               ~ ' --remote-port %p" ') if _mysql_is_ec2 else '')
+             ~ '-o ControlMaster=auto -o ControlPersist=600s -o ControlPath=~/.ansible/cp/mysql-%h-%p-%r' }}
       when: _mysql_split_host
       changed_when: false
 
