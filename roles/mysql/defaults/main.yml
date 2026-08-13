@@ -21,11 +21,10 @@ _mysql_backup_path: "{{ _mysql_backup_dir }}/all-databases-{{ ansible_date_time.
 _mysql_backup_keep: 7
 
 # ── Split-host (ADR-012) ────────────────────────────────────────────────────
-# mysql_host set (customer 20-customer.yml) = this role runs delegated to a
-# dedicated MySQL VM instead of co-located on the OpenSpecimen host - see
-# site.yml's "Provision MySQL" task. Unset = today's co-located behavior,
-# byte-identical to before this var existed.
-_mysql_split_host: "{{ mysql_host is defined }}"
+# _mysql_split_host is NOT defaulted here - tasks/resolve-mysql-target.yml
+# (imported before this role ever runs, tags: always) already sets it as a
+# fact, which outranks role defaults, so a copy here would only ever be dead
+# weight. That file is the one place this topology decision lives.
 
 # GRANT host scope for the OpenSpecimen DB user. 'localhost' (unchanged) when
 # co-located; the app host's own resolved address when split-host - never '%'.

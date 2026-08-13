@@ -22,7 +22,7 @@
       in this customer's 20-customer.yml, to the app host's real VPC-private IP.
   when:
     - _mysql_split_host
-    - mysql_grant_host is match('^i-[0-9a-f]{8,17}$')
+    - mysql_grant_host is match(_ec2_instance_id_pattern)
 
 - name: "Create OpenSpecimen database user ({{ _instance.db_user }})"
   block:

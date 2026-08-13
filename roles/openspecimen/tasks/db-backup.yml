@@ -40,8 +40,8 @@
       ansible.builtin.file:
         path: "{{ db_backup_dir | default(openspecimen_instance_dir ~ '/db-backups') }}"
         state: directory
-        owner: "{{ 'root' if _mysql_split_host else tomcat_user }}"
-        group: "{{ 'root' if _mysql_split_host else tomcat_user }}"
+        owner: "{{ _mysql_backup_owner }}"
+        group: "{{ _mysql_backup_owner }}"
         mode: '0750'
 
     - name: Dump database (consistent, gzipped)
@@ -60,8 +60,8 @@
     - name: Set ownership of the dump
       ansible.builtin.file:
         path: "{{ _db_backup_file }}"
-        owner: "{{ 'root' if _mysql_split_host else tomcat_user }}"
-        group: "{{ 'root' if _mysql_split_host else tomcat_user }}"
+        owner: "{{ _mysql_backup_owner }}"
+        group: "{{ _mysql_backup_owner }}"
         mode: '0640'
 
     - name: Stat the dump

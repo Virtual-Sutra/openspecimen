@@ -83,22 +83,12 @@
                  | map(attribute='content') | map('b64decode') | map('trim')
                  | select('equalto', '') | list | length > 0) }}
 
-    # ADR-012: mysql_host (dedicated, Ansible-managed MySQL VM) and
-    # db_managed=false (fully external/unmanaged - RDS/Oracle/DBA-owned) are
-    # mutually exclusive topologies. Nothing else would catch this
-    # combination - it would silently attempt to skip AND provision MySQL.
-    - name: Fail fast when db_managed=false and mysql_host are both set
-      ansible.builtin.fail:
-        msg: >-
-          db_managed=false (fully external/unmanaged DB) and mysql_host
-          (dedicated, Ansible-managed MySQL VM, ADR-012) are mutually
-          exclusive - set at most one. If MySQL should be Ansible-managed on
-          its own VM, remove db_managed=false. If it's genuinely external
-          (RDS/Oracle/DBA-owned), remove mysql_host.
-      when:
-        - not (db_managed | default(true) | bool)
-        - mysql_host is defined
-
+    # ADR-012: the db_managed=false/mysql_host mutual-exclusion guard lives
+    # inside resolve-mysql-target.yml itself, not here - db-backup.yml,
+    # db-restore.yml, and rollback.yml are standalone playbooks that never
+    # run this pre_tasks block, so a guard placed only here would leave those
+    # three entry points free to silently split-host a customer whose
+    # inventory says the DB is externally unmanaged.
     - name: Resolve the MySQL target host
       ansible.builtin.import_tasks: tasks/resolve-mysql-target.yml
       tags: [always]

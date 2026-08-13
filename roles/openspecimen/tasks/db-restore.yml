@@ -88,10 +88,8 @@
   failed_when: false
 
 - name: Restore database from dump
-  # -h 127.0.0.1 (not mysql_db_host): once delegated, this task runs ON the
-  # MySQL host itself, reading the dump from its own local filesystem and
-  # connecting via its own loopback - correct for both topologies, since
-  # delegate_to is a no-op when co-located.
+  # -h 127.0.0.1, not mysql_db_host: see db-backup.yml's "Dump database"
+  # comment for why (connects to the delegated host's own loopback).
   ansible.builtin.shell: |
     set -o pipefail
     gunzip -c "{{ _restore_dump }}" \
