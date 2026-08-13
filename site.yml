@@ -93,6 +93,21 @@
       ansible.builtin.import_tasks: tasks/resolve-mysql-target.yml
       tags: [always]
 
+    # ADR-012: co-located installs get a `mysql`/`mysqldump` CLI on the app
+    # host "for free" (a side effect of installing mysql-community-server
+    # there). Split-host installs that package only on the dedicated MySQL
+    # VM now, so the app host needs its own client install - un-delegated,
+    # matching the mysql role's own _full_deploy/db_managed gating below.
+    - name: Install MySQL client on the app host (split-host)
+      ansible.builtin.include_role:
+        name: mysql
+        tasks_from: install_client
+      when:
+        - _full_deploy
+        - db_managed | default(true)
+        - _mysql_split_host
+      tags: [base]
+
   roles:
     # ── Base roles - fresh install only (skipped on fast upgrades)
     - role: common

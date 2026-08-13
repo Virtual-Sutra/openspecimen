@@ -6,6 +6,26 @@
 - name: Load OS-specific variables
   ansible.builtin.include_vars: "{{ ansible_facts['os_family'] }}.yml"
 
+# ADR-012: create_db.yml's mysql_db/mysql_user modules run wherever this role
+# is delegated - on a dedicated MySQL VM, that's a host the common role never
+# touches (common only runs on the app host), so it never got the PyMySQL
+# Python module those modules need. Co-located installs already have it via
+# common's _os_prereq_packages; only the split-host, delegated case needs it
+# installed here too.
+- name: Enable EPEL repository for PyMySQL (RHEL, split-host)
+  ansible.builtin.dnf:
+    name: epel-release
+    state: present
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - _mysql_split_host
+
+- name: Install PyMySQL Python module (split-host delegated host)
+  ansible.builtin.package:
+    name: "{{ 'python3-PyMySQL' if ansible_facts['os_family'] == 'RedHat' else 'python3-pymysql' }}"
+    state: present
+  when: _mysql_split_host
+
 # ── RHEL 9: add MySQL Community repo ─────────────────────────────────────────
 # RHEL 9 ships MariaDB in its default repos; the community repo provides
 # genuine MySQL 8.4 LTS. The RPM is idempotent - dnf skips it if already present.

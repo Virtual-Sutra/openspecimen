@@ -1,0 +1,56 @@
+---
+# ADR-012, split-host: on a co-located install, the app host gets a `mysql`/
+# `mysqldump` CLI "for free" as a side effect of mysql-community-server being
+# installed there. On split-host, that package only ever installs on the
+# dedicated MySQL VM (this role's tasks/main.yml runs delegated) - the app
+# host itself never gets any MySQL package, yet main.yml/db-backup.yml/
+# db-restore.yml all invoke the `mysql`/`mysqldump` binaries directly ON the
+# app host (testing the real JDBC path, deliberately not delegated for those
+# probes). Install just the client package here, on whichever host this file
+# actually runs on - called from site.yml's pre_tasks on the app host,
+# un-delegated, only when split-host is active.
+
+- name: Load OS-specific variables (client)
+  ansible.builtin.include_vars: "{{ ansible_facts['os_family'] }}.yml"
+
+- name: Install MySQL Community repository (RHEL, app host client)
+  ansible.builtin.dnf:
+    name: "https://dev.mysql.com/get/mysql84-community-release-el9-1.noarch.rpm"
+    state: present
+    disable_gpg_check: true
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Ensure apt keyrings directory (Debian, app host client)
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Install MySQL APT signing key (Debian, app host client)
+  ansible.builtin.get_url:
+    url: "{{ _mysql_apt_key_url }}"
+    dest: "{{ _mysql_apt_keyring }}"
+    owner: root
+    group: root
+    mode: '0644'
+    force: true
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Add MySQL 8.4 LTS APT repository (Debian, app host client)
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by={{ _mysql_apt_keyring }}]
+      https://repo.mysql.com/apt/{{ ansible_facts['distribution'] | lower }}
+      {{ ansible_facts['distribution_release'] }} {{ _mysql_apt_component }}
+    filename: mysql
+    state: present
+    update_cache: true
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Install MySQL client package
+  ansible.builtin.package:
+    name: mysql-community-client
+    state: present

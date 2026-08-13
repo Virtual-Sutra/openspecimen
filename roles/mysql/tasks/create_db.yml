@@ -26,14 +26,43 @@
 
 - name: "Create OpenSpecimen database user ({{ _instance.db_user }})"
   block:
+    # PROCESS + SHOW_ROUTINE (global, alongside the per-DB ALL) are required
+    # for `mysqldump --routines --add-drop-database` (db-backup.yml, main.yml,
+    # rollback.yml) to succeed, not just for the app's own JDBC use of this
+    # grant: --single-transaction dumps tablespace info (needs PROCESS), and
+    # dumping routines this account didn't itself DEFINE needs SHOW_ROUTINE
+    # (MySQL 8.0.20+) - Liquibase creates routines as whichever grant account
+    # the app's JDBC connection used, which for split-host is the
+    # mysql_grant_host entry below, not the separate localhost entry backup
+    # connects as.
     - name: "Grant privileges to {{ _instance.db_user }}@{{ mysql_grant_host }}"
       community.mysql.mysql_user:
         name: "{{ _instance.db_user }}"
         password: "{{ _instance.db_password }}"
-        priv: "{{ _instance.db_name }}.*:ALL"
+        priv:
+          "{{ _instance.db_name }}.*": ALL
+          "*.*": "PROCESS,SHOW_ROUTINE"
         host: "{{ mysql_grant_host }}"
         state: present
         login_unix_socket: "{{ _mysql_socket }}"
+
+    # ADR-012: backup/restore/upgrade dumps (db-backup.yml, db-restore.yml,
+    # main.yml, rollback.yml) run delegated ON the MySQL host itself and
+    # connect via -h 127.0.0.1 - a different peer address than
+    # mysql_grant_host (the APP host's IP), so MySQL sees it as a distinct
+    # account and denies it without its own grant. Not needed co-located,
+    # where mysql_grant_host already IS 'localhost'.
+    - name: "Grant local privileges to {{ _instance.db_user }}@localhost (split-host backup/restore)"
+      community.mysql.mysql_user:
+        name: "{{ _instance.db_user }}"
+        password: "{{ _instance.db_password }}"
+        priv:
+          "{{ _instance.db_name }}.*": ALL
+          "*.*": "PROCESS,SHOW_ROUTINE"
+        host: localhost
+        state: present
+        login_unix_socket: "{{ _mysql_socket }}"
+      when: _mysql_split_host
   rescue:
     # Surface the exact MySQL error and the resolved grant host inline -
     # a malformed mysql_grant_host_override or a stale conflicting grant
