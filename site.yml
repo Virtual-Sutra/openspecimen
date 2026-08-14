@@ -83,6 +83,31 @@
                  | map(attribute='content') | map('b64decode') | map('trim')
                  | select('equalto', '') | list | length > 0) }}
 
+    # ADR-012: the db_managed=false/mysql_host mutual-exclusion guard lives
+    # inside resolve-mysql-target.yml itself, not here - db-backup.yml,
+    # db-restore.yml, and rollback.yml are standalone playbooks that never
+    # run this pre_tasks block, so a guard placed only here would leave those
+    # three entry points free to silently split-host a customer whose
+    # inventory says the DB is externally unmanaged.
+    - name: Resolve the MySQL target host
+      ansible.builtin.import_tasks: tasks/resolve-mysql-target.yml
+      tags: [always]
+
+    # ADR-012: co-located installs get a `mysql`/`mysqldump` CLI on the app
+    # host "for free" (a side effect of installing mysql-community-server
+    # there). Split-host installs that package only on the dedicated MySQL
+    # VM now, so the app host needs its own client install - un-delegated,
+    # matching the mysql role's own _full_deploy/db_managed gating below.
+    - name: Install MySQL client on the app host (split-host)
+      ansible.builtin.include_role:
+        name: mysql
+        tasks_from: install_client
+      when:
+        - _full_deploy
+        - db_managed | default(true)
+        - _mysql_split_host
+      tags: [base]
+
   roles:
     # ── Base roles - fresh install only (skipped on fast upgrades)
     - role: common
@@ -93,6 +118,15 @@
         - _full_deploy
         - db_managed | default(true)
       tags: [base]
+      # ADR-012: delegate to the dedicated MySQL VM when mysql_host is set;
+      # default(omit) means no delegation at all when it's unset (undefined,
+      # not falsy) - the role then runs on the current host exactly as
+      # before this var existed. Connection params for the delegated hop come
+      # from resolve-mysql-target.yml's add_host registration above, as real
+      # per-host vars - never from a task/role `vars:` override here (see
+      # that file's header comment for why: omit inside a magic-connection-var
+      # vars: block does not fall through, it corrupts the connection).
+      delegate_to: "{{ mysql_host | default(omit) }}"
     # java + tomcat are per-instance (installed in deploy-instance.yml) so instances
     # can run different OpenSpecimen/Tomcat/Java versions side by side; only shared
     # layers (OS packages, MySQL server) stay host-level.
@@ -106,7 +140,8 @@
     - name: Record MySQL (host-level base) stage status for the deploy report
       ansible.builtin.set_fact:
         _mysql_stage: >-
-          {{ 'ok (installed/updated this run)'
+          {{ ('ok (installed/updated this run, on dedicated host ' ~ mysql_host ~ ', ADR-012)'
+                if _mysql_split_host else 'ok (installed/updated this run)')
              if (_full_deploy and (db_managed | default(true)))
              else ('skipped (external DB - db_managed=false: RDS/Oracle)'
                    if not (db_managed | default(true))

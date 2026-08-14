@@ -1,0 +1,142 @@
+---
+# Resolve where MySQL actually runs and how to reach it (ADR-012, split-host).
+# Included from site.yml (before the mysql role runs) and from the DB
+# backup/restore task files - the one place this topology decision lives, so
+# provisioning and backup/restore always agree on the target.
+#
+# Co-located (mysql_host undefined): _mysql_target_host == inventory_hostname,
+# so delegate_to at every call site becomes a documented no-op (self-
+# delegation, no host gets registered below) - byte-identical to before this
+# file existed.
+#
+# Everything below is wrapped in a single block, guarded to run once per play:
+# site.yml imports this in pre_tasks (tags: always), and roles/openspecimen/
+# tasks/main.yml imports it again on upgrade within that SAME play - without
+# the guard, the reachability wait_for would re-probe the same host a second
+# (or, via the in-process auto-rollback-on-failure path, third) time on every
+# run. db-backup.yml/db-restore.yml/rollback.yml are separate standalone
+# playbooks with their own fresh play, so their own import still runs for
+# real.
+#
+# Gated on _mysql_target_resolved, a sentinel set only as this block's LAST
+# task - not on `_mysql_target_host is defined` directly, which the block's
+# own first task sets: since a block-level `when:` is re-evaluated for every
+# task inside it, gating on _mysql_target_host itself would skip every task
+# AFTER the first one on the very first pass too, not just on re-imports.
+- name: Resolve MySQL split-host target (once per play - re-imports are no-ops)
+  when: not (_mysql_target_resolved | default(false))
+  block:
+    # ADR-012: mysql_host (dedicated, Ansible-managed MySQL VM) and
+    # db_managed=false (fully external/unmanaged - RDS/Oracle/DBA-owned) are
+    # mutually exclusive topologies. Checked here, not just in site.yml's
+    # pre_tasks, so db-backup.yml/db-restore.yml/rollback.yml (standalone
+    # playbooks that import this file directly, with no pre_tasks of their
+    # own) are covered too - a guard placed only in site.yml would leave
+    # those three entry points free to silently split-host a customer whose
+    # inventory says the DB is externally unmanaged.
+    - name: Fail fast when db_managed=false and mysql_host are both set
+      ansible.builtin.fail:
+        msg: >-
+          db_managed=false (fully external/unmanaged DB) and mysql_host
+          (dedicated, Ansible-managed MySQL VM, ADR-012) are mutually
+          exclusive - set at most one. If MySQL should be Ansible-managed on
+          its own VM, remove db_managed=false. If it's genuinely external
+          (RDS/Oracle/DBA-owned), remove mysql_host.
+      when:
+        - not (db_managed | default(true) | bool)
+        - mysql_host is defined
+
+    - name: Resolve the MySQL target host
+      ansible.builtin.set_fact:
+        _ec2_instance_id_pattern: '^i-[0-9a-f]{8,17}$'
+        _mysql_target_host: "{{ mysql_host | default(inventory_hostname, true) }}"
+        _mysql_split_host:  "{{ mysql_host is defined }}"
+
+    - name: Resolve EC2-shape and backup-ownership facts
+      ansible.builtin.set_fact:
+        _mysql_is_ec2:        "{{ (mysql_host | default('')) is match(_ec2_instance_id_pattern) }}"
+        _mysql_backup_owner:  "{{ 'root' if _mysql_split_host else tomcat_user }}"
+
+    # Register the dedicated MySQL host as a real delegation target, with its
+    # own connection vars as genuine per-host vars (module params - a
+    # legitimate use of `omit`). Every call site below then just does
+    # `delegate_to: "{{ _mysql_target_host }}"` with NO vars: override at all.
+    #
+    # This is deliberate, not incidental: an earlier version of this file
+    # computed _mysql_conn_user/_mysql_conn_key/_mysql_conn_proxy as plain
+    # facts and had each call site apply them through a task-level `vars:`
+    # block (`ansible_user: "{{ _mysql_conn_user if _mysql_split_host else
+    # omit }}"`, etc.). That's broken - assigning `omit` to a magic
+    # connection var (ansible_user, ansible_ssh_private_key_file,
+    # ansible_ssh_common_args) via a task/role `vars:` block does NOT fall
+    # through to the enclosing host's own value the way a module parameter
+    # does; it silently corrupts the connection to use no key/user/proxy at
+    # all. That fired for every co-located customer (mysql_host unset) on
+    # every task carrying that vars: block. add_host avoids this entirely:
+    # co-located call sites never set these keys anywhere, so they use the
+    # play's own connection unmodified (self-delegation, byte-identical to
+    # before this file existed); split-host call sites delegate to a host
+    # that already carries real values as its own hostvars.
+    # ControlMaster/ControlPersist matter here specifically (not added
+    # repo-wide) because this is the one connection ADR-012 expects to
+    # routinely run over a slower link than the rest of this codebase's
+    # EC2/LAN targets - VPN/on-prem is the primary split-host use case.
+    # Confirmed live over a local VPN PoC tunnel: a cold connection took
+    # ~15s, tripping Ansible's default 12s become-prompt timeout on
+    # ordinary tasks (a plain `sudo whoami` took 15s cold, <1s reused).
+    # Multiplexing pays that cost once per play instead of once per task.
+    - name: Register the dedicated MySQL host as a delegation target
+      ansible.builtin.add_host:
+        name: "{{ mysql_host }}"
+        ansible_host: "{{ mysql_host }}"
+        ansible_user: "{{ mysql_ssh_user | default('ubuntu') }}"
+        ansible_become_timeout: 60
+        ansible_ssh_private_key_file: >-
+          {{ (mysql_ssh_private_key_file
+              | default('~/.ssh/' ~ (customer | default(openspecimen_instance_name | default('openspecimen'))) ~ '-mysql-deploy', true))
+             if not _mysql_is_ec2 else omit }}
+        ansible_ssh_common_args: >-
+          {{ (('-o ProxyCommand="aws --region ' ~ (aws_region | default(''))
+               ~ ' ec2-instance-connect open-tunnel --instance-id ' ~ mysql_host
+               ~ ' --remote-port %p" ') if _mysql_is_ec2 else '')
+             ~ '-o ControlMaster=auto -o ControlPersist=600s -o ControlPath=~/.ansible/cp/mysql-%h-%p-%r' }}
+      when: _mysql_split_host
+      changed_when: false
+
+    # Fail fast with a clear, specific message instead of letting a
+    # network-layer failure surface as a raw SSH connection-timeout stack
+    # trace from deep inside whatever task happens to be first to actually
+    # delegate. Port-only (no auth attempted here) - a network-reachable-but-
+    # auth-failing host still passes this and fails later with its own (also
+    # clear) SSH error, correctly distinguishing "can't reach it at all" from
+    # "reached it, wrong key". Skipped for an EICE target: the tunnel itself
+    # only exists for the duration of the delegated connection, so there is
+    # nothing to probe here.
+    - name: Verify the MySQL host is reachable before attempting to use it
+      ansible.builtin.wait_for:
+        host: "{{ mysql_host }}"
+        port: 22
+        timeout: 10
+      delegate_to: localhost
+      become: false
+      when:
+        - _mysql_split_host
+        - not _mysql_is_ec2
+      register: _mysql_reachability
+      failed_when: false
+
+    - name: Fail with an actionable message when the MySQL host is unreachable
+      ansible.builtin.fail:
+        msg: >-
+          MySQL host '{{ mysql_host }}' is not reachable on port 22 - check
+          the VPN tunnel/network path and that the host is up before
+          retrying. (Key auth was not even attempted; this is a
+          network-layer failure, not a credentials problem.)
+      when:
+        - _mysql_split_host
+        - not _mysql_is_ec2
+        - _mysql_reachability is failed or (_mysql_reachability.elapsed | default(0)) >= 10
+
+    - name: Mark MySQL target resolution complete
+      ansible.builtin.set_fact:
+        _mysql_target_resolved: true

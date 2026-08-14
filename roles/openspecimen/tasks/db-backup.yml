@@ -13,44 +13,61 @@
       db-backup.yml supports local MySQL (db_managed=true, db_type=mysql) only.
       For RDS take an AWS snapshot (#99); for Oracle use the DBA's backup tools.
 
+# ADR-012: resolves _mysql_target_host (self, unless mysql_host is set) and
+# fails fast if a dedicated MySQL host is configured but unreachable, before
+# any backup work starts.
+- name: Resolve the MySQL target host
+  ansible.builtin.import_tasks: "{{ playbook_dir }}/tasks/resolve-mysql-target.yml"
+
 - name: Get backup timestamp
   ansible.builtin.command: date '+%d%m%Y_%H%M%S'
   register: _db_backup_ts
   changed_when: false
 
-- name: Ensure DB backup directory exists
-  ansible.builtin.file:
-    path: "{{ db_backup_dir | default(openspecimen_instance_dir ~ '/db-backups') }}"
-    state: directory
-    owner: "{{ tomcat_user }}"
-    group: "{{ tomcat_user }}"
-    mode: '0750'
-
 - name: Set DB backup file path
   ansible.builtin.set_fact:
     _db_backup_file: "{{ db_backup_dir | default(openspecimen_instance_dir ~ '/db-backups') }}/{{ _db_backup_ts.stdout }}_{{ mysql_db_name }}.sql.gz"
 
-- name: Dump database (consistent, gzipped)
-  ansible.builtin.shell: |
-    set -o pipefail
-    mysqldump --single-transaction --routines --triggers --add-drop-database --databases {{ mysql_db_name }} \
-      -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' -h {{ mysql_db_host }} \
-      | gzip > "{{ _db_backup_file }}"
-  args:
-    executable: /bin/bash
-  no_log: true
+# ADR-012: every task below runs on the MySQL host (delegate_to is a no-op
+# when co-located). _db_backup_file above still templates from THIS host's
+# own vars (delegate_to only changes execution host, not variable context),
+# so the path is identical either way, just physically on a different disk.
+# tomcat_user doesn't exist on a MySQL-only VM, so split-host owns it root.
+- name: Dump database to the MySQL host's own filesystem
+  delegate_to: "{{ _mysql_target_host }}"
+  block:
+    - name: Ensure DB backup directory exists
+      ansible.builtin.file:
+        path: "{{ db_backup_dir | default(openspecimen_instance_dir ~ '/db-backups') }}"
+        state: directory
+        owner: "{{ _mysql_backup_owner }}"
+        group: "{{ _mysql_backup_owner }}"
+        mode: '0750'
 
-- name: Set ownership of the dump
-  ansible.builtin.file:
-    path: "{{ _db_backup_file }}"
-    owner: "{{ tomcat_user }}"
-    group: "{{ tomcat_user }}"
-    mode: '0640'
+    - name: Dump database (consistent, gzipped)
+      # -h 127.0.0.1 (not mysql_db_host): once delegated, this task runs ON
+      # the MySQL host itself and connects to its own loopback - correct for
+      # both topologies, since delegate_to is a no-op when co-located.
+      ansible.builtin.shell: |
+        set -o pipefail
+        mysqldump --single-transaction --routines --triggers --add-drop-database --databases {{ mysql_db_name }} \
+          -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' -h 127.0.0.1 \
+          | gzip > "{{ _db_backup_file }}"
+      args:
+        executable: /bin/bash
+      no_log: true
 
-- name: Stat the dump
-  ansible.builtin.stat:
-    path: "{{ _db_backup_file }}"
-  register: _db_backup_stat
+    - name: Set ownership of the dump
+      ansible.builtin.file:
+        path: "{{ _db_backup_file }}"
+        owner: "{{ _mysql_backup_owner }}"
+        group: "{{ _mysql_backup_owner }}"
+        mode: '0640'
+
+    - name: Stat the dump
+      ansible.builtin.stat:
+        path: "{{ _db_backup_file }}"
+      register: _db_backup_stat
 
 - name: Database backup complete
   ansible.builtin.debug:

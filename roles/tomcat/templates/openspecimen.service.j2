@@ -1,9 +1,11 @@
 [Unit]
 Description=OpenSpecimen ({{ openspecimen_service_name | default('openspecimen') }})
-{% if db_managed | default(true) %}
+{% if db_managed | default(true) and not (_mysql_split_host | default(false)) %}
 After=network.target {{ (ansible_facts['os_family'] == 'RedHat') | ternary('mysqld', 'mysql') }}.service
 Requires={{ (ansible_facts['os_family'] == 'RedHat') | ternary('mysqld', 'mysql') }}.service
 {% else %}
+{#- db_managed=false (external DB) or split-host (ADR-012, MySQL is managed but
+   on a different VM - no LOCAL unit by that name exists to require) #}
 After=network.target
 {% endif %}
 

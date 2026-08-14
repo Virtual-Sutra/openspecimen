@@ -28,12 +28,20 @@
       {{ db_backup_dir | default(openspecimen_instance_dir ~ '/db-backups') }}.
   when: not (db_restore_confirm | default(false) | bool)
 
+# ADR-012: resolves _mysql_target_host (self, unless mysql_host is set) and
+# fails fast if a dedicated MySQL host is configured but unreachable, before
+# any restore work starts. The dump lives on the MySQL host for split-host
+# (db-backup.yml wrote it there) - find/stat below must look there too.
+- name: Resolve the MySQL target host
+  ansible.builtin.import_tasks: "{{ playbook_dir }}/tasks/resolve-mysql-target.yml"
+
 - name: Find newest dump in db_backup_dir (when db_backup_file not given)
   ansible.builtin.find:
     paths:    "{{ db_backup_dir | default(openspecimen_instance_dir ~ '/db-backups') }}"
     patterns: "*.sql.gz"
   register: _db_dumps
   when: not (db_backup_file is defined and db_backup_file | trim)
+  delegate_to: "{{ _mysql_target_host }}"
 
 - name: Resolve dump file to restore
   ansible.builtin.set_fact:
@@ -59,6 +67,7 @@
   ansible.builtin.stat:
     path: "{{ _restore_dump }}"
   register: _restore_dump_stat
+  delegate_to: "{{ _mysql_target_host }}"
 
 - name: Fail if the dump file is missing
   ansible.builtin.fail:
@@ -79,13 +88,16 @@
   failed_when: false
 
 - name: Restore database from dump
+  # -h 127.0.0.1, not mysql_db_host: see db-backup.yml's "Dump database"
+  # comment for why (connects to the delegated host's own loopback).
   ansible.builtin.shell: |
     set -o pipefail
     gunzip -c "{{ _restore_dump }}" \
-      | mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' -h {{ mysql_db_host }}
+      | mysql -u {{ mysql_db_user }} -p'{{ mysql_db_password }}' -h 127.0.0.1
   args:
     executable: /bin/bash
   no_log: true
+  delegate_to: "{{ _mysql_target_host }}"
 
 - name: Restore complete - service left stopped
   ansible.builtin.debug:

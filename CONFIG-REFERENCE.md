@@ -44,12 +44,34 @@ Key settings in `mysqld.cnf`:
 
 | Setting | Variable | Default | Notes |
 |---------|----------|---------|-------|
-| `bind-address` | `mysql_bind_address` | `127.0.0.1` | |
+| `bind-address` | `mysql_bind_address` | `127.0.0.1` | Auto-switches to `0.0.0.0` when `mysql_host` is set (split-host) - override explicitly if that's wrong for your network |
 | `character-set-server` | hardcoded | `utf8` | Must be `utf8`, NOT `utf8mb4` - Liquibase index size constraint |
 | `lower_case_table_names` | hardcoded | `1` | Required for Liquibase schema migration |
 | `log_bin_trust_function_creators` | hardcoded | `1` | Required for trigger creation without SUPER |
 | `innodb_buffer_pool_size` | `mysql_innodb_buffer_pool_size` | auto-sized (RAM × 0.25) | Override: `mysql_innodb_buffer_pool_size_override` (MB) |
 | `max_allowed_packet` | `mysql_max_allowed_packet` | `64M` | |
+
+### Split-host MySQL (ADR-012)
+
+Unset (default) = MySQL co-located on the OpenSpecimen VM, unchanged from
+today. Set `mysql_host` to run MySQL on its own dedicated VM instead - both
+topologies are permanently supported side by side. No new inventory file:
+the MySQL host is delegated to directly from `resolve-mysql-target.yml`.
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `mysql_host` | unset | EC2 instance ID or IP/hostname of the dedicated MySQL VM. Unset = co-located. |
+| `mysql_ssh_user` | `ubuntu` | BYO (non-EC2) path only - the SSH user on the MySQL VM. |
+| `mysql_ssh_private_key_file` | `~/.ssh/<customer>-mysql-deploy` | BYO path only - private half of the pre-installed deploy key. |
+| `mysql_grant_host_override` | app host's resolved `ansible_host` | Set explicitly when the app host itself is an EC2 instance ID (not routable) - `create_db.yml` fails fast naming this var if it's needed and missing. |
+| `mysql_db_host` | `mysql_host` when set, else `127.0.0.1` | The JDBC address Tomcat connects to - only diverges from `mysql_host` if Ansible's SSH target and Tomcat's DB address genuinely differ. |
+
+Connectivity to `mysql_host` mirrors `openspecimen_host`'s own model exactly
+(EICE for an EC2 instance ID, BYO key otherwise) - see
+`CUSTOMER-ONBOARDING.md` (`openspecimen-ops`) § "Split-host MySQL" for the
+onboarding/credential mechanics, and
+`.planning/adr/012-split-host-mysql-deployment.md` (`openspecimen-ansible`)
+for the full design.
 
 ---
 
