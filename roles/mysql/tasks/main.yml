@@ -61,16 +61,17 @@
     # Always refresh: a box that fetched the pre-renewal (expired) key on an
     # earlier run must pick up the renewed key, and the key rotates over time.
     force: true
-    timeout: 20
+    timeout: "{{ mysql_apt_key_timeout | default(20) | int }}"
   when: ansible_facts['os_family'] == 'Debian'
   register: _mysql_apt_key_fetch
   # keyserver.ubuntu.com (the SKS pool - see _mysql_apt_key_url's own comment
   # for why the alternative, repo.mysql.com's standalone key file, can't be
   # used instead: it serves an EXPIRED key) is known-flaky - retry rather than
-  # fail the whole deploy on a single slow/dropped connection.
-  retries: 3
-  delay: 5
-  until: _mysql_apt_key_fetch is not failed
+  # fail the whole deploy on a single slow/dropped connection. Mirrors the
+  # tomcat role's own download retry pattern (roles/tomcat/tasks/main.yml).
+  until: _mysql_apt_key_fetch is succeeded
+  retries: "{{ mysql_apt_key_retries | default(3) | int }}"
+  delay: "{{ mysql_apt_key_delay | default(5) | int }}"
 
 - name: Add MySQL 8.4 LTS APT repository (Debian)
   ansible.builtin.apt_repository:
