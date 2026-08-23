@@ -91,10 +91,22 @@
         ansible_host: "{{ mysql_host }}"
         ansible_user: "{{ mysql_ssh_user | default('ubuntu') }}"
         ansible_become_timeout: 60
+        # BYO (non-EC2): default to the conventional per-customer deploy-key path
+        # when not explicitly set. EC2: the Jenkinsfile generates AND pushes a
+        # distinct ephemeral keypair for mysql_host (separate from the app
+        # host's own ephemeral key) and always passes its path as
+        # mysql_ssh_private_key_file, EC2 or not - falling through to the
+        # connection's global default private key (the APP HOST's ephemeral
+        # key) here would silently authenticate with the wrong keypair against
+        # whatever public key EC2 Instance Connect actually pushed to this
+        # host, failing "Permission denied (publickey)". Only genuinely omit
+        # (fall through to the global default) when nothing was passed at all
+        # (e.g. a manual non-Jenkins run reusing one shared key for both hosts).
         ansible_ssh_private_key_file: >-
-          {{ (mysql_ssh_private_key_file
-              | default('~/.ssh/' ~ (customer | default(openspecimen_instance_name | default('openspecimen'))) ~ '-mysql-deploy', true))
-             if not _mysql_is_ec2 else omit }}
+          {{ mysql_ssh_private_key_file
+             | default(omit if _mysql_is_ec2 else
+                        ('~/.ssh/' ~ (customer | default(openspecimen_instance_name | default('openspecimen'))) ~ '-mysql-deploy'),
+                        true) }}
         ansible_ssh_common_args: >-
           {{ (('-o ProxyCommand="aws --region ' ~ (aws_region | default(''))
                ~ ' ec2-instance-connect open-tunnel --instance-id ' ~ mysql_host
