@@ -103,9 +103,10 @@
         # (fall through to the global default) when nothing was passed at all
         # (e.g. a manual non-Jenkins run reusing one shared key for both hosts).
         ansible_ssh_private_key_file: >-
-          {{ (mysql_ssh_private_key_file
-              | default('~/.ssh/' ~ (customer | default(openspecimen_instance_name | default('openspecimen'))) ~ '-mysql-deploy', true))
-             if not _mysql_is_ec2 else (mysql_ssh_private_key_file | default(omit)) }}
+          {{ mysql_ssh_private_key_file
+             | default(omit if _mysql_is_ec2 else
+                        ('~/.ssh/' ~ (customer | default(openspecimen_instance_name | default('openspecimen'))) ~ '-mysql-deploy'),
+                        true) }}
         ansible_ssh_common_args: >-
           {{ (('-o ProxyCommand="aws --region ' ~ (aws_region | default(''))
                ~ ' ec2-instance-connect open-tunnel --instance-id ' ~ mysql_host
