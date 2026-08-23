@@ -18,6 +18,15 @@
 # playbooks with their own fresh play, so their own import still runs for
 # real.
 #
+# Captured BEFORE the guarded block below touches _mysql_target_resolved, so
+# this reflects whether THIS import is a re-import (true) or the first one in
+# the play (false) - used further down to skip a redundant ephemeral-key
+# re-authorization on the first import, where the Jenkinsfile's own eager
+# push (immediately before invoking ansible-playbook) is still fresh.
+- name: Note whether this is a re-import within the same play
+  ansible.builtin.set_fact:
+    _mysql_target_was_already_resolved: "{{ _mysql_target_resolved | default(false) }}"
+
 # Gated on _mysql_target_resolved, a sentinel set only as this block's LAST
 # task - not on `_mysql_target_host is defined` directly, which the block's
 # own first task sets: since a block-level `when:` is re-evaluated for every
@@ -152,3 +161,44 @@
     - name: Mark MySQL target resolution complete
       ansible.builtin.set_fact:
         _mysql_target_resolved: true
+
+# Deliberately OUTSIDE the block above - runs on every RE-import (gated on
+# _mysql_target_was_already_resolved, captured before the block above), not
+# the first. EC2 Instance Connect's pushed key only authorizes connections
+# for ~60s from the push. The Jenkinsfile's own eager push (immediately
+# before invoking ansible-playbook) already covers the first import in every
+# play - a fresh install's host-level mysql role connects to mysql_host
+# almost immediately after it, and the standalone db-backup.yml/
+# db-restore.yml/rollback.yml playbooks each have their own equally-fresh
+# Jenkinsfile push before their own first (and typically only) import. Only a
+# RE-import within an already-running play - upgrade's per-instance import in
+# roles/openspecimen/tasks/main.yml, or the in-process auto-rollback-on-
+# failure path - can land far enough past that original push (after
+# fact-gathering, spec resolution, direction/version detection, and
+# preflight, all on the app host) for the window to have already closed:
+#
+#   fatal: [... -> i-...]: UNREACHABLE! => {"msg": "... Permission denied
+#   (publickey)."}
+#
+# Re-authorizing the SAME already-generated public key (no new keypair) only
+# on a re-import opens a fresh window right where it's actually needed,
+# without paying a redundant AWS API call on every fresh install/standalone
+# run where the original push is still well within its window. No-op for BYO
+# (non-EC2, persistent key) and co-located (mysql_host unset) - neither is
+# exposed to this window.
+- name: Re-authorize the ephemeral MySQL SSH key (EC2 Instance Connect)
+  ansible.builtin.command:
+    cmd: >-
+      aws ec2-instance-connect send-ssh-public-key
+      --region {{ aws_region | default('') }}
+      --instance-id {{ mysql_host }}
+      --instance-os-user {{ mysql_ssh_user | default('ubuntu') }}
+      --ssh-public-key file://{{ mysql_ssh_private_key_file }}.pub
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  when:
+    - _mysql_target_was_already_resolved | default(false)
+    - _mysql_is_ec2 | default(false)
+    - mysql_ssh_private_key_file is defined
+    - mysql_ssh_private_key_file | trim | length > 0
