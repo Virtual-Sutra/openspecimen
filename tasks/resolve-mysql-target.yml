@@ -152,3 +152,41 @@
     - name: Mark MySQL target resolution complete
       ansible.builtin.set_fact:
         _mysql_target_resolved: true
+
+# Deliberately OUTSIDE the block above - runs on EVERY import, not just the
+# first, unlike everything before this point. EC2 Instance Connect's pushed
+# key only authorizes connections for ~60s from the push. The Jenkinsfile's
+# own eager push (before invoking ansible-playbook) only covers whatever
+# connects to mysql_host first - on a fresh install that's the host-level
+# mysql role, reached almost immediately. On an UPGRADE, that entire role is
+# skipped (site.yml's _full_deploy gate), so the first real delegated
+# connection to mysql_host can land much later - after fact-gathering, spec
+# resolution, direction/version detection, and preflight, all on the app
+# host - deep in the per-instance flow (roles/openspecimen/tasks/main.yml's
+# "Create DB backup tier directory" and similar, which is why this file is
+# re-imported there). By then the original 60s window has often already
+# closed, failing with "Permission denied (publickey)" on the very first
+# connection attempt of the run - not a stale/expired connection, a window
+# that closed before it was ever used.
+#
+# Re-authorizing the SAME already-generated public key (no new keypair)
+# immediately before whatever delegated task follows THIS import point opens
+# a fresh window right where it's actually needed, regardless of how long
+# the preceding app-host-only work took. No-op for BYO (non-EC2, persistent
+# key) and co-located (mysql_host unset) - neither is exposed to this window.
+- name: Re-authorize the ephemeral MySQL SSH key (EC2 Instance Connect)
+  ansible.builtin.command:
+    cmd: >-
+      aws ec2-instance-connect send-ssh-public-key
+      --region {{ aws_region | default('') }}
+      --instance-id {{ mysql_host }}
+      --instance-os-user {{ mysql_ssh_user | default('ubuntu') }}
+      --ssh-public-key file://{{ mysql_ssh_private_key_file }}.pub
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  when:
+    - _mysql_split_host | default(false)
+    - _mysql_is_ec2 | default(false)
+    - mysql_ssh_private_key_file is defined
+    - mysql_ssh_private_key_file | trim | length > 0
