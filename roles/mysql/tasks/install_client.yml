@@ -37,7 +37,17 @@
     group: root
     mode: '0644'
     force: true
+    timeout: 20
   when: ansible_facts['os_family'] == 'Debian'
+  register: _mysql_apt_key_fetch
+  # keyserver.ubuntu.com (the SKS pool - see _mysql_apt_key_url's own comment
+  # in roles/mysql/vars/Debian.yml for why the alternative, repo.mysql.com's
+  # standalone key file, can't be used instead: it serves an EXPIRED key) is
+  # known-flaky - retry rather than fail the whole deploy on one slow/dropped
+  # connection.
+  retries: 3
+  delay: 5
+  until: _mysql_apt_key_fetch is not failed
 
 - name: Add MySQL 8.4 LTS APT repository (Debian, app host client)
   ansible.builtin.apt_repository:
