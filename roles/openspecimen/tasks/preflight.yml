@@ -114,6 +114,7 @@
   delegate_to: localhost
   register: _release_zip_stat
   changed_when: false
+  when: openspecimen_zip_source | default('local') == 'local'
 
 - name: Fail with operator guidance when release zip is missing
   ansible.builtin.fail:
@@ -138,7 +139,41 @@
       How to fix:
         - Upload the zip with the upload-releases.yml playbook, OR
         - SCP it directly:  scp openspecimen_<ver>.zip <jenkins>:{{ openspecimen_builds_dir }}/
-  when: not _release_zip_stat.stat.exists
+  when:
+    - openspecimen_zip_source | default('local') == 'local'
+    - not _release_zip_stat.stat.exists
+
+# ADR-013: openspecimen_zip_source=download credential/URL checks. The URL
+# itself is never blank (openspecimen_download_url always has a computed
+# default), so only the credentials and the URL scheme need validating here.
+- name: Fail with operator guidance when download-mode credentials are missing
+  ansible.builtin.fail:
+    msg: |
+      ✗ openspecimen_zip_source=download requires Jenkins-supplied credentials.
+
+      Missing:        openspecimen_download_username and/or openspecimen_download_password
+      Download URL:   {{ openspecimen_download_url | default('(not set)') }}
+
+      How to fix:
+        - Ensure the openspecimen-build-download Jenkins credential exists and is
+          bound in the Jenkinsfile for this job (see ADR-013 in openspecimen-ansible).
+  when:
+    - openspecimen_zip_source | default('local') == 'download'
+    - (openspecimen_download_username | default('') | trim == '') or
+      (openspecimen_download_password | default('') | trim == '')
+
+- name: Fail fast when the download URL is not HTTPS
+  # Credentials are sent as Basic Auth (force_basic_auth in the get_url task) -
+  # over plain HTTP that means cleartext on the wire, no_log only protects
+  # Ansible's own logs. Refuse rather than silently downgrade security.
+  ansible.builtin.fail:
+    msg: >-
+      openspecimen_download_url ({{ openspecimen_download_url }}) must be
+      https:// - openspecimen_download_username/_password would otherwise be
+      sent in cleartext.
+  when:
+    - openspecimen_zip_source | default('local') == 'download'
+    - not (openspecimen_download_url | default('') | trim is match('^https://'))
 
 - name: Find paid plugin zips under builds_dir (pre-flight)
   ansible.builtin.find:
