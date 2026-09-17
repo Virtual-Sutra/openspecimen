@@ -39,6 +39,21 @@ openspecimen_port:    8080
 openspecimen_builds_dir: /opt/openspecimen/builds
 openspecimen_zip_path:   "{{ openspecimen_builds_dir }}/{{ openspecimen_release }}.zip"
 
+# ── Artifact transfer mechanism (ADR-013) ────────────────────────────────────
+# local    → (default) the Ansible control node uploads a zip already staged at
+#            openspecimen_zip_path - today's controller-push behavior, unchanged.
+# download → the target host pulls the zip itself over HTTP(S), built from
+#            openspecimen_download_base_url + the release name (mirrors
+#            openspecimen_zip_path's own builds_dir + release pattern above),
+#            authenticating with openspecimen_download_username/
+#            openspecimen_download_password.
+# Neither credential var is given a default - they must be passed at runtime
+# (-e, sourced from Jenkins credentials) and are never logged; see the no_log
+# task in roles/openspecimen/tasks/main.yml.
+openspecimen_zip_source:         local
+openspecimen_download_base_url:  "https://build.openspecimen.org/download"
+openspecimen_download_url:       "{{ openspecimen_download_base_url }}/{{ openspecimen_release }}.zip"
+
 # ── Plugins ───────────────────────────────────────────────────────────────────
 # Plugin names (no version, no extension). The role derives the zip filename at
 # runtime: <name>-<version>.zip where version = openspecimen_release stripped of
