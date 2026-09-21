@@ -119,14 +119,21 @@
         - db_managed | default(true)
       tags: [base]
       # ADR-012: delegate to the dedicated MySQL VM when mysql_host is set;
-      # default(omit) means no delegation at all when it's unset (undefined,
-      # not falsy) - the role then runs on the current host exactly as
-      # before this var existed. Connection params for the delegated hop come
-      # from resolve-mysql-target.yml's add_host registration above, as real
-      # per-host vars - never from a task/role `vars:` override here (see
-      # that file's header comment for why: omit inside a magic-connection-var
+      # otherwise self-delegate to inventory_hostname, which Ansible treats as
+      # no delegation - the role runs on the current host exactly as before
+      # this var existed. NOT default(omit): at ROLE level on ansible-core 2.16
+      # (the Jenkins controller) omit does not drop the keyword, it delegates
+      # to a phantom host named after the omit placeholder. That host carries
+      # none of the inventory's connection vars (ansible_host, ansible_user,
+      # the EICE ProxyCommand, ansible_connection=local), so the role's first
+      # real module dies with "UNREACHABLE" or "'NoneType' object is not
+      # subscriptable" on every co-located customer. Same expression as
+      # resolve-mysql-target.yml's _mysql_target_host. Connection params for
+      # the delegated hop come from that file's add_host registration above,
+      # as real per-host vars - never from a task/role `vars:` override here
+      # (see its header comment for why: omit inside a magic-connection-var
       # vars: block does not fall through, it corrupts the connection).
-      delegate_to: "{{ mysql_host | default(omit) }}"
+      delegate_to: "{{ mysql_host | default(inventory_hostname, true) }}"
     # java + tomcat are per-instance (installed in deploy-instance.yml) so instances
     # can run different OpenSpecimen/Tomcat/Java versions side by side; only shared
     # layers (OS packages, MySQL server) stay host-level.
